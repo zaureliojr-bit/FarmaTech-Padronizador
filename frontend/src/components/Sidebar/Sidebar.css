@@ -1,0 +1,71 @@
+.sidebar{
+
+    width:260px;
+    height:100vh;
+
+    background:#182231;
+
+    border-right:1px solid #334155;
+
+    position:fixed;
+
+    left:0;
+    top:0;
+
+}
+
+.logo{
+
+    padding:30px;
+
+    border-bottom:1px solid #334155;
+
+}
+
+.logo h2{
+
+    font-size:28px;
+
+}
+
+.logo span{
+
+    color:#94A3B8;
+
+}
+
+nav{
+
+    display:flex;
+
+    flex-direction:column;
+
+    padding:20px;
+
+    gap:10px;
+
+}
+
+nav button{
+
+    background:none;
+
+    border:none;
+
+    color:white;
+
+    text-align:left;
+
+    padding:15px;
+
+    border-radius:10px;
+
+    font-size:16px;
+
+}
+
+nav button:hover{
+
+    background:#2563EB;
+
+}

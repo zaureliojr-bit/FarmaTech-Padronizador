@@ -1,0 +1,29 @@
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    font-family:Segoe UI, sans-serif;
+}
+
+body{
+
+    background:var(--bg);
+    color:var(--text);
+
+}
+
+button{
+
+    cursor:pointer;
+
+}
+.container{
+
+    width:95%;
+    max-width:1400px;
+
+    margin:auto;
+
+    padding:30px;
+
+}
