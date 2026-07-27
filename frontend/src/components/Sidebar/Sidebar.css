@@ -5,12 +5,15 @@
 
     background:#182231;
 
-    border-right:1px solid #334155;
-
     position:fixed;
 
     left:0;
     top:0;
+
+    border-right:1px solid #2d3748;
+
+    display:flex;
+    flex-direction:column;
 
 }
 
@@ -18,12 +21,13 @@
 
     padding:30px;
 
-    border-bottom:1px solid #334155;
+    border-bottom:1px solid #2d3748;
 
 }
 
 .logo h2{
 
+    color:white;
     font-size:28px;
 
 }
@@ -40,32 +44,40 @@ nav{
 
     flex-direction:column;
 
-    padding:20px;
+    padding:15px;
 
-    gap:10px;
+    gap:8px;
 
 }
 
 nav button{
 
+    display:flex;
+
+    align-items:center;
+
+    gap:15px;
+
     background:none;
 
     border:none;
 
-    color:white;
-
-    text-align:left;
-
-    padding:15px;
+    color:#CBD5E1;
 
     border-radius:10px;
 
-    font-size:16px;
+    padding:15px;
+
+    font-size:15px;
+
+    transition:.25s;
 
 }
 
 nav button:hover{
 
     background:#2563EB;
+
+    color:white;
 
 }

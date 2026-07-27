@@ -1,0 +1,35 @@
+.import-box{
+
+    background:#1F2937;
+
+    border:2px dashed #334155;
+
+    border-radius:12px;
+
+    padding:40px;
+
+    margin-top:30px;
+
+    text-align:center;
+
+}
+
+.import-box h2{
+
+    margin-bottom:10px;
+
+}
+
+.import-box p{
+
+    color:#94A3B8;
+
+    margin-bottom:20px;
+
+}
+
+.import-box input{
+
+    color:white;
+
+}

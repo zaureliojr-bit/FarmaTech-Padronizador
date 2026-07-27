@@ -2,6 +2,20 @@
 
     margin-left:260px;
 
-    padding:40px;
+    padding:30px;
+
+}
+
+.dashboard h1{
+
+    font-size:30px;
+
+    margin-bottom:10px;
+
+}
+
+.dashboard p{
+
+    color:#94A3B8;
 
 }

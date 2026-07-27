@@ -1,17 +1,37 @@
 import "./Topbar.css";
+import { FiBell, FiSearch, FiUser } from "react-icons/fi";
 
-function Topbar(){
+function Topbar() {
+  return (
+    <header className="topbar">
 
-    return(
+      <div className="search">
 
-        <header className="topbar">
+        <FiSearch />
 
-            FarmaTech Padronizador
+        <input
+          type="text"
+          placeholder="Pesquisar produto, EAN ou descrição..."
+        />
 
-        </header>
+      </div>
 
-    );
+      <div className="topbar-right">
 
+        <FiBell className="icon" />
+
+        <div className="user">
+
+          <FiUser />
+
+          <span>Zaurélio</span>
+
+        </div>
+
+      </div>
+
+    </header>
+  );
 }
 
 export default Topbar;

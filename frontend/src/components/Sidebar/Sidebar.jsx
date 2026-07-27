@@ -1,5 +1,7 @@
 import "./Sidebar.css";
 
+import { menu } from "../../data/menu";
+
 function Sidebar() {
 
     return (
@@ -16,27 +18,33 @@ function Sidebar() {
 
             <nav>
 
-                <button>🏠 Dashboard</button>
+                {
 
-                <button>📄 Importar</button>
+                    menu.map((item, index)=>{
 
-                <button>🔍 Buscar</button>
+                        const Icon = item.icon;
 
-                <button>🤖 IA</button>
+                        return(
 
-                <button>🖼 Imagens</button>
+                            <button key={index}>
 
-                <button>🗄 Banco</button>
+                                <Icon size={18}/>
 
-                <button>📊 Relatórios</button>
+                                <span>{item.title}</span>
 
-                <button>⚙ Configurações</button>
+                            </button>
+
+                        )
+
+                    })
+
+                }
 
             </nav>
 
         </aside>
 
-    );
+    )
 
 }
 

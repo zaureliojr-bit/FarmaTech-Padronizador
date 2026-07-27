@@ -1,0 +1,63 @@
+.card{
+
+    background:#1F2937;
+
+    border:1px solid #334155;
+
+    border-radius:14px;
+
+    padding:20px;
+
+    display:flex;
+
+    align-items:center;
+
+    gap:18px;
+
+    transition:.25s;
+
+}
+
+.card:hover{
+
+    transform:translateY(-3px);
+
+    border-color:#2563EB;
+
+}
+
+.card-icon{
+
+    width:52px;
+
+    height:52px;
+
+    border-radius:12px;
+
+    display:flex;
+
+    justify-content:center;
+
+    align-items:center;
+
+    color:white;
+
+    font-size:22px;
+
+}
+
+.card-info span{
+
+    color:#94A3B8;
+
+    font-size:14px;
+
+}
+
+.card-info h2{
+
+    margin-top:5px;
+
+    font-size:28px;
+
+}
