@@ -3,7 +3,11 @@ import "./ProductTable.css";
 import { useImagem } from "../../hooks/useImagem";
 import ImageModal from "../ImageModal/ImageModal";
 
-function ProductTable({ produtos, atualizarProduto }) {
+function ProductTable({
+    produtos,
+    atualizarProduto,
+    mostrarToast
+}) {
 
     const {
 
@@ -95,9 +99,45 @@ function ProductTable({ produtos, atualizarProduto }) {
                                     <td>
 
                                         {
+
                                             produto.statusImagem === "salva"
-                                                ? "🟢"
-                                                : "🔴"
+
+                                                ?
+
+                                                <div className="status-imagem">
+
+                                                    <img
+                                                        src={produto.imagem}
+                                                        alt={produto.descricao}
+                                                        className="miniatura"
+                                                    />
+
+                                                    <span className="status-ok">
+
+                                                        Imagem salva
+
+                                                    </span>
+
+                                                </div>
+
+                                                :
+
+                                                <div className="status-imagem">
+
+                                                    <div className="miniatura-placeholder">
+
+                                                        🚫
+
+                                                    </div>
+
+                                                    <span className="status-sem">
+
+                                                        Sem imagem
+
+                                                    </span>
+
+                                                </div>
+
                                         }
 
                                     </td>
@@ -113,9 +153,13 @@ function ProductTable({ produtos, atualizarProduto }) {
                                         >
 
                                             {
+
                                                 produto.statusImagem === "salva"
+
                                                     ? "👁 Ver"
+
                                                     : "🔍 Buscar"
+
                                             }
 
                                         </button>
@@ -151,6 +195,8 @@ function ProductTable({ produtos, atualizarProduto }) {
                 fechar={fecharModal}
 
                 atualizarProduto={atualizarProduto}
+
+                mostrarToast={mostrarToast}
 
             />
 

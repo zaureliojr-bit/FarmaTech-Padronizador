@@ -9,48 +9,39 @@ function ImageModal({
     setImagemSelecionada,
     loading,
     fechar,
-    atualizarProduto
+    atualizarProduto,
+    mostrarToast
 }) {
+
+    if (!aberto) return null;
 
     async function salvar() {
 
         if (!imagemSelecionada) {
-            alert("Selecione uma imagem.");
+            mostrarToast("Selecione uma imagem.", "erro");
             return;
         }
 
-        const resultado = await salvarImagem(
-            produto,
-            imagemSelecionada
-        );
+        const resultado = await salvarImagem(produto, imagemSelecionada);
 
         if (!resultado.sucesso) {
-            alert("Erro ao salvar imagem.");
+            mostrarToast("Erro ao salvar imagem.", "erro");
             return;
         }
 
         atualizarProduto({
-
             ...produto,
-
             imagem: resultado.caminho,
-
             statusImagem: "salva"
-
         });
 
-        alert(resultado.mensagem);
+        mostrarToast(resultado.mensagem, "sucesso");
 
         fechar();
-
     }
 
-    if (!aberto) return null;
-
     return (
-
         <div className="modal-overlay">
-
             <div className="modal">
 
                 <h2>Buscar imagem</h2>
@@ -59,41 +50,32 @@ function ImageModal({
                     <strong>Produto:</strong> {produto?.descricao}
                 </p>
 
-                {loading ? (
-
-                    <p>Buscando imagens...</p>
-
-                ) : (
-
-                    <div className="galeria">
-
-                        {imagens.map((imagem, index) => (
-
-                            <img
-                                key={index}
-                                src={imagem}
-                                alt={`Imagem ${index + 1}`}
-                                className={
-                                    imagemSelecionada === imagem
-                                        ? "selecionada"
-                                        : ""
-                                }
-                                onClick={() =>
-                                    setImagemSelecionada(imagem)
-                                }
-                            />
-
-                        ))}
-
-                    </div>
-
-                )}
+                {
+                    loading ? (
+                        <p>Buscando imagens...</p>
+                    ) : (
+                        <div className="galeria">
+                            {imagens.map((imagem, index) => (
+                                <img
+                                    key={index}
+                                    src={imagem}
+                                    alt={`Imagem ${index + 1}`}
+                                    className={
+                                        imagemSelecionada === imagem
+                                            ? "selecionada"
+                                            : ""
+                                    }
+                                    onClick={() => setImagemSelecionada(imagem)}
+                                />
+                            ))}
+                        </div>
+                    )
+                }
 
                 <div className="acoes">
-
                     <button
-                        disabled={!imagemSelecionada}
                         onClick={salvar}
+                        disabled={!imagemSelecionada}
                     >
                         💾 Salvar imagem
                     </button>
@@ -101,15 +83,11 @@ function ImageModal({
                     <button onClick={fechar}>
                         Fechar
                     </button>
-
                 </div>
 
             </div>
-
         </div>
-
     );
-
 }
 
 export default ImageModal;

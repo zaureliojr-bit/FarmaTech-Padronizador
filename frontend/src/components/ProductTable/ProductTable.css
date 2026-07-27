@@ -82,3 +82,70 @@ tr:hover{
     opacity:.9;
 
 }
+.status-imagem{
+
+    display:flex;
+
+    flex-direction:column;
+
+    align-items:center;
+
+    justify-content:center;
+
+    text-align:center;
+
+    gap:6px;
+
+}
+
+.miniatura-placeholder{
+
+    width:48px;
+    height:48px;
+
+    border-radius:8px;
+
+    background:#2c3446;
+
+    display:flex;
+    align-items:center;
+    justify-content:center;
+
+    font-size:22px;
+
+}
+
+.status-ok{
+
+    color:#2ecc71;
+
+    font-size:12px;
+
+    font-weight:600;
+
+}
+
+.status-sem{
+
+    color:#ff5b5b;
+
+    font-size:12px;
+
+    font-weight:600;
+
+}
+.miniatura{
+
+    width:56px;
+
+    height:56px;
+
+    object-fit:cover;
+
+    border-radius:8px;
+
+    border:1px solid #3d4658;
+
+    transition:.2s;
+
+}
