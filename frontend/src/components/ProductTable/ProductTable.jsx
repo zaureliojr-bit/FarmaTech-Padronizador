@@ -1,162 +1,244 @@
-<table>
+import "./ProductTable.css";
 
-    <thead>
+import ImageModal from "../ImageModal/ImageModal";
+import { useImagem } from "../../hooks/useImagem";
 
-        <tr>
+function ProductTable({
+    produtos,
+    atualizarProduto,
+    mostrarToast
+}) {
+console.log(produtos)
+    const {
 
-            <th>Código</th>
+        modalAberto,
+        abrirModal,
+        fecharModal,
 
-            <th>EAN</th>
+        produtoSelecionado,
 
-            <th>Produto</th>
+        imagens,
 
-            <th>Classe</th>
+        imagemSelecionada,
+        setImagemSelecionada,
 
-            <th>Categoria</th>
+        loading
 
-            <th>Laboratório</th>
+    } = useImagem();
 
-            <th>Venda</th>
+    return (
 
-            <th>Promo</th>
+        <>
 
-            <th>Custo</th>
+            <div className="table-container">
 
-            <th>Estoque</th>
+                <table>
 
-            <th>Aba</th>
+                    <thead>
 
-            <th>Imagem</th>
+                        <tr>
 
-            <th>Ações</th>
+                            <th>Código</th>
 
-        </tr>
+                            <th>EAN</th>
 
-    </thead>
+                            <th>Produto</th>
 
-    <tbody>
+                            <th>Classe</th>
 
-        {
+                            <th>Categoria</th>
 
-            produtos.map((produto, index) => (
+                            <th>Laboratório</th>
 
-                <tr key={index}>
+                            <th>Venda</th>
 
-                    <td>{produto.codigo}</td>
+                            <th>Promo</th>
 
-                    <td>{produto.ean}</td>
+                            <th>Custo</th>
 
-                    <td>{produto.descricao}</td>
+                            <th>Estoque</th>
 
-                    <td>{produto.classe}</td>
+                            <th>Aba</th>
 
-                    <td>{produto.categoria}</td>
+                            <th>Imagem</th>
 
-                    <td>{produto.laboratorio}</td>
+                            <th>Ações</th>
 
-                    <td>R$ {produto.precoVenda}</td>
+                        </tr>
 
-                    <td>
+                    </thead>
 
-                        {
-
-                            produto.precoPromocao &&
-                            produto.precoPromocao !== "0,00"
-
-                                ? `🔥 R$ ${produto.precoPromocao}`
-
-                                : "-"
-
-                        }
-
-                    </td>
-
-                    <td>R$ {produto.precoCusto}</td>
-
-                    <td>{produto.estoque}</td>
-
-                    <td>{produto.__aba}</td>
-
-                    <td>
+                    <tbody>
 
                         {
 
-                            produto.statusImagem === "salva"
+                            produtos.map((produto, index) => (
 
-                                ?
+                                <tr key={`${produto.codigo}-${produto.__aba}-${index}`}>
+                                
 
-                                <div className="status-imagem">
+                                    <td>{produto.codigo}</td>
 
-                                    <img
+                                    <td>{produto.ean}</td>
 
-                                        src={produto.imagem}
+                                    <td>{produto.descricao}</td>
 
-                                        alt={produto.descricao}
+                                    <td>{produto.classe}</td>
 
-                                        className="miniatura"
+                                    <td>{produto.categoria}</td>
 
-                                    />
+                                    <td>{produto.laboratorio}</td>
 
-                                    <span className="status-ok">
+                                    <td>
 
-                                        Imagem salva
+                                        R$ {produto.precoVenda}
 
-                                    </span>
+                                    </td>
 
-                                </div>
+                                    <td>
 
-                                :
+                                        {
 
-                                <div className="status-imagem">
+                                            produto.precoPromocao &&
+                                            produto.precoPromocao !== "0,00"
 
-                                    <div className="miniatura-placeholder">
+                                                ? `🔥 R$ ${produto.precoPromocao}`
 
-                                        🚫
+                                                : "-"
 
-                                    </div>
+                                        }
 
-                                    <span className="status-sem">
+                                    </td>
 
-                                        Sem imagem
+                                    <td>
 
-                                    </span>
+                                        R$ {produto.precoCusto}
 
-                                </div>
+                                    </td>
+
+                                    <td>
+
+                                        {produto.estoque}
+
+                                    </td>
+
+                                    <td>
+
+                                        {produto.__aba}
+
+                                    </td>
+                                                                        <td>
+
+                                        {
+
+                                            produto.statusImagem === "salva"
+
+                                                ?
+
+                                                <div className="status-imagem">
+
+                                                    <img
+
+                                                        src={produto.imagem}
+
+                                                        alt={produto.descricao}
+
+                                                        className="miniatura"
+
+                                                    />
+
+                                                    <span className="status-ok">
+
+                                                        Imagem salva
+
+                                                    </span>
+
+                                                </div>
+
+                                                :
+
+                                                <div className="status-imagem">
+
+                                                    <div className="miniatura-placeholder">
+
+                                                        🚫
+
+                                                    </div>
+
+                                                    <span className="status-sem">
+
+                                                        Sem imagem
+
+                                                    </span>
+
+                                                </div>
+
+                                        }
+
+                                    </td>
+
+                                    <td>
+
+                                        <button
+
+                                            className="btn-imagem"
+
+                                            onClick={() => abrirModal(produto)}
+
+                                        >
+
+                                            {
+
+                                                produto.statusImagem === "salva"
+
+                                                    ? "👁 Ver"
+
+                                                    : "🔍 Buscar"
+
+                                            }
+
+                                        </button>
+
+                                    </td>
+
+                                </tr>
+
+                            ))
 
                         }
 
-                    </td>
+                    </tbody>
 
-                    <td>
+                </table>
 
-                        <button
+            </div>
 
-                            className="btn-imagem"
+            <ImageModal
 
-                            onClick={() => abrirModal(produto)}
+                aberto={modalAberto}
 
-                        >
+                produto={produtoSelecionado}
 
-                            {
+                imagens={imagens}
 
-                                produto.statusImagem === "salva"
+                imagemSelecionada={imagemSelecionada}
 
-                                    ? "👁 Ver"
+                setImagemSelecionada={setImagemSelecionada}
 
-                                    : "🔍 Buscar"
+                loading={loading}
 
-                            }
+                fechar={fecharModal}
 
-                        </button>
+                atualizarProduto={atualizarProduto}
 
-                    </td>
+                mostrarToast={mostrarToast}
 
-                </tr>
+            />
 
-            ))
+        </>
 
-        }
+    );
 
-    </tbody>
+}
 
-</table>
+export default ProductTable;
