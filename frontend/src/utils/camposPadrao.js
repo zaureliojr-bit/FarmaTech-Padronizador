@@ -1,16 +1,24 @@
 const CAMPOS_PADRAO = {
 
+    codigo: [
+        "codigo",
+        "código",
+        "cod",
+        "id",
+        "cód"
+    ],
+
     ean: [
         "ean",
         "gtin",
+        "cod.barra",
+        "cod barra",
+        "cod.barras",
         "codigo barras",
         "código barras",
         "codigo de barras",
         "código de barras",
-        "cod barras",
-        "cod. barras",
-        "código",
-        "codigo"
+        "codbarra"
     ],
 
     descricao: [
@@ -20,12 +28,18 @@ const CAMPOS_PADRAO = {
         "descrição comercial",
         "descricao comercial",
         "item",
-        "nome",
-        "produto descrição"
+        "nome"
     ],
 
-    marca: [
-        "marca"
+    classe: [
+        "classe"
+    ],
+
+    categoria: [
+        "grupo",
+        "categoria",
+        "departamento",
+        "linha"
     ],
 
     laboratorio: [
@@ -34,11 +48,38 @@ const CAMPOS_PADRAO = {
         "fabricante"
     ],
 
-    categoria: [
-        "categoria",
-        "grupo",
-        "departamento",
-        "linha"
+    marca: [
+        "marca"
+    ],
+
+    precoVenda: [
+        "venda",
+        "preço venda",
+        "preco venda",
+        "valor venda"
+    ],
+
+    precoPromocao: [
+        "promoção",
+        "promocao",
+        "preço promocional",
+        "preco promocional"
+    ],
+
+    precoCusto: [
+        "custo",
+        "preço custo",
+        "preco custo"
+    ],
+
+    estoque: [
+        "estoque",
+        "saldo",
+        "quantidade"
+    ],
+
+    reajuste: [
+        "reajuste"
     ]
 
 };

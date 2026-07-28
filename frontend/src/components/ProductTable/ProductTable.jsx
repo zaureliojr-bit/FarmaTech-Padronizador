@@ -1,209 +1,162 @@
-import "./ProductTable.css";
+<table>
 
-import { useImagem } from "../../hooks/useImagem";
-import ImageModal from "../ImageModal/ImageModal";
+    <thead>
 
-function ProductTable({
-    produtos,
-    atualizarProduto,
-    mostrarToast
-}) {
+        <tr>
 
-    const {
+            <th>Código</th>
 
-        modalAberto,
-        abrirModal,
-        fecharModal,
+            <th>EAN</th>
 
-        produtoSelecionado,
+            <th>Produto</th>
 
-        imagens,
+            <th>Classe</th>
 
-        imagemSelecionada,
-        setImagemSelecionada,
+            <th>Categoria</th>
 
-        loading
+            <th>Laboratório</th>
 
-    } = useImagem();
+            <th>Venda</th>
 
-    if (!produtos || produtos.length === 0) {
+            <th>Promo</th>
 
-        return (
+            <th>Custo</th>
 
-            <div className="tabela-vazia">
-                Nenhum produto importado.
-            </div>
+            <th>Estoque</th>
 
-        );
+            <th>Aba</th>
 
-    }
+            <th>Imagem</th>
 
-    return (
+            <th>Ações</th>
 
-        <>
+        </tr>
 
-            <div className="table-container">
+    </thead>
 
-                <h2>
+    <tbody>
 
-                    Produtos Importados ({produtos.length})
+        {
 
-                </h2>
+            produtos.map((produto, index) => (
 
-                <table>
+                <tr key={index}>
 
-                    <thead>
+                    <td>{produto.codigo}</td>
 
-                        <tr>
+                    <td>{produto.ean}</td>
 
-                            <th>EAN</th>
+                    <td>{produto.descricao}</td>
 
-                            <th>Descrição</th>
+                    <td>{produto.classe}</td>
 
-                            <th>Marca</th>
+                    <td>{produto.categoria}</td>
 
-                            <th>Laboratório</th>
+                    <td>{produto.laboratorio}</td>
 
-                            <th>Categoria</th>
+                    <td>R$ {produto.precoVenda}</td>
 
-                            <th>Aba</th>
-
-                            <th>Imagem</th>
-
-                            <th>Ações</th>
-
-                        </tr>
-
-                    </thead>
-
-                    <tbody>
+                    <td>
 
                         {
 
-                            produtos.map((produto, index) => (
+                            produto.precoPromocao &&
+                            produto.precoPromocao !== "0,00"
 
-                                <tr key={index}>
+                                ? `🔥 R$ ${produto.precoPromocao}`
 
-                                    <td>{produto.ean}</td>
-
-                                    <td>{produto.descricao}</td>
-
-                                    <td>{produto.marca}</td>
-
-                                    <td>{produto.laboratorio}</td>
-
-                                    <td>{produto.categoria}</td>
-
-                                    <td>{produto.__aba}</td>
-
-                                    <td>
-
-                                        {
-
-                                            produto.statusImagem === "salva"
-
-                                                ?
-
-                                                <div className="status-imagem">
-
-                                                    <img
-                                                        src={produto.imagem}
-                                                        alt={produto.descricao}
-                                                        className="miniatura"
-                                                    />
-
-                                                    <span className="status-ok">
-
-                                                        Imagem salva
-
-                                                    </span>
-
-                                                </div>
-
-                                                :
-
-                                                <div className="status-imagem">
-
-                                                    <div className="miniatura-placeholder">
-
-                                                        🚫
-
-                                                    </div>
-
-                                                    <span className="status-sem">
-
-                                                        Sem imagem
-
-                                                    </span>
-
-                                                </div>
-
-                                        }
-
-                                    </td>
-
-                                    <td>
-
-                                        <button
-
-                                            className="btn-imagem"
-
-                                            onClick={() => abrirModal(produto)}
-
-                                        >
-
-                                            {
-
-                                                produto.statusImagem === "salva"
-
-                                                    ? "👁 Ver"
-
-                                                    : "🔍 Buscar"
-
-                                            }
-
-                                        </button>
-
-                                    </td>
-
-                                </tr>
-
-                            ))
+                                : "-"
 
                         }
 
-                    </tbody>
+                    </td>
 
-                </table>
+                    <td>R$ {produto.precoCusto}</td>
 
-            </div>
+                    <td>{produto.estoque}</td>
 
-            <ImageModal
+                    <td>{produto.__aba}</td>
 
-                aberto={modalAberto}
+                    <td>
 
-                produto={produtoSelecionado}
+                        {
 
-                imagens={imagens}
+                            produto.statusImagem === "salva"
 
-                imagemSelecionada={imagemSelecionada}
+                                ?
 
-                setImagemSelecionada={setImagemSelecionada}
+                                <div className="status-imagem">
 
-                loading={loading}
+                                    <img
 
-                fechar={fecharModal}
+                                        src={produto.imagem}
 
-                atualizarProduto={atualizarProduto}
+                                        alt={produto.descricao}
 
-                mostrarToast={mostrarToast}
+                                        className="miniatura"
 
-            />
+                                    />
 
-        </>
+                                    <span className="status-ok">
 
-    );
+                                        Imagem salva
 
-}
+                                    </span>
 
-export default ProductTable;
+                                </div>
+
+                                :
+
+                                <div className="status-imagem">
+
+                                    <div className="miniatura-placeholder">
+
+                                        🚫
+
+                                    </div>
+
+                                    <span className="status-sem">
+
+                                        Sem imagem
+
+                                    </span>
+
+                                </div>
+
+                        }
+
+                    </td>
+
+                    <td>
+
+                        <button
+
+                            className="btn-imagem"
+
+                            onClick={() => abrirModal(produto)}
+
+                        >
+
+                            {
+
+                                produto.statusImagem === "salva"
+
+                                    ? "👁 Ver"
+
+                                    : "🔍 Buscar"
+
+                            }
+
+                        </button>
+
+                    </td>
+
+                </tr>
+
+            ))
+
+        }
+
+    </tbody>
+
+</table>

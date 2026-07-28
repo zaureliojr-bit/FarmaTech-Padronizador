@@ -97,6 +97,7 @@ function Home() {
                         total={produtosFiltrados.length}
 
                         limparFiltros={limparFiltros}
+                        produtos={produtosFiltrados}
 
                     />
 

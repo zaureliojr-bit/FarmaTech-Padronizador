@@ -1,4 +1,5 @@
 import "./Toolbar.css";
+import { exportarJSON } from "../../services/exportService";
 
 function Toolbar({
     pesquisa,
@@ -13,7 +14,8 @@ function Toolbar({
     aba,
     setAba,
     total,
-    limparFiltros
+    limparFiltros,
+    produtos
 }) {
 
     return (
@@ -70,13 +72,17 @@ function Toolbar({
             </select>
 
             <div className="toolbar-info">
-
                 <strong>{total}</strong> produtos
-
             </div>
 
             <button onClick={limparFiltros}>
                 Limpar
+            </button>
+
+            <button
+                onClick={() => exportarJSON(produtos)}
+            >
+                📤 Exportar JSON
             </button>
 
         </div>

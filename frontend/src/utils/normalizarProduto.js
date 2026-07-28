@@ -4,14 +4,37 @@ export function normalizarProduto(produto) {
 
     const novo = {
 
-        ean: "",
-        descricao: "",
-        marca: "",
-        laboratorio: "",
-        categoria: "",
-        __aba: produto.__aba || ""
+    codigo: "",
 
-    };
+    ean: "",
+
+    descricao: "",
+
+    marca: "",
+
+    laboratorio: "",
+
+    categoria: "",
+
+    classe: "",
+
+    precoVenda: 0,
+
+    precoPromocao: 0,
+
+    precoCusto: 0,
+
+    estoque: 0,
+
+    reajuste: "",
+
+    imagem: "",
+
+    statusImagem: "sem",
+
+    __aba: produto.__aba || ""
+
+};
 
     Object.entries(CAMPOS_PADRAO).forEach(([campo, sinonimos]) => {
 
