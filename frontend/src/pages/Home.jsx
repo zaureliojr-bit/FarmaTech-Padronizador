@@ -6,6 +6,7 @@ import Toolbar from "../components/Toolbar/Toolbar";
 import ProductTable from "../components/ProductTable/ProductTable";
 import Pagination from "../components/Pagination/Pagination";
 import Toast from "../components/Toast/Toast";
+import DashboardStats from "../components/DashboardStats/DashboardStats";
 
 import { useProdutos } from "../hooks/useProdutos";
 
@@ -71,7 +72,19 @@ function Home() {
             <ImportSummary
                 resumo={resultadoImportacao}
             />
+            {
 
+    resultadoImportacao && (
+
+        <DashboardStats
+
+            produtos={produtosFiltrados}
+
+        />
+
+    )
+
+}
             {
 
                 resultadoImportacao && (
