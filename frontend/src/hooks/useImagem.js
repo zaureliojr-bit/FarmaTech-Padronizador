@@ -1,13 +1,6 @@
 import { useState } from "react";
 
-const imagensFake = [
-    "https://picsum.photos/300?random=1",
-    "https://picsum.photos/300?random=2",
-    "https://picsum.photos/300?random=3",
-    "https://picsum.photos/300?random=4",
-    "https://picsum.photos/300?random=5",
-    "https://picsum.photos/300?random=6"
-];
+import { buscarImagens } from "../services/imagemService";
 
 export function useImagem() {
 
@@ -23,24 +16,30 @@ export function useImagem() {
 
     const [erro, setErro] = useState(null);
 
-    function abrirModal(produto) {
+    const [modoManual, setModoManual] = useState(false);
+
+    const [linkBusca, setLinkBusca] = useState("");
+
+    async function abrirModal(produto) {
 
         setLoading(true);
 
         setProdutoSelecionado(produto);
         setImagemSelecionada(null);
         setErro(null);
+        setModoManual(false);
+        setLinkBusca("");
+        setImagens([]);
 
-        // Simula uma busca de imagens
-        setTimeout(() => {
+        setModalAberto(true);
 
-            setImagens(imagensFake);
+        const resultado = await buscarImagens(produto);
 
-            setLoading(false);
+        setImagens(resultado.imagens);
+        setModoManual(resultado.origem === "manual");
+        setLinkBusca(resultado.linkBusca || "");
 
-            setModalAberto(true);
-
-        }, 500);
+        setLoading(false);
 
     }
 
@@ -53,6 +52,17 @@ export function useImagem() {
         setImagens([]);
         setErro(null);
         setLoading(false);
+        setModoManual(false);
+        setLinkBusca("");
+
+    }
+
+    function adicionarImagemManual(url) {
+
+        if (!url) return;
+
+        setImagens((atual) => [url, ...atual]);
+        setImagemSelecionada(url);
 
     }
 
@@ -73,7 +83,12 @@ export function useImagem() {
         loading,
 
         erro,
-        setErro
+        setErro,
+
+        modoManual,
+        linkBusca,
+
+        adicionarImagemManual
 
     };
 

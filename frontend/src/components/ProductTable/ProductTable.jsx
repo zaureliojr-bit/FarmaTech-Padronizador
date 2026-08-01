@@ -22,7 +22,11 @@ console.log(produtos)
         imagemSelecionada,
         setImagemSelecionada,
 
-        loading
+        loading,
+
+        modoManual,
+        linkBusca,
+        adicionarImagemManual
 
     } = useImagem();
 
@@ -232,6 +236,12 @@ console.log(produtos)
                 atualizarProduto={atualizarProduto}
 
                 mostrarToast={mostrarToast}
+
+                modoManual={modoManual}
+
+                linkBusca={linkBusca}
+
+                adicionarImagemManual={adicionarImagemManual}
 
             />
 

@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import "./ImageModal.css";
 import { salvarImagem } from "../../services/downloadService";
 
@@ -10,8 +12,14 @@ function ImageModal({
     loading,
     fechar,
     atualizarProduto,
-    mostrarToast
+    mostrarToast,
+    modoManual,
+    linkBusca,
+    adicionarImagemManual
 }) {
+
+    const [urlManual, setUrlManual] = useState("");
+    const [arrastando, setArrastando] = useState(false);
 
     if (!aberto) return null;
 
@@ -40,6 +48,47 @@ function ImageModal({
         fechar();
     }
 
+    function adicionarUrl() {
+
+        const url = urlManual.trim();
+
+        if (!url) return;
+
+        adicionarImagemManual(url);
+        setUrlManual("");
+
+    }
+
+    function aoSoltar(event) {
+
+        event.preventDefault();
+        setArrastando(false);
+
+        const urlSolta =
+            event.dataTransfer.getData("text/uri-list") ||
+            event.dataTransfer.getData("text/plain");
+
+        if (urlSolta) {
+            adicionarImagemManual(urlSolta.trim());
+            return;
+        }
+
+        const arquivo = event.dataTransfer.files?.[0];
+
+        if (arquivo && arquivo.type.startsWith("image/")) {
+
+            const leitor = new FileReader();
+
+            leitor.onload = () => {
+                adicionarImagemManual(leitor.result);
+            };
+
+            leitor.readAsDataURL(arquivo);
+
+        }
+
+    }
+
     return (
         <div className="modal-overlay">
             <div className="modal">
@@ -54,21 +103,80 @@ function ImageModal({
                     loading ? (
                         <p>Buscando imagens...</p>
                     ) : (
-                        <div className="galeria">
-                            {imagens.map((imagem, index) => (
-                                <img
-                                    key={index}
-                                    src={imagem}
-                                    alt={`Imagem ${index + 1}`}
-                                    className={
-                                        imagemSelecionada === imagem
-                                            ? "selecionada"
-                                            : ""
-                                    }
-                                    onClick={() => setImagemSelecionada(imagem)}
-                                />
-                            ))}
-                        </div>
+                        <>
+                            {
+                                imagens.length > 0 && (
+                                    <div className="galeria">
+                                        {imagens.map((imagem, index) => (
+                                            <img
+                                                key={index}
+                                                src={imagem}
+                                                alt={`Imagem ${index + 1}`}
+                                                className={
+                                                    imagemSelecionada === imagem
+                                                        ? "selecionada"
+                                                        : ""
+                                                }
+                                                onClick={() => setImagemSelecionada(imagem)}
+                                            />
+                                        ))}
+                                    </div>
+                                )
+                            }
+
+                            <div className="busca-manual">
+
+                                {
+                                    modoManual && (
+                                        <p className="busca-manual-aviso">
+                                            Não encontramos a imagem automaticamente.
+                                            Busque manualmente e adicione abaixo.
+                                        </p>
+                                    )
+                                }
+
+                                {
+                                    linkBusca && (
+                                        <a
+                                            href={linkBusca}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="btn-busca-externa"
+                                        >
+                                            🔎 Abrir busca de imagens
+                                        </a>
+                                    )
+                                }
+
+                                <div
+                                    className={`dropzone ${arrastando ? "arrastando" : ""}`}
+                                    onDragOver={(event) => {
+                                        event.preventDefault();
+                                        setArrastando(true);
+                                    }}
+                                    onDragLeave={() => setArrastando(false)}
+                                    onDrop={aoSoltar}
+                                >
+                                    Arraste uma imagem aqui
+                                </div>
+
+                                <div className="url-manual">
+                                    <input
+                                        type="text"
+                                        placeholder="Cole a URL da imagem"
+                                        value={urlManual}
+                                        onChange={(event) => setUrlManual(event.target.value)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === "Enter") adicionarUrl();
+                                        }}
+                                    />
+                                    <button onClick={adicionarUrl}>
+                                        Adicionar
+                                    </button>
+                                </div>
+
+                            </div>
+                        </>
                     )
                 }
 
