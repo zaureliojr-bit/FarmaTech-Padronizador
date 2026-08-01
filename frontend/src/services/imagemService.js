@@ -1,31 +1,43 @@
 import { buscarProdutoPorEan } from "./cosmosService";
+import { buscarImagensGoogle } from "./googleImageService";
+import { obterCache, salvarCache } from "./imagemCache";
 
 export async function buscarImagens(produto) {
 
-    try {
+    const emCache = obterCache(produto.ean);
 
-        const resultado = await buscarProdutoPorEan(produto.ean);
+    if (emCache) return emCache;
 
-        if (resultado?.imagem) {
+    const [cosmos, google] = await Promise.allSettled([
+        buscarProdutoPorEan(produto.ean),
+        buscarImagensGoogle(produto)
+    ]);
 
-            return {
-                origem: "cosmos",
-                imagens: [resultado.imagem]
-            };
+    const imagens = [];
 
-        }
+    if (cosmos.status === "fulfilled" && cosmos.value?.imagem) {
+        imagens.push(cosmos.value.imagem);
+    }
 
-    } catch (erro) {
+    if (google.status === "fulfilled") {
 
-        console.warn("Cosmos indisponível, caindo para busca manual.", erro);
+        google.value.forEach((url) => {
+            if (!imagens.includes(url)) imagens.push(url);
+        });
 
     }
 
-    return {
-        origem: "manual",
-        imagens: [],
-        linkBusca: montarLinkBuscaGoogle(produto)
-    };
+    const resultado = imagens.length > 0
+        ? { origem: "busca", imagens }
+        : {
+            origem: "manual",
+            imagens: [],
+            linkBusca: montarLinkBuscaGoogle(produto)
+        };
+
+    salvarCache(produto.ean, resultado);
+
+    return resultado;
 
 }
 

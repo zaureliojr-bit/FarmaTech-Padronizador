@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { buscarImagens } from "../services/imagemService";
+import { salvarCache } from "../services/imagemCache";
 
 export function useImagem() {
 
@@ -22,16 +23,26 @@ export function useImagem() {
 
     async function abrirModal(produto) {
 
-        setLoading(true);
-
         setProdutoSelecionado(produto);
         setImagemSelecionada(null);
         setErro(null);
         setModoManual(false);
         setLinkBusca("");
-        setImagens([]);
-
         setModalAberto(true);
+
+        // Produto já resolvido: só exibe a imagem salva, sem gastar consulta.
+        if (produto.statusImagem === "salva" && produto.imagem) {
+
+            setImagens([produto.imagem]);
+            setImagemSelecionada(produto.imagem);
+            setLoading(false);
+
+            return;
+
+        }
+
+        setLoading(true);
+        setImagens([]);
 
         const resultado = await buscarImagens(produto);
 
@@ -61,8 +72,21 @@ export function useImagem() {
 
         if (!url) return;
 
-        setImagens((atual) => [url, ...atual]);
+        setImagens((atual) => {
+
+            const novaLista = [url, ...atual];
+
+            salvarCache(produtoSelecionado?.ean, {
+                origem: "manual-confirmado",
+                imagens: novaLista
+            });
+
+            return novaLista;
+
+        });
+
         setImagemSelecionada(url);
+        setModoManual(false);
 
     }
 
