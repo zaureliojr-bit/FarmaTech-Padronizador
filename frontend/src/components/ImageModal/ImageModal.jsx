@@ -43,7 +43,7 @@ function ImageModal({
             statusImagem: "salva"
         });
 
-        mostrarToast(resultado.mensagem, "sucesso");
+        mostrarToast(resultado.mensagem, resultado.baixado ? "sucesso" : "aviso");
 
         fechar();
     }

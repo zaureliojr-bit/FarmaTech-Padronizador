@@ -13,7 +13,9 @@ function Toast({ mensagem, tipo, visivel }) {
                 {
                     tipo === "sucesso"
                         ? "✅"
-                        : "❌"
+                        : tipo === "aviso"
+                            ? "⚠️"
+                            : "❌"
                 }
 
             </span>

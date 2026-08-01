@@ -1,12 +1,27 @@
+import { baixarBlob, salvarImagemLocal } from "./imagemDB";
+
 export async function salvarImagem(produto, imagem) {
 
-    // Simula um pequeno tempo de processamento
-    await new Promise(resolve => setTimeout(resolve, 800));
+    const blob = await baixarBlob(imagem);
+
+    if (blob) {
+
+        await salvarImagemLocal(produto.ean, blob, imagem);
+
+        return {
+            sucesso: true,
+            baixado: true,
+            caminho: URL.createObjectURL(blob),
+            mensagem: "Imagem baixada e salva localmente!"
+        };
+
+    }
 
     return {
         sucesso: true,
+        baixado: false,
         caminho: imagem,
-        mensagem: "Imagem salva com sucesso!"
+        mensagem: "Site de origem não permite baixar o arquivo (CORS); o link original foi salvo."
     };
 
 }

@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import { encontrarCabecalho } from "../utils/detectarCabecalho";
 import { normalizarProduto } from "../utils/normalizarProduto";
+import { obterImagensLocais } from "./imagemDB";
 
 export async function importarPlanilha(arquivo) {
 
@@ -8,7 +9,7 @@ export async function importarPlanilha(arquivo) {
 
         const leitor = new FileReader();
 
-        leitor.onload = (evento) => {
+        leitor.onload = async (evento) => {
 
             try {
 
@@ -56,6 +57,28 @@ export async function importarPlanilha(arquivo) {
                         );
 
                     });
+
+                });
+
+                // Reaproveita imagens já baixadas em sessões anteriores
+                // (guardadas no IndexedDB por EAN), sem baixar de novo.
+                const eans = produtos
+                    .map((produto) => produto.ean)
+                    .filter(Boolean);
+
+                const imagensLocais = await obterImagensLocais(eans);
+
+                produtos = produtos.map((produto) => {
+
+                    const local = imagensLocais.get(produto.ean);
+
+                    if (!local) return produto;
+
+                    return {
+                        ...produto,
+                        imagem: URL.createObjectURL(local.blob),
+                        statusImagem: "salva"
+                    };
 
                 });
 
