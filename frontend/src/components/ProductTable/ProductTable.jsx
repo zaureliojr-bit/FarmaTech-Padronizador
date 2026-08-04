@@ -81,7 +81,7 @@ console.log(produtos)
 
                                     <td>{produto.ean}</td>
 
-                                    <td>{produto.descricao}</td>
+                                    <td>{produto.descricaoPesquisa}</td>
 
                                     <td>{produto.classe}</td>
 

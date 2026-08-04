@@ -65,3 +65,4 @@ deve ser reutilizável.
 O objetivo não é resolver um produto.
 
 É ensinar uma habilidade.
+Todo módulo deve ser reutilizável e testável de forma isolada.

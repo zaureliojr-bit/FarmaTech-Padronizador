@@ -1,14 +1,19 @@
 /**
  * =====================================================
  * FarmaTech Intelligence
- * Analisador de Produtos
+ * Pipeline Inteligente
  * =====================================================
  *
  * Responsabilidade:
- * Coordenar todo o Pipeline Inteligente do FarmaTech.
+ * Coordenar todas as etapas da Inteligência do FarmaTech.
+ *
+ * Nenhuma regra de negócio deve ficar neste arquivo.
+ * Cada etapa delega sua responsabilidade para um módulo
+ * especializado.
  *
  * Sprint:
- * 7.7
+ * 8.1 - Search Builder
+ * =====================================================
  */
 
 import { criarProdutoInteligente } from "../models/produtoInteligente";
@@ -34,16 +39,20 @@ import {
     diagnosticarProduto
 } from "../quality";
 
-export function analisarProduto(produtoImportado) {
+import {
+    montarPesquisaImagem
+} from "../search";
 
-    let produto = criarProdutoInteligente(produtoImportado);
+const DEBUG = true;
+
+export function analisarProduto(produtoImportado) {
 
     // =====================================================
     // ETAPA 01
     // Produto Inteligente
     // =====================================================
 
-    // Produto criado
+    let produto = criarProdutoInteligente(produtoImportado);
 
     // =====================================================
     // ETAPA 02
@@ -65,12 +74,14 @@ export function analisarProduto(produtoImportado) {
     // =====================================================
 
     produto = extrairMarca(produto);
+    produto = extrairLinha(produto);
+
     produto = extrairQuantidade(produto);
     produto = extrairPeso(produto);
     produto = extrairVolume(produto);
+
     produto = extrairApresentacao(produto);
     produto = extrairCategoria(produto);
-    produto = extrairLinha(produto);
 
     // =====================================================
     // ETAPA 05
@@ -82,6 +93,35 @@ export function analisarProduto(produtoImportado) {
     produto = calcularScore(produto);
 
     produto.diagnostico = diagnosticarProduto(produto);
+
+    // =====================================================
+    // ETAPA 06
+    // Search Builder
+    // =====================================================
+
+    produto.pesquisaImagem = montarPesquisaImagem(produto);
+
+    // =====================================================
+    // DEBUG
+    // =====================================================
+
+    if (DEBUG && produto.codigo === "001496") {
+
+        console.log("====================================");
+        console.log("FarmaTech Intelligence");
+        console.log("====================================");
+
+        console.log("Produto Inteligente:");
+        console.log(produto);
+
+        console.log("Pesquisa de Imagem:");
+        console.log(produto.pesquisaImagem);
+
+    }
+
+    // =====================================================
+    // Finalização
+    // =====================================================
 
     return produto;
 
