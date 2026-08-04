@@ -1,0 +1,1 @@
+export { analisarProduto } from "./analisarProduto";
