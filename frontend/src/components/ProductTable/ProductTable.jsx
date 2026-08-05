@@ -3,12 +3,21 @@ import "./ProductTable.css";
 import ImageModal from "../ImageModal/ImageModal";
 import { useImagem } from "../../hooks/useImagem";
 
+function classeQualidade(score) {
+
+    if (score >= 90) return "qualidade-boa";
+    if (score >= 50) return "qualidade-media";
+
+    return "qualidade-baixa";
+
+}
+
 function ProductTable({
     produtos,
     atualizarProduto,
     mostrarToast
 }) {
-console.log(produtos)
+
     const {
 
         modalAberto,
@@ -63,6 +72,8 @@ console.log(produtos)
                             <th>Estoque</th>
 
                             <th>Aba</th>
+
+                            <th>Qualidade</th>
 
                             <th>Imagem</th>
 
@@ -131,7 +142,20 @@ console.log(produtos)
                                         {produto.__aba}
 
                                     </td>
-                                                                        <td>
+
+                                    <td>
+
+                                        <div className={`badge-qualidade ${classeQualidade(produto.score)}`}>
+
+                                            <strong>{produto.score}%</strong>
+
+                                            <span>{produto.diagnostico}</span>
+
+                                        </div>
+
+                                    </td>
+
+                                    <td>
 
                                         {
 
@@ -165,7 +189,7 @@ console.log(produtos)
 
                                                     <div className="miniatura-placeholder">
 
-                                                        🚫
+                                                        🖼️
 
                                                     </div>
 
