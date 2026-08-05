@@ -12,7 +12,7 @@
  * especializado.
  *
  * Sprint:
- * 8.1 - Search Builder
+ * 8.1.1 - Refinamento da Inteligência
  * =====================================================
  */
 
@@ -20,7 +20,8 @@ import { criarProdutoInteligente } from "../models/produtoInteligente";
 
 import {
     limparDescricao,
-    gerarDescricaoPesquisa
+    gerarDescricaoPesquisa,
+    refinarDescricaoPesquisa
 } from "../normalizers";
 
 import {
@@ -70,6 +71,13 @@ export function analisarProduto(produtoImportado) {
 
     // =====================================================
     // ETAPA 04
+    // Refinamento
+    // =====================================================
+
+    produto = refinarDescricaoPesquisa(produto);
+
+    // =====================================================
+    // ETAPA 05
     // Extração
     // =====================================================
 
@@ -84,7 +92,7 @@ export function analisarProduto(produtoImportado) {
     produto = extrairCategoria(produto);
 
     // =====================================================
-    // ETAPA 05
+    // ETAPA 06
     // Qualidade
     // =====================================================
 
@@ -95,7 +103,7 @@ export function analisarProduto(produtoImportado) {
     produto.diagnostico = diagnosticarProduto(produto);
 
     // =====================================================
-    // ETAPA 06
+    // ETAPA 07
     // Search Builder
     // =====================================================
 
@@ -111,11 +119,35 @@ export function analisarProduto(produtoImportado) {
         console.log("FarmaTech Intelligence");
         console.log("====================================");
 
-        console.log("Produto Inteligente:");
-        console.log(produto);
+        console.log("Código:");
+        console.log(produto.codigo);
+
+        console.log("");
+
+        console.log("Descrição Original:");
+        console.log(produto.descricaoOriginal);
+
+        console.log("");
+
+        console.log("Descrição Pesquisa:");
+        console.log(produto.descricaoPesquisa);
+
+        console.log("");
+
+        console.log("Descrição Refinada:");
+        console.log(produto.descricaoPesquisaRefinada);
+
+        console.log("");
+
+        console.log("Marca:");
+        console.log(produto.marca);
+
+        console.log("");
 
         console.log("Pesquisa de Imagem:");
         console.log(produto.pesquisaImagem);
+
+        console.log("====================================");
 
     }
 
