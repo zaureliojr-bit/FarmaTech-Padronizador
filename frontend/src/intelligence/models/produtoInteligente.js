@@ -79,10 +79,15 @@ export function criarProdutoInteligente(produto = {}) {
         // =====================================================
         // Imagens
         // =====================================================
+        // Preserva imagem já resolvida (busca anterior ou
+        // reaproveitada do IndexedDB na importação) em vez de
+        // descartar a cada passagem pelo pipeline.
 
-        imagem: "",
+        imagem: produto.imagem || "",
 
-        statusImagem: "pendente",
+        statusImagem: produto.imagem
+            ? "salva"
+            : (produto.statusImagem || "pendente"),
 
         // =====================================================
         // Search Builder

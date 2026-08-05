@@ -1,3 +1,5 @@
+import { termoDeBusca } from "./termoBusca";
+
 const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_CSE_KEY;
 const GOOGLE_CX = import.meta.env.VITE_GOOGLE_CSE_CX;
 
@@ -7,9 +9,7 @@ export async function buscarImagensGoogle(produto) {
 
     if (!GOOGLE_KEY || !GOOGLE_CX) return [];
 
-    const termo = [produto.marca, produto.descricao]
-        .filter(Boolean)
-        .join(" ");
+    const termo = termoDeBusca(produto);
 
     if (!termo) return [];
 

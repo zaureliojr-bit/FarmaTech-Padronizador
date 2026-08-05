@@ -145,7 +145,7 @@ console.log(produtos)
 
                                                         src={produto.imagem}
 
-                                                        alt={produto.descricao}
+                                                        alt={produto.descricaoPesquisa}
 
                                                         className="miniatura"
 

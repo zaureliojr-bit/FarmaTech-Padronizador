@@ -1,6 +1,7 @@
 import { buscarProdutoPorEan } from "./cosmosService";
 import { buscarImagensGoogle } from "./googleImageService";
 import { obterCache, salvarCache } from "./imagemCache";
+import { termoDeBusca } from "./termoBusca";
 
 export async function buscarImagens(produto) {
 
@@ -43,9 +44,7 @@ export async function buscarImagens(produto) {
 
 function montarLinkBuscaGoogle(produto) {
 
-    const termo = [produto.marca, produto.descricao]
-        .filter(Boolean)
-        .join(" ");
+    const termo = termoDeBusca(produto);
 
     return `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(termo)}`;
 

@@ -96,7 +96,7 @@ function ImageModal({
                 <h2>Buscar imagem</h2>
 
                 <p>
-                    <strong>Produto:</strong> {produto?.descricao}
+                    <strong>Produto:</strong> {produto?.descricaoPesquisa}
                 </p>
 
                 {
