@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { analisarProduto } from "../intelligence/core";
 
 export function useProdutos() {
 
@@ -19,49 +20,70 @@ export function useProdutos() {
 
     }, [pesquisa, laboratorio, categoria, aba]);
 
-    const laboratorios = useMemo(() => {
+    // =====================================================
+    // Produtos Inteligentes
+    // =====================================================
+
+    const produtos = useMemo(() => {
 
         if (!resultadoImportacao) return [];
 
-        return [...new Set(
-            resultadoImportacao.produtos
-                .map(p => p.laboratorio)
-                .filter(Boolean)
-        )].sort();
+        return resultadoImportacao.produtos.map(analisarProduto);
 
     }, [resultadoImportacao]);
+    console.log(produtos[0]);
+
+    // =====================================================
+    // Filtros
+    // =====================================================
+
+    const laboratorios = useMemo(() => {
+
+        return [...new Set(
+
+            produtos
+                .map(produto => produto.laboratorio)
+                .filter(Boolean)
+
+        )].sort();
+
+    }, [produtos]);
 
     const categorias = useMemo(() => {
 
-        if (!resultadoImportacao) return [];
-
         return [...new Set(
-            resultadoImportacao.produtos
-                .map(p => p.categoria)
+
+            produtos
+                .map(produto => produto.categoria)
                 .filter(Boolean)
+
         )].sort();
 
-    }, [resultadoImportacao]);
+    }, [produtos]);
 
     const abas = useMemo(() => {
 
-        if (!resultadoImportacao) return [];
-
         return [...new Set(
-            resultadoImportacao.produtos
-                .map(p => p.__aba)
+
+            produtos
+                .map(produto => produto.__aba)
                 .filter(Boolean)
+
         )].sort();
 
-    }, [resultadoImportacao]);
+    }, [produtos]);
+
+    // =====================================================
+    // Produtos Filtrados
+    // =====================================================
 
     const produtosFiltrados = useMemo(() => {
 
-        if (!resultadoImportacao) return [];
+        if (!produtos.length) return [];
 
         const texto = pesquisa.toLowerCase().trim();
 
-        return resultadoImportacao.produtos.filter(produto => {
+        return produtos.filter(produto => {
 
             const busca =
 
@@ -69,7 +91,7 @@ export function useProdutos() {
 
                 produto.ean?.toLowerCase().includes(texto) ||
 
-                produto.descricao?.toLowerCase().includes(texto) ||
+                produto.descricaoOriginal?.toLowerCase().includes(texto) ||
 
                 produto.marca?.toLowerCase().includes(texto) ||
 
@@ -78,108 +100,168 @@ export function useProdutos() {
                 produto.categoria?.toLowerCase().includes(texto);
 
             const filtroLaboratorio =
-                !laboratorio || produto.laboratorio === laboratorio;
+
+                !laboratorio ||
+
+                produto.laboratorio === laboratorio;
 
             const filtroCategoria =
-                !categoria || produto.categoria === categoria;
+
+                !categoria ||
+
+                produto.categoria === categoria;
 
             const filtroAba =
-                !aba || produto.__aba === aba;
+
+                !aba ||
+
+                produto.__aba === aba;
 
             return (
+
                 busca &&
+
                 filtroLaboratorio &&
+
                 filtroCategoria &&
+
                 filtroAba
+
             );
 
         });
 
     }, [
-        resultadoImportacao,
+
+        produtos,
+
         pesquisa,
+
         laboratorio,
+
         categoria,
+
         aba
+
     ]);
 
+    // =====================================================
+    // Paginação
+    // =====================================================
+
     const totalPaginas = Math.ceil(
+
         produtosFiltrados.length / itensPorPagina
+
     );
 
     const produtosPagina = useMemo(() => {
 
-        const inicio = (paginaAtual - 1) * itensPorPagina;
+        const inicio =
+
+            (paginaAtual - 1) * itensPorPagina;
 
         return produtosFiltrados.slice(
+
             inicio,
+
             inicio + itensPorPagina
+
         );
 
     }, [
+
         produtosFiltrados,
+
         paginaAtual
+
     ]);
+
+    // =====================================================
+    // Ações
+    // =====================================================
 
     function limparFiltros() {
 
         setPesquisa("");
+
         setLaboratorio("");
+
         setCategoria("");
+
         setAba("");
 
     }
-function atualizarProduto(produtoAtualizado) {
 
-    setResultadoImportacao((anterior) => ({
+    function atualizarProduto(produtoAtualizado) {
 
-        ...anterior,
+        setResultadoImportacao((anterior) => ({
 
-        produtos: anterior.produtos.map((produto) =>
+            ...anterior,
 
-            produto.ean === produtoAtualizado.ean
-                ? {
-                    ...produto,
-                    ...produtoAtualizado
-                }
-                : produto
+            produtos: anterior.produtos.map((produto) =>
 
-        )
+                produto.ean === produtoAtualizado.ean
 
-    }));
+                    ? {
 
-}
+                        ...produto,
+
+                        ...produtoAtualizado
+
+                    }
+
+                    : produto
+
+            )
+
+        }));
+
+    }
+
     return {
 
         resultadoImportacao,
+
         setResultadoImportacao,
 
         pesquisa,
+
         setPesquisa,
 
         laboratorio,
+
         setLaboratorio,
 
         categoria,
+
         setCategoria,
 
         aba,
+
         setAba,
 
         laboratorios,
+
         categorias,
+
         abas,
 
-        produtosPagina,
+        produtos,
+
         produtosFiltrados,
 
+        produtosPagina,
+
         paginaAtual,
+
         setPaginaAtual,
 
         totalPaginas,
 
         limparFiltros,
-        atualizarProduto,
+
+        atualizarProduto
 
     };
 

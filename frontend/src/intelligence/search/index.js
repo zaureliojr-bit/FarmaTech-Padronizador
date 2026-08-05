@@ -1,0 +1,1 @@
+export { montarPesquisaImagem } from "./montarPesquisaImagem";
