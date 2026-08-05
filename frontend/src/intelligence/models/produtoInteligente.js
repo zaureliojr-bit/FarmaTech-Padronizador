@@ -43,6 +43,9 @@ export function criarProdutoInteligente(produto = {}) {
         // =====================================================
 
         descricaoPesquisa: "",
+        
+        descricaoPesquisaRefinada: "",
+
 
         descricaoSite: "",
 

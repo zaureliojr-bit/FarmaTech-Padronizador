@@ -8,9 +8,12 @@
  * Centralizar abreviações conhecidas utilizadas
  * pelos fornecedores.
  *
+ * Sprint:
+ * 8.1.1
+ * =====================================================
  */
 
-const ABREVIACOES = {
+export const ABREVIACOES = {
 
     FR: "Fralda",
 
@@ -41,5 +44,3 @@ const ABREVIACOES = {
     ENV: "Envelope"
 
 };
-
-export default ABREVIACOES;
