@@ -30,6 +30,8 @@ export function criarProdutoInteligente(produto = {}) {
 
         descricaoOriginal: produto.descricao || "",
 
+        classe: produto.classe || "",
+
         laboratorio: produto.laboratorio || "",
 
         categoriaOriginal: produto.categoria || "",
