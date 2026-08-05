@@ -45,7 +45,18 @@ A prioridade é colocar o sistema em operação o mais rápido possível.
 
 # Versão 1.1
 
-- [ ] Busca de imagens
+- [x] Busca de imagens (Cosmos API + Google Custom Search, com fallback manual quando nenhuma das duas encontra)
+- [x] Armazenamento local de imagens (IndexedDB, por EAN)
+
+### Armazenamento de imagens — capacidade
+
+As imagens baixadas são salvas no **IndexedDB do navegador** (não em um servidor). Isso significa:
+
+- Não existe um limite fixo de quantidade de imagens — o limite real é o **espaço em disco livre** da máquina, não um número de arquivos.
+- Estimativa pro catálogo atual (~5.000 produtos): fotos comprimidas de produto costumam pesar 50–300KB cada, então o total fica entre ~250MB e ~1,5GB — tranquilo pra qualquer computador com espaço livre normal.
+- **Chrome, Edge e Firefox**: aceitam vários GB por site, sem problema mesmo crescendo bem além dos 5.000 produtos.
+- **Safari**: mais restritivo, pode apagar dados automaticamente após um tempo de inatividade (proteção anti-rastreamento). Recomendado evitar Safari pra essa ferramenta.
+- Como é armazenamento local do navegador, o cache **não é compartilhado entre máquinas/pessoas** — cada computador baixa e guarda sua própria cópia. Se no futuro for necessário compartilhar entre o time, isso exige migrar para um banco com backend (ver seção "Banco" abaixo).
 
 ---
 
