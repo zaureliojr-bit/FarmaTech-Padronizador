@@ -45,7 +45,10 @@ A prioridade é colocar o sistema em operação o mais rápido possível.
 
 # Versão 1.1
 
-- [x] Busca de imagens (Cosmos API + Google Custom Search, com fallback manual quando nenhuma das duas encontra)
+- [x] Busca de imagens (Cosmos API, com fallback manual quando não encontra)
+- [ ] Proxy pra resolver CORS da Cosmos (chamada direta do navegador é bloqueada)
+
+> Google Custom Search foi avaliado e descartado: fechado para novos clientes desde 2025 e será desligado em 01/01/2027. Mercado Livre também foi avaliado - o endpoint público de busca está instável/bloqueado (relatos recentes de 403 mesmo com token válido). Bing Image Search API foi descontinuada pela Microsoft. Cosmos segue como única fonte automática viável hoje.
 - [x] Armazenamento local de imagens (IndexedDB, por EAN)
 
 ### Armazenamento de imagens — capacidade
