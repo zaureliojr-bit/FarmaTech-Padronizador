@@ -1,19 +1,13 @@
-const COSMOS_TOKEN = import.meta.env.VITE_COSMOS_TOKEN;
-
-const COSMOS_URL = "https://api.cosmos.bluesoft.io/gtins";
+// A Cosmos bloqueia chamada direta do navegador (CORS), então passamos
+// por um proxy próprio (Cloudflare Worker) que guarda o token no
+// servidor. Ver cosmos-proxy/ na raiz do projeto.
+const PROXY_URL = import.meta.env.VITE_COSMOS_PROXY_URL;
 
 export async function buscarProdutoPorEan(ean) {
 
-    if (!COSMOS_TOKEN || !ean) return null;
+    if (!PROXY_URL || !ean) return null;
 
-    const resposta = await fetch(`${COSMOS_URL}/${ean}.json`, {
-
-        headers: {
-            "Content-Type": "application/json;charset=UTF-8",
-            "X-Cosmos-Token": COSMOS_TOKEN
-        }
-
-    });
+    const resposta = await fetch(`${PROXY_URL}?ean=${encodeURIComponent(ean)}`);
 
     if (!resposta.ok) return null;
 
