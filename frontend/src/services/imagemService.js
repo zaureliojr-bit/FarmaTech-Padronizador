@@ -1,6 +1,5 @@
 import { buscarProdutoPorEan } from "./cosmosService";
 import { obterCache, salvarCache } from "./imagemCache";
-import { termoDeBusca } from "./termoBusca";
 
 export async function buscarImagens(produto) {
 
@@ -36,10 +35,10 @@ export async function buscarImagens(produto) {
 
 }
 
+// Busca pelo código de barras (EAN) em vez da descrição do produto -
+// reduz a chance de trazer imagem de um produto parecido mas errado.
 function montarLinkBuscaGoogle(produto) {
 
-    const termo = termoDeBusca(produto);
-
-    return `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(termo)}`;
+    return `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(produto.ean)}`;
 
 }
