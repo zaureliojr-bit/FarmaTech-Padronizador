@@ -17,6 +17,11 @@ export async function salvarImagem(produto, imagem) {
 
     }
 
+    // Não deu pra baixar o arquivo (CORS do site de origem), mas ainda
+    // guardamos a referência por EAN pra não perder a escolha ao
+    // reimportar a planilha depois.
+    await salvarImagemLocal(produto.ean, null, imagem);
+
     return {
         sucesso: true,
         baixado: false,

@@ -76,7 +76,9 @@ export async function importarPlanilha(arquivo) {
 
                     return {
                         ...produto,
-                        imagem: URL.createObjectURL(local.blob),
+                        imagem: local.blob
+                            ? URL.createObjectURL(local.blob)
+                            : local.urlOriginal,
                         statusImagem: "salva"
                     };
 
