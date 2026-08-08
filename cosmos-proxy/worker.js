@@ -7,7 +7,7 @@
 //
 // Uso: GET https://<seu-worker>.workers.dev/?ean=7891234567895
 
-const COSMOS_URL = "https://api.cosmos.bluesoft.io/gtins";
+const COSMOS_URL = "https://cosmos.bluesoft.com.br/api/gtins";
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",

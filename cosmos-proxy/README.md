@@ -4,6 +4,13 @@ Worker do Cloudflare que resolve o bloqueio de CORS da Cosmos API
 (a Cosmos não libera chamadas diretas do navegador). Sem servidor pra
 manter, roda no free tier do Cloudflare (sem cartão de crédito).
 
+> **Endpoint correto:** `https://cosmos.bluesoft.com.br/api/gtins/{ean}.json`.
+> O domínio antigo `api.cosmos.bluesoft.io`, usado em várias
+> integrações de terceiros documentadas por aí, estava retornando
+> conteúdo de spam/aposta (provavelmente expirado e comprado por
+> golpistas) - confirme sempre a URL atual no painel de vocês em
+> https://cosmos.bluesoft.com.br/ antes de confiar em exemplos externos.
+
 ## Deploy (painel do Cloudflare, sem linha de comando)
 
 1. Acesse https://dash.cloudflare.com/ → **Workers e Pages** → **Criar**.
