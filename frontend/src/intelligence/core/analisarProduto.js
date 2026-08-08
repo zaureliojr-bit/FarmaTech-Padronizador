@@ -21,7 +21,8 @@ import { criarProdutoInteligente } from "../models/produtoInteligente";
 import {
     limparDescricao,
     gerarDescricaoPesquisa,
-    refinarDescricaoPesquisa
+    refinarDescricaoPesquisa,
+    gerarDescricaoSite
 } from "../normalizers";
 
 import {
@@ -75,6 +76,8 @@ export function analisarProduto(produtoImportado) {
     // =====================================================
 
     produto = refinarDescricaoPesquisa(produto);
+
+    produto = gerarDescricaoSite(produto);
 
     // =====================================================
     // ETAPA 05
@@ -136,6 +139,11 @@ export function analisarProduto(produtoImportado) {
 
         console.log("Descrição Refinada:");
         console.log(produto.descricaoPesquisaRefinada);
+
+        console.log("");
+
+        console.log("Descrição Site:");
+        console.log(produto.descricaoSite);
 
         console.log("");
 

@@ -96,7 +96,7 @@ function ProductTable({
 
                                     <td>{produto.ean}</td>
 
-                                    <td>{produto.descricaoPesquisa}</td>
+                                    <td>{produto.descricaoSite}</td>
 
                                     <td>{produto.classe}</td>
 
@@ -169,7 +169,7 @@ function ProductTable({
 
                                                         src={produto.imagem}
 
-                                                        alt={produto.descricaoPesquisa}
+                                                        alt={produto.descricaoSite}
 
                                                         className="miniatura"
 
