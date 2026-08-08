@@ -5,7 +5,9 @@ export async function buscarImagens(produto) {
 
     const emCache = obterCache(produto.ean);
 
-    if (emCache) return emCache;
+    // Ignora cache antigo de modo manual (pode ter um link
+    // desatualizado de antes de alguma mudança na lógica de busca).
+    if (emCache?.origem === "cosmos") return emCache;
 
     let imagem = null;
 
@@ -21,13 +23,20 @@ export async function buscarImagens(produto) {
 
     }
 
-    const resultado = imagem
-        ? { origem: "cosmos", imagens: [imagem] }
-        : {
+    // Modo manual não chama nenhuma API - não custa nada recalcular
+    // toda vez, então não cacheamos (evita link salvo desatualizado
+    // se a lógica de busca mudar depois).
+    if (!imagem) {
+
+        return {
             origem: "manual",
             imagens: [],
             linkBusca: montarLinkBuscaGoogle(produto)
         };
+
+    }
+
+    const resultado = { origem: "cosmos", imagens: [imagem] };
 
     salvarCache(produto.ean, resultado);
 
