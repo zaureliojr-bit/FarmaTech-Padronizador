@@ -13,7 +13,11 @@ export function encontrarApresentacao(texto = "") {
 
     for (const apresentacao of APRESENTACOES) {
 
-        if (descricao.includes(apresentacao.toUpperCase())) {
+        // \b garante palavra inteira - sem isso "CREMER" (fabricante)
+        // é confundido com "CREME" (forma farmacêutica).
+        const regex = new RegExp(`\\b${apresentacao.toUpperCase()}\\b`);
+
+        if (regex.test(descricao)) {
 
             return apresentacao;
 
