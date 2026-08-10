@@ -1,5 +1,7 @@
+import { useState } from "react";
 import "./Toolbar.css";
 import { exportarJSON } from "../../services/exportService";
+import { publicarNoSite } from "../../services/exportSiteService";
 
 function Toolbar({
     pesquisa,
@@ -15,8 +17,33 @@ function Toolbar({
     setAba,
     total,
     limparFiltros,
-    produtos
+    produtos,
+    mostrarToast
 }) {
+
+    const [publicando, setPublicando] = useState(false);
+
+    async function handlePublicar() {
+
+        setPublicando(true);
+
+        try {
+
+            const { total: totalPublicado } = await publicarNoSite(produtos);
+            mostrarToast?.(`${totalPublicado} produtos publicados no site!`, "sucesso");
+
+        } catch (erro) {
+
+            console.error("Erro ao publicar no site", erro);
+            mostrarToast?.(erro.message || "Erro ao publicar no site.", "erro");
+
+        } finally {
+
+            setPublicando(false);
+
+        }
+
+    }
 
     return (
 
@@ -83,6 +110,13 @@ function Toolbar({
                 onClick={() => exportarJSON(produtos)}
             >
                 📤 Exportar JSON
+            </button>
+
+            <button
+                onClick={handlePublicar}
+                disabled={publicando}
+            >
+                {publicando ? "Publicando..." : "🌐 Publicar no site"}
             </button>
 
         </div>

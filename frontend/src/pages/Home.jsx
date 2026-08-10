@@ -111,6 +111,7 @@ function Home() {
 
                         limparFiltros={limparFiltros}
                         produtos={produtosFiltrados}
+                        mostrarToast={mostrarToast}
 
                     />
 
