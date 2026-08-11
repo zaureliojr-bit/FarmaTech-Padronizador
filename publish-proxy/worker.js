@@ -55,19 +55,7 @@ export default {
         }
 
         if (!env.PUBLISH_KEY || request.headers.get("X-Publish-Key") !== env.PUBLISH_KEY) {
-
-            // DIAGNÓSTICO TEMPORÁRIO - remover depois de descobrir a causa
-            // do 401. Não expõe os valores reais, só metadados seguros.
-            return jsonResponse({
-                erro: "Não autorizado.",
-                debug: {
-                    chaveConfiguradaNoWorker: !!env.PUBLISH_KEY,
-                    tamanhoChaveConfigurada: env.PUBLISH_KEY ? env.PUBLISH_KEY.length : 0,
-                    chaveRecebida: !!request.headers.get("X-Publish-Key"),
-                    tamanhoChaveRecebida: (request.headers.get("X-Publish-Key") || "").length
-                }
-            }, 401);
-
+            return jsonResponse({ erro: "Não autorizado." }, 401);
         }
 
         let corpo;
