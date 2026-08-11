@@ -18,6 +18,7 @@ function Toolbar({
     total,
     limparFiltros,
     produtos,
+    produtosCompletos,
     mostrarToast
 }) {
 
@@ -29,7 +30,10 @@ function Toolbar({
 
         try {
 
-            const { total: totalPublicado } = await publicarNoSite(produtos);
+            // Sempre publica o catálogo completo importado, nunca a lista
+            // filtrada da tela - senão um filtro ativo (categoria, busca...)
+            // apagaria do site tudo que não bate com o filtro.
+            const { total: totalPublicado } = await publicarNoSite(produtosCompletos || produtos);
             mostrarToast?.(`${totalPublicado} produtos publicados no site!`, "sucesso");
 
         } catch (erro) {
@@ -115,6 +119,7 @@ function Toolbar({
             <button
                 onClick={handlePublicar}
                 disabled={publicando}
+                title={`Publica o catálogo completo (${(produtosCompletos || produtos).length} produtos), ignorando filtros ativos na tela`}
             >
                 {publicando ? "Publicando..." : "🌐 Publicar no site"}
             </button>
