@@ -37,6 +37,7 @@ function Home() {
         categorias,
         abas,
 
+        produtos,
         produtosPagina,
         produtosFiltrados,
 
@@ -111,6 +112,7 @@ function Home() {
 
                         limparFiltros={limparFiltros}
                         produtos={produtosFiltrados}
+                        produtosCompletos={produtos}
                         mostrarToast={mostrarToast}
 
                     />
