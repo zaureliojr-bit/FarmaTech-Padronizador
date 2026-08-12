@@ -6,11 +6,21 @@ function Header(){
 
         <header className="header">
 
-            <div>
+            <div className="header-inner">
 
-                <h1>🏥 FarmaTech</h1>
+                <div className="header-brand">
 
-                <span>Padronizador</span>
+                    <span className="header-logo">🏥</span>
+
+                    <div>
+
+                        <h1>FarmaTech</h1>
+
+                        <span className="header-subtitle">Padronizador de Catálogo</span>
+
+                    </div>
+
+                </div>
 
             </div>
 

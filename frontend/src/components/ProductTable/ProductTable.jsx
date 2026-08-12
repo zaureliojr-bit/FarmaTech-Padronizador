@@ -89,7 +89,7 @@ function ProductTable({
 
                             produtos.map((produto, index) => (
 
-                                <tr key={`${produto.codigo}-${produto.__aba}-${index}`}>
+                                <tr key={`${produto.codigo}-${produto.aba}-${index}`}>
                                 
 
                                     <td>{produto.codigo}</td>
@@ -139,7 +139,7 @@ function ProductTable({
 
                                     <td>
 
-                                        {produto.__aba}
+                                        {produto.aba}
 
                                     </td>
 

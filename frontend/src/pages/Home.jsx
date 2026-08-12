@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import Header from "../components/Header/Header";
 import ImportBox from "../components/ImportBox/ImportBox";
 import ImportSummary from "../components/ImportSummary/ImportSummary";
 import Toolbar from "../components/Toolbar/Toolbar";
@@ -66,6 +67,10 @@ function Home() {
 
         <>
 
+            <Header />
+
+            <div className="page">
+
             <ImportBox
                 onImportar={setResultadoImportacao}
             />
@@ -131,6 +136,7 @@ function Home() {
                 paginaAtual={paginaAtual}
                 totalPaginas={totalPaginas}
                 mudarPagina={setPaginaAtual}
+                totalItens={produtosFiltrados.length}
             />
 
             <Toast
@@ -138,6 +144,8 @@ function Home() {
                 mensagem={toastMensagem}
                 tipo={toastTipo}
             />
+
+            </div>
 
         </>
 

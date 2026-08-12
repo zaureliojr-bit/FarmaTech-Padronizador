@@ -1,35 +1,49 @@
 .import-box{
 
-    background:#1F2937;
+    background:var(--card);
 
-    border:2px dashed #334155;
+    border:2px dashed var(--card-border);
 
-    border-radius:12px;
+    border-radius:var(--radius);
 
     padding:40px;
 
-    margin-top:30px;
+    margin-top:24px;
 
     text-align:center;
+
+    transition:border-color .2s var(--ease);
+
+}
+
+.import-box:hover{
+
+    border-color:var(--primary);
 
 }
 
 .import-box h2{
 
-    margin-bottom:10px;
+    margin-bottom:8px;
+
+    font-size:18px;
 
 }
 
 .import-box p{
 
-    color:#94A3B8;
+    color:var(--text2);
 
     margin-bottom:20px;
+
+    font-size:14px;
 
 }
 
 .import-box input{
 
-    color:white;
+    color:var(--text);
+
+    font-size:14px;
 
 }

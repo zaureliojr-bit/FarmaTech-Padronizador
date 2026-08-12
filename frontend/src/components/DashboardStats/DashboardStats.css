@@ -2,77 +2,105 @@
 
     display: grid;
 
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 
-    gap: 20px;
+    gap: 14px;
 
-    margin: 25px 0;
+    margin: 24px 0;
 
 }
 
 .dashboard-card {
 
-    background: #1f2937;
+    background: var(--card);
 
-    border: 1px solid #374151;
+    border: 1px solid var(--card-border);
+    border-left: 3px solid var(--card-border);
 
-    border-radius: 12px;
+    border-radius: var(--radius);
 
-    padding: 22px;
+    padding: 18px 20px;
 
     display: flex;
 
-    flex-direction: column;
-
-    justify-content: center;
-
     align-items: center;
 
-    transition: .25s;
+    gap: 14px;
 
-    cursor: default;
+    transition: transform .2s var(--ease), box-shadow .2s var(--ease), border-color .2s var(--ease);
 
 }
 
 .dashboard-card:hover {
 
-    transform: translateY(-4px);
+    transform: translateY(-3px);
 
-    border-color: #3b82f6;
-
-    box-shadow: 0 8px 24px rgba(59,130,246,.18);
+    box-shadow: var(--shadow-sm);
 
 }
 
 .dashboard-icon {
 
-    font-size: 32px;
+    width: 42px;
+    height: 42px;
 
-    margin-bottom: 12px;
+    flex-shrink: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 20px;
+
+    border-radius: var(--radius-sm);
+
+}
+
+.dashboard-texto {
+
+    display: flex;
+
+    flex-direction: column;
 
 }
 
 .dashboard-title {
 
-    color: #9ca3af;
+    color: var(--text2);
 
-    font-size: .9rem;
-
-    margin-bottom: 10px;
-
-    text-align: center;
+    font-size: .82rem;
 
 }
 
 .dashboard-value {
 
-    color: #ffffff;
+    color: var(--text);
 
-    font-size: 2rem;
+    font-size: 1.6rem;
 
-    font-weight: bold;
+    font-weight: 700;
+
+    line-height: 1.15;
 
 }
+
+.cor-azul { border-left-color: var(--primary); }
+.cor-azul .dashboard-icon { background: var(--primary-soft); }
+
+.cor-verde { border-left-color: var(--success); }
+.cor-verde .dashboard-icon { background: var(--success-soft); }
+
+.cor-vermelho { border-left-color: var(--danger); }
+.cor-vermelho .dashboard-icon { background: var(--danger-soft); }
+
+.cor-roxo { border-left-color: var(--accent-purple); }
+.cor-roxo .dashboard-icon { background: rgba(167,139,250,.14); }
+
+.cor-amarelo { border-left-color: var(--warning); }
+.cor-amarelo .dashboard-icon { background: var(--warning-soft); }
+
+.cor-ciano { border-left-color: var(--accent-cyan); }
+.cor-ciano .dashboard-icon { background: rgba(34,211,238,.14); }
 
 @media (max-width: 768px) {
 

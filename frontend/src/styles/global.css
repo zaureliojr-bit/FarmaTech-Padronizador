@@ -2,7 +2,13 @@
     margin:0;
     padding:0;
     box-sizing:border-box;
-    font-family:Segoe UI, sans-serif;
+    font-family:var(--font);
+}
+
+html{
+
+    scrollbar-color: var(--card-border) transparent;
+
 }
 
 body{
@@ -15,15 +21,36 @@ body{
 button{
 
     cursor:pointer;
+    font-family:var(--font);
 
 }
-.container{
 
-    width:95%;
+button:focus-visible,
+input:focus-visible,
+select:focus-visible{
+
+    outline:2px solid var(--primary);
+    outline-offset:2px;
+
+}
+
+.page{
+
+    width:100%;
     max-width:1400px;
 
-    margin:auto;
+    margin:0 auto;
 
-    padding:30px;
+    padding:0 24px 60px;
+
+}
+
+@media (max-width:640px){
+
+    .page{
+
+        padding:0 14px 40px;
+
+    }
 
 }

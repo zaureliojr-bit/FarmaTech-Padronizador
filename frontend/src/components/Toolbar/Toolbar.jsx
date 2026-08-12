@@ -53,76 +53,87 @@ function Toolbar({
 
         <div className="toolbar">
 
-            <input
-                type="text"
-                placeholder="🔎 Pesquisar..."
-                value={pesquisa}
-                onChange={(e) => setPesquisa(e.target.value)}
-            />
+            <div className="toolbar-filtros">
 
-            <select
-                value={laboratorio}
-                onChange={(e) => setLaboratorio(e.target.value)}
-            >
-                <option value="">Todos os Laboratórios</option>
+                <input
+                    className="toolbar-busca"
+                    type="text"
+                    placeholder="🔎 Pesquisar por nome, marca, EAN..."
+                    value={pesquisa}
+                    onChange={(e) => setPesquisa(e.target.value)}
+                />
 
-                {laboratorios.map(item => (
-                    <option key={item} value={item}>
-                        {item}
-                    </option>
-                ))}
+                <select
+                    value={laboratorio}
+                    onChange={(e) => setLaboratorio(e.target.value)}
+                >
+                    <option value="">Todos os Laboratórios</option>
 
-            </select>
+                    {laboratorios.map(item => (
+                        <option key={item} value={item}>
+                            {item}
+                        </option>
+                    ))}
 
-            <select
-                value={categoria}
-                onChange={(e) => setCategoria(e.target.value)}
-            >
-                <option value="">Todas as Categorias</option>
+                </select>
 
-                {categorias.map(item => (
-                    <option key={item} value={item}>
-                        {item}
-                    </option>
-                ))}
+                <select
+                    value={categoria}
+                    onChange={(e) => setCategoria(e.target.value)}
+                >
+                    <option value="">Todas as Categorias</option>
 
-            </select>
+                    {categorias.map(item => (
+                        <option key={item} value={item}>
+                            {item}
+                        </option>
+                    ))}
 
-            <select
-                value={aba}
-                onChange={(e) => setAba(e.target.value)}
-            >
-                <option value="">Todas as Abas</option>
+                </select>
 
-                {abas.map(item => (
-                    <option key={item} value={item}>
-                        {item}
-                    </option>
-                ))}
+                <select
+                    value={aba}
+                    onChange={(e) => setAba(e.target.value)}
+                >
+                    <option value="">Todas as Abas</option>
 
-            </select>
+                    {abas.map(item => (
+                        <option key={item} value={item}>
+                            {item}
+                        </option>
+                    ))}
 
-            <div className="toolbar-info">
-                <strong>{total}</strong> produtos
+                </select>
+
+                <button className="btn btn-ghost" onClick={limparFiltros}>
+                    Limpar
+                </button>
+
             </div>
 
-            <button onClick={limparFiltros}>
-                Limpar
-            </button>
+            <div className="toolbar-acoes">
 
-            <button
-                onClick={() => exportarJSON(produtos)}
-            >
-                📤 Exportar JSON
-            </button>
+                <div className="toolbar-contagem">
+                    <strong>{total.toLocaleString("pt-BR")}</strong> produtos
+                </div>
 
-            <button
-                onClick={handlePublicar}
-                disabled={publicando}
-                title={`Publica o catálogo completo (${(produtosCompletos || produtos).length} produtos), ignorando filtros ativos na tela`}
-            >
-                {publicando ? "Publicando..." : "🌐 Publicar no site"}
-            </button>
+                <button
+                    className="btn btn-outline"
+                    onClick={() => exportarJSON(produtos)}
+                >
+                    📤 Exportar JSON
+                </button>
+
+                <button
+                    className="btn btn-primary"
+                    onClick={handlePublicar}
+                    disabled={publicando}
+                    title={`Publica o catálogo completo (${(produtosCompletos || produtos).length} produtos), ignorando filtros ativos na tela`}
+                >
+                    {publicando ? "Publicando..." : "🌐 Publicar no site"}
+                </button>
+
+            </div>
 
         </div>
 
