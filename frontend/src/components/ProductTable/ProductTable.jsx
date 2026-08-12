@@ -149,6 +149,73 @@ function CelulaDescricao({ produto, atualizarProduto }) {
 
 }
 
+// Editor de campo livre de uma linha (venda, promoção, estoque) -
+// clica, digita, Enter ou clique fora salva, Esc cancela.
+function CelulaTexto({ valor, onSalvar, formatarExibicao }) {
+
+    const valorTexto = valor == null ? "" : String(valor);
+
+    const [editando, setEditando] = useState(false);
+    const [valorEditado, setValorEditado] = useState(valorTexto);
+
+    function iniciarEdicao() {
+
+        setValorEditado(valorTexto);
+        setEditando(true);
+
+    }
+
+    function salvar() {
+
+        setEditando(false);
+
+        const novoValor = valorEditado.trim();
+
+        if (novoValor === valorTexto) return;
+
+        onSalvar(novoValor);
+
+    }
+
+    if (editando) {
+
+        return (
+
+            <input
+                className="celula-texto-input"
+                type="text"
+                value={valorEditado}
+                onChange={(e) => setValorEditado(e.target.value)}
+                onBlur={salvar}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter") salvar();
+                    else if (e.key === "Escape") setEditando(false);
+                }}
+                autoFocus
+            />
+
+        );
+
+    }
+
+    return (
+
+        <button
+            className="celula-texto"
+            onClick={iniciarEdicao}
+            title="Clique para editar"
+        >
+
+            <span>{formatarExibicao ? formatarExibicao(valorTexto) : (valorTexto || "—")}</span>
+
+            <span className="icone-editar">✏️</span>
+
+        </button>
+
+    );
+
+}
+
 // Editor de campos com vocabulário fechado (classe, categoria) - só
 // deixa escolher entre valores já cadastrados no catálogo importado,
 // não digitar um novo.
@@ -270,8 +337,6 @@ function ProductTable({
 
                             <th>Estoque</th>
 
-                            <th>Aba</th>
-
                             <th>Qualidade</th>
 
                             <th>Imagem</th>
@@ -328,22 +393,21 @@ function ProductTable({
 
                                     <td>
 
-                                        R$ {produto.precoVenda}
+                                        <CelulaTexto
+                                            valor={produto.precoVenda}
+                                            formatarExibicao={(v) => `R$ ${v}`}
+                                            onSalvar={(novoValor) => atualizarProduto({ ean: produto.ean, precoVenda: novoValor })}
+                                        />
 
                                     </td>
 
                                     <td>
 
-                                        {
-
-                                            produto.precoPromocao &&
-                                            produto.precoPromocao !== "0,00"
-
-                                                ? `🔥 R$ ${produto.precoPromocao}`
-
-                                                : "-"
-
-                                        }
+                                        <CelulaTexto
+                                            valor={produto.precoPromocao}
+                                            formatarExibicao={(v) => v && v !== "0,00" ? `🔥 R$ ${v}` : "-"}
+                                            onSalvar={(novoValor) => atualizarProduto({ ean: produto.ean, precoPromocao: novoValor })}
+                                        />
 
                                     </td>
 
@@ -355,13 +419,10 @@ function ProductTable({
 
                                     <td>
 
-                                        {produto.estoque}
-
-                                    </td>
-
-                                    <td>
-
-                                        {produto.aba}
+                                        <CelulaTexto
+                                            valor={produto.estoque}
+                                            onSalvar={(novoValor) => atualizarProduto({ ean: produto.ean, estoque: novoValor })}
+                                        />
 
                                     </td>
 

@@ -503,3 +503,69 @@ tr:hover .celula-selecao .icone-editar,
     max-width:160px;
 
 }
+
+.celula-texto{
+
+    display:inline-flex;
+
+    align-items:center;
+
+    gap:6px;
+
+    border:none;
+
+    background:transparent;
+
+    color:var(--text);
+
+    padding:2px 4px;
+
+    border-radius:6px;
+
+    font-size:inherit;
+    font-family:var(--font);
+
+    white-space:nowrap;
+
+}
+
+.celula-texto:hover{
+
+    background:var(--bg-soft);
+
+}
+
+.celula-texto .icone-editar{
+
+    font-size:11px;
+
+    opacity:0;
+
+    transition:opacity .15s var(--ease);
+
+}
+
+tr:hover .celula-texto .icone-editar,
+.celula-texto:hover .icone-editar{
+
+    opacity:1;
+
+}
+
+.celula-texto-input{
+
+    width:90px;
+
+    padding:6px 8px;
+
+    border:1px solid var(--primary);
+
+    border-radius:var(--radius-sm);
+
+    background:var(--bg-soft);
+    color:var(--text);
+
+    font-size:13px;
+    font-family:var(--font);
+
+}
