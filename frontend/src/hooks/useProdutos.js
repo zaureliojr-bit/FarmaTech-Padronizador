@@ -61,6 +61,18 @@ export function useProdutos() {
 
     }, [produtos]);
 
+    const classes = useMemo(() => {
+
+        return [...new Set(
+
+            produtos
+                .map(produto => produto.classe)
+                .filter(Boolean)
+
+        )].sort();
+
+    }, [produtos]);
+
     const abas = useMemo(() => {
 
         return [...new Set(
@@ -244,6 +256,8 @@ export function useProdutos() {
         laboratorios,
 
         categorias,
+
+        classes,
 
         abas,
 

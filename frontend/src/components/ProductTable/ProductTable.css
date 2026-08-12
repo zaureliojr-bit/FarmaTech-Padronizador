@@ -432,3 +432,69 @@ tr:hover .celula-descricao-toolbar,
     color:white;
 
 }
+
+.celula-selecao{
+
+    display:inline-flex;
+
+    align-items:center;
+
+    gap:6px;
+
+    border:none;
+
+    background:transparent;
+
+    color:var(--text);
+
+    padding:2px 4px;
+
+    border-radius:6px;
+
+    font-size:inherit;
+    font-family:var(--font);
+
+    white-space:nowrap;
+
+}
+
+.celula-selecao:hover{
+
+    background:var(--bg-soft);
+
+}
+
+.celula-selecao .icone-editar{
+
+    font-size:11px;
+
+    opacity:0;
+
+    transition:opacity .15s var(--ease);
+
+}
+
+tr:hover .celula-selecao .icone-editar,
+.celula-selecao:hover .icone-editar{
+
+    opacity:1;
+
+}
+
+.celula-selecao-input{
+
+    padding:6px 8px;
+
+    border:1px solid var(--primary);
+
+    border-radius:var(--radius-sm);
+
+    background:var(--bg-soft);
+    color:var(--text);
+
+    font-size:13px;
+    font-family:var(--font);
+
+    max-width:160px;
+
+}

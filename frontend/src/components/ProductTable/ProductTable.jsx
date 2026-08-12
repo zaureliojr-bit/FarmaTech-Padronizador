@@ -149,8 +149,70 @@ function CelulaDescricao({ produto, atualizarProduto }) {
 
 }
 
+// Editor de campos com vocabulário fechado (classe, categoria) - só
+// deixa escolher entre valores já cadastrados no catálogo importado,
+// não digitar um novo.
+function CelulaSelecao({ valor, opcoes, onSalvar }) {
+
+    const [editando, setEditando] = useState(false);
+
+    if (editando) {
+
+        // Garante que o valor atual apareça na lista mesmo se, por
+        // algum motivo, não estiver entre as opções coletadas.
+        const listaCompleta = valor && !opcoes.includes(valor)
+            ? [valor, ...opcoes]
+            : opcoes;
+
+        return (
+
+            <select
+                className="celula-selecao-input"
+                autoFocus
+                defaultValue={valor || ""}
+                onChange={(e) => {
+                    onSalvar(e.target.value);
+                    setEditando(false);
+                }}
+                onBlur={() => setEditando(false)}
+            >
+
+                <option value="">—</option>
+
+                {listaCompleta.map((opcao) => (
+                    <option key={opcao} value={opcao}>
+                        {opcao}
+                    </option>
+                ))}
+
+            </select>
+
+        );
+
+    }
+
+    return (
+
+        <button
+            className="celula-selecao"
+            onClick={() => setEditando(true)}
+            title="Clique para escolher outro valor"
+        >
+
+            <span>{valor || "—"}</span>
+
+            <span className="icone-editar">✏️</span>
+
+        </button>
+
+    );
+
+}
+
 function ProductTable({
     produtos,
+    categorias,
+    classes,
     atualizarProduto,
     mostrarToast
 }) {
@@ -242,9 +304,25 @@ function ProductTable({
 
                                     </td>
 
-                                    <td>{produto.classe}</td>
+                                    <td>
 
-                                    <td>{produto.categoria}</td>
+                                        <CelulaSelecao
+                                            valor={produto.classe}
+                                            opcoes={classes}
+                                            onSalvar={(novoValor) => atualizarProduto({ ean: produto.ean, classe: novoValor })}
+                                        />
+
+                                    </td>
+
+                                    <td>
+
+                                        <CelulaSelecao
+                                            valor={produto.categoria}
+                                            opcoes={categorias}
+                                            onSalvar={(novoValor) => atualizarProduto({ ean: produto.ean, categoria: novoValor })}
+                                        />
+
+                                    </td>
 
                                     <td>{produto.laboratorio}</td>
 

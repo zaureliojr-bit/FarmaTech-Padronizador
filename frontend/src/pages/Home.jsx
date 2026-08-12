@@ -36,6 +36,7 @@ function Home() {
 
         laboratorios,
         categorias,
+        classes,
         abas,
 
         produtos,
@@ -128,6 +129,8 @@ function Home() {
 
             <ProductTable
                 produtos={produtosPagina}
+                categorias={categorias}
+                classes={classes}
                 atualizarProduto={atualizarProduto}
                 mostrarToast={mostrarToast}
             />
