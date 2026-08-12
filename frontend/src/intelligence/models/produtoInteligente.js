@@ -40,6 +40,11 @@ export function criarProdutoInteligente(produto = {}) {
 
         aba: produto.__aba || "",
 
+        // Sobrescrita manual da descrição - vinda do usuário, persiste
+        // entre reimportações/reprocessamentos do pipeline (ver
+        // gerarDescricaoSite, que a usa no lugar da versão automática).
+        descricaoManual: produto.descricaoManual || "",
+
         // =====================================================
         // Inteligência
         // =====================================================

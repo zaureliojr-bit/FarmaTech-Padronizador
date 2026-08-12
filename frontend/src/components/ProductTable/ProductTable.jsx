@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import "./ProductTable.css";
 
 import ImageModal from "../ImageModal/ImageModal";
@@ -9,6 +11,141 @@ function classeQualidade(score) {
     if (score >= 50) return "qualidade-media";
 
     return "qualidade-baixa";
+
+}
+
+function CelulaDescricao({ produto, atualizarProduto }) {
+
+    const [editando, setEditando] = useState(false);
+    const [valor, setValor] = useState(produto.descricaoSite);
+
+    const editadaManualmente = !!produto.descricaoManual;
+
+    function iniciarEdicao() {
+
+        setValor(produto.descricaoSite);
+        setEditando(true);
+
+    }
+
+    function salvar() {
+
+        const novoValor = valor.trim();
+
+        // Vazio ou igual à versão automática = não é mais uma
+        // sobrescrita manual, volta a acompanhar o pipeline.
+        atualizarProduto({
+            ean: produto.ean,
+            descricaoManual: novoValor && novoValor !== produto.descricaoSiteAuto
+                ? novoValor
+                : ""
+        });
+
+        setEditando(false);
+
+    }
+
+    function cancelar() {
+
+        setEditando(false);
+
+    }
+
+    function reverterParaAutomatica() {
+
+        atualizarProduto({ ean: produto.ean, descricaoManual: "" });
+        setEditando(false);
+
+    }
+
+    if (editando) {
+
+        return (
+
+            <div className="celula-descricao-edicao">
+
+                <textarea
+                    value={valor}
+                    onChange={(e) => setValor(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            salvar();
+                        } else if (e.key === "Escape") {
+                            cancelar();
+                        }
+                    }}
+                    autoFocus
+                    rows={3}
+                />
+
+                <div className="celula-descricao-acoes">
+
+                    <button className="btn-mini btn-mini-salvar" onClick={salvar}>
+                        Salvar
+                    </button>
+
+                    <button className="btn-mini" onClick={cancelar}>
+                        Cancelar
+                    </button>
+
+                </div>
+
+            </div>
+
+        );
+
+    }
+
+    return (
+
+        <div className="celula-descricao">
+
+            <span>{produto.descricaoSite}</span>
+
+            <div className="celula-descricao-toolbar">
+
+                {
+
+                    editadaManualmente && (
+
+                        <span className="badge-manual" title="Descrição editada manualmente">
+                            ✏️ Manual
+                        </span>
+
+                    )
+
+                }
+
+                <button
+                    className="btn-editar-descricao"
+                    onClick={iniciarEdicao}
+                    title="Editar descrição"
+                >
+                    ✏️
+                </button>
+
+                {
+
+                    editadaManualmente && (
+
+                        <button
+                            className="btn-editar-descricao"
+                            onClick={reverterParaAutomatica}
+                            title="Reverter para a descrição automática"
+                        >
+                            ↺
+                        </button>
+
+                    )
+
+                }
+
+            </div>
+
+        </div>
+
+    );
 
 }
 
@@ -90,13 +227,20 @@ function ProductTable({
                             produtos.map((produto, index) => (
 
                                 <tr key={`${produto.codigo}-${produto.aba}-${index}`}>
-                                
+
 
                                     <td>{produto.codigo}</td>
 
                                     <td>{produto.ean}</td>
 
-                                    <td>{produto.descricaoSite}</td>
+                                    <td className="td-descricao">
+
+                                        <CelulaDescricao
+                                            produto={produto}
+                                            atualizarProduto={atualizarProduto}
+                                        />
+
+                                    </td>
 
                                     <td>{produto.classe}</td>
 
