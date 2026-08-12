@@ -46,7 +46,12 @@ table{
 
     width:100%;
 
-    border-collapse:collapse;
+    /* separate (não collapse) - no Safari/iOS, position:sticky em
+       td/th dentro de uma tabela com border-collapse:collapse não
+       forma um contexto de empilhamento correto, e as colunas fixas
+       (Imagem/Ações) ficam sobrepondo o conteúdo ao rolar de lado. */
+    border-collapse:separate;
+    border-spacing:0;
 
 }
 
