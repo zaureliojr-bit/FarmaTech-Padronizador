@@ -130,7 +130,7 @@ function Home() {
             <Pagination
                 paginaAtual={paginaAtual}
                 totalPaginas={totalPaginas}
-                setPaginaAtual={setPaginaAtual}
+                mudarPagina={setPaginaAtual}
             />
 
             <Toast
