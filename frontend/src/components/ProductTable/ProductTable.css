@@ -438,6 +438,24 @@ tr:hover .celula-descricao-toolbar,
 
 }
 
+.celula-selecao-wrap{
+
+    display:inline-flex;
+
+    align-items:center;
+
+    gap:4px;
+
+}
+
+.badge-aviso{
+
+    font-size:12px;
+
+    cursor:help;
+
+}
+
 .celula-selecao{
 
     display:inline-flex;

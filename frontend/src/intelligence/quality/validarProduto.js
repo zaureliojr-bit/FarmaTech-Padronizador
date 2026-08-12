@@ -8,6 +8,7 @@
 export function validarProduto(produto) {
 
     produto.erros = [];
+    produto.avisos = [];
 
     if (!produto.descricaoSite) {
 
@@ -24,6 +25,13 @@ export function validarProduto(produto) {
     if (!produto.categoria) {
 
         produto.erros.push("Categoria não identificada.");
+
+    } else if (produto.familia === "outros") {
+
+        // Não é um erro - "Outros" existe no site - mas vale avisar,
+        // porque às vezes é só um erro de digitação na planilha
+        // (ex: "GENÉRICO" com acento não bate com "GENERICO").
+        produto.avisos.push(`Categoria "${produto.categoria}" não reconhecida pelo site - vai cair em "Outros".`);
 
     }
 
