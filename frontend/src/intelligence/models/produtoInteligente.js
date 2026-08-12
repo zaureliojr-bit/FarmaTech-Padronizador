@@ -78,13 +78,15 @@ export function criarProdutoInteligente(produto = {}) {
         // Comercial
         // =====================================================
 
-        precoVenda: produto.precoVenda || "",
+        // ?? (não ||) - preço/estoque igual a 0 é um valor real, não
+        // "sem valor". Com ||, precoVenda=0 virava "" e desaparecia.
+        precoVenda: produto.precoVenda ?? "",
 
-        precoPromocao: produto.precoPromocao || "",
+        precoPromocao: produto.precoPromocao ?? "",
 
-        precoCusto: produto.precoCusto || "",
+        precoCusto: produto.precoCusto ?? "",
 
-        estoque: produto.estoque || "",
+        estoque: produto.estoque ?? "",
 
         // =====================================================
         // Imagens
