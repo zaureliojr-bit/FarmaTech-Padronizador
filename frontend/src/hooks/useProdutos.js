@@ -66,7 +66,7 @@ export function useProdutos() {
         return [...new Set(
 
             produtos
-                .map(produto => produto.__aba)
+                .map(produto => produto.aba)
                 .filter(Boolean)
 
         )].sort();
@@ -115,7 +115,7 @@ export function useProdutos() {
 
                 !aba ||
 
-                produto.__aba === aba;
+                produto.aba === aba;
 
             return (
 

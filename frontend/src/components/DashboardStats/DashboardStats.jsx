@@ -24,7 +24,7 @@ function DashboardStats({ produtos }) {
 
     const totalAbas = new Set(
         produtos
-            .map(produto => produto.__aba)
+            .map(produto => produto.aba)
             .filter(Boolean)
     ).size;
 
@@ -33,37 +33,43 @@ function DashboardStats({ produtos }) {
         {
             titulo: "Produtos",
             valor: totalProdutos,
-            icone: "📦"
+            icone: "📦",
+            cor: "azul"
         },
 
         {
             titulo: "Imagens",
             valor: imagensSalvas,
-            icone: "🖼️"
+            icone: "🖼️",
+            cor: "verde"
         },
 
         {
             titulo: "Sem imagem",
             valor: semImagem,
-            icone: "🚫"
+            icone: "🚫",
+            cor: "vermelho"
         },
 
         {
             titulo: "Laboratórios",
             valor: totalLaboratorios,
-            icone: "🏭"
+            icone: "🏭",
+            cor: "roxo"
         },
 
         {
             titulo: "Categorias",
             valor: totalCategorias,
-            icone: "📂"
+            icone: "📂",
+            cor: "amarelo"
         },
 
         {
             titulo: "Abas",
             valor: totalAbas,
-            icone: "📑"
+            icone: "📑",
+            cor: "ciano"
         }
 
     ];
@@ -78,7 +84,7 @@ function DashboardStats({ produtos }) {
 
                     <div
                         key={card.titulo}
-                        className="dashboard-card"
+                        className={`dashboard-card cor-${card.cor}`}
                     >
 
                         <span className="dashboard-icon">
@@ -87,17 +93,21 @@ function DashboardStats({ produtos }) {
 
                         </span>
 
-                        <span className="dashboard-title">
+                        <div className="dashboard-texto">
 
-                            {card.titulo}
+                            <strong className="dashboard-value">
 
-                        </span>
+                                {card.valor.toLocaleString("pt-BR")}
 
-                        <strong className="dashboard-value">
+                            </strong>
 
-                            {card.valor.toLocaleString("pt-BR")}
+                            <span className="dashboard-title">
 
-                        </strong>
+                                {card.titulo}
+
+                            </span>
+
+                        </div>
 
                     </div>
 

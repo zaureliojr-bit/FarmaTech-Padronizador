@@ -1,10 +1,12 @@
 .table-container{
 
-    margin-top:40px;
+    margin-top:24px;
 
-    background:#1F2937;
+    background:var(--card);
 
-    border-radius:12px;
+    border:1px solid var(--card-border);
+
+    border-radius:var(--radius);
 
     padding:20px;
 
@@ -23,14 +25,14 @@
 
 .table-container::-webkit-scrollbar-thumb{
 
-    background:#374151;
+    background:var(--card-border);
     border-radius:6px;
 
 }
 
 .table-container::-webkit-scrollbar-thumb:hover{
 
-    background:#475569;
+    background:var(--text3);
 
 }
 
@@ -50,13 +52,13 @@ table{
 
 th{
 
-    background:#111827;
+    background:var(--bg-soft);
 
     padding:12px;
 
     text-align:left;
 
-    border-bottom:1px solid #374151;
+    border-bottom:1px solid var(--card-border);
 
     position:sticky;
     top:0;
@@ -70,19 +72,19 @@ td{
 
     padding:10px;
 
-    border-bottom:1px solid #374151;
+    border-bottom:1px solid var(--card-border);
 
 }
 
 tbody tr:nth-child(even){
 
-    background:#242e40;
+    background:rgba(255,255,255,.02);
 
 }
 
 tr:hover{
 
-    background:#273549;
+    background:var(--card-hover);
 
 }
 
@@ -92,7 +94,7 @@ thead th:nth-last-child(-n+2){
 
     position:sticky;
     right:0;
-    background:#1F2937;
+    background:var(--card);
     z-index:1;
 
 }
@@ -119,7 +121,7 @@ tbody td:nth-last-child(2){
 
 tbody tr:hover td:nth-last-child(-n+2){
 
-    background:#273549;
+    background:var(--card-hover);
 
 }
 
@@ -127,7 +129,7 @@ tbody tr:hover td:nth-last-child(-n+2){
 
     margin-top:30px;
 
-    color:#94A3B8;
+    color:var(--text2);
 
 }
 .btn-imagem{
@@ -180,7 +182,7 @@ tbody tr:hover td:nth-last-child(-n+2){
 
     border-radius:8px;
 
-    background:#2c3446;
+    background:var(--bg-soft);
 
     display:flex;
     align-items:center;
@@ -250,7 +252,7 @@ tbody tr:hover td:nth-last-child(-n+2){
 
 .status-sem{
 
-    color:#94A3B8;
+    color:var(--text2);
 
     font-size:12px;
 
@@ -267,7 +269,7 @@ tbody tr:hover td:nth-last-child(-n+2){
 
     border-radius:8px;
 
-    border:1px solid #3d4658;
+    border:1px solid var(--card-border);
 
     transition:.2s;
 
