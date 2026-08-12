@@ -219,7 +219,7 @@ function CelulaTexto({ valor, onSalvar, formatarExibicao }) {
 // Editor de campos com vocabulário fechado (classe, categoria) - só
 // deixa escolher entre valores já cadastrados no catálogo importado,
 // não digitar um novo.
-function CelulaSelecao({ valor, opcoes, onSalvar }) {
+function CelulaSelecao({ valor, opcoes, onSalvar, aviso }) {
 
     const [editando, setEditando] = useState(false);
 
@@ -260,17 +260,33 @@ function CelulaSelecao({ valor, opcoes, onSalvar }) {
 
     return (
 
-        <button
-            className="celula-selecao"
-            onClick={() => setEditando(true)}
-            title="Clique para escolher outro valor"
-        >
+        <div className="celula-selecao-wrap">
 
-            <span>{valor || "—"}</span>
+            <button
+                className="celula-selecao"
+                onClick={() => setEditando(true)}
+                title="Clique para escolher outro valor"
+            >
 
-            <span className="icone-editar">✏️</span>
+                <span>{valor || "—"}</span>
 
-        </button>
+                <span className="icone-editar">✏️</span>
+
+            </button>
+
+            {
+
+                aviso && (
+
+                    <span className="badge-aviso" title={aviso}>
+                        ⚠️
+                    </span>
+
+                )
+
+            }
+
+        </div>
 
     );
 
@@ -385,6 +401,11 @@ function ProductTable({
                                             valor={produto.categoria}
                                             opcoes={categorias}
                                             onSalvar={(novoValor) => atualizarProduto({ ean: produto.ean, categoria: novoValor })}
+                                            aviso={
+                                                produto.categoria && produto.familia === "outros"
+                                                    ? `Categoria fora das famílias do site - vai cair em "Outros".`
+                                                    : null
+                                            }
                                         />
 
                                     </td>

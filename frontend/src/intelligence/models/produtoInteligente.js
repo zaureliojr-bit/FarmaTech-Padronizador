@@ -60,6 +60,10 @@ export function criarProdutoInteligente(produto = {}) {
 
         categoria: "",
 
+        familia: "",
+
+        familiaNome: "",
+
         linha: "",
 
         tamanho: "",
