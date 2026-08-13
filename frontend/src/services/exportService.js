@@ -23,7 +23,12 @@ export async function exportarJSON(produtos) {
 
     const produtosExport = await Promise.all(
 
-        produtos.map(async (produto) => {
+        produtos.map(async (produtoCompleto) => {
+
+            // precoCusto é informação comercial interna (margem) -
+            // não deve sair da máquina do farmacêutico em nenhum
+            // export, nem no de backup/uso interno.
+            const { precoCusto, ...produto } = produtoCompleto;
 
             if (!produto.imagem?.startsWith("blob:")) return produto;
 
