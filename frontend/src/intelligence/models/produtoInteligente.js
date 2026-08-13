@@ -93,6 +93,29 @@ export function criarProdutoInteligente(produto = {}) {
         estoque: produto.estoque ?? "",
 
         // =====================================================
+        // CMED (tarja, exigência de receita, preço máximo legal)
+        // =====================================================
+        // Preenchidos por padronizarComCmed sobre o produto bruto, antes
+        // do pipeline rodar - preservados aqui do mesmo jeito que
+        // imagem/descricaoManual, senão desapareceriam a cada reprocessamento.
+
+        tarja: produto.tarja || "",
+
+        exigeReceita: !!produto.exigeReceita,
+
+        substancia: produto.substancia || "",
+
+        classeTerapeutica: produto.classeTerapeutica || "",
+
+        tipoProduto: produto.tipoProduto || "",
+
+        registroAnvisa: produto.registroAnvisa || "",
+
+        pmc: produto.pmc ?? "",
+
+        acimaDoPmc: !!produto.acimaDoPmc,
+
+        // =====================================================
         // Imagens
         // =====================================================
         // Preserva imagem já resolvida (busca anterior ou

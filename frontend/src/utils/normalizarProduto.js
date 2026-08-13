@@ -32,6 +32,23 @@ export function normalizarProduto(produto) {
 
     statusImagem: "sem",
 
+    // preenchidos pelo módulo da CMED, quando a lista é cruzada
+    tarja: "",
+
+    exigeReceita: false,
+
+    substancia: "",
+
+    classeTerapeutica: "",
+
+    tipoProduto: "",
+
+    registroAnvisa: "",
+
+    pmc: "",
+
+    acimaDoPmc: false,
+
     __aba: produto.__aba || ""
 
 };

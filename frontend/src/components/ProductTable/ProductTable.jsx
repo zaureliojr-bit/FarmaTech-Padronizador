@@ -107,6 +107,36 @@ function CelulaDescricao({ produto, atualizarProduto }) {
 
                 {
 
+                    produto.exigeReceita && (
+
+                        <span
+                            className="badge-receita"
+                            title={`Exige receita (tarja ${produto.tarja || "?"}, pela CMED)`}
+                        >
+                            🔴 Receita
+                        </span>
+
+                    )
+
+                }
+
+                {
+
+                    produto.acimaDoPmc && (
+
+                        <span
+                            className="badge-pmc"
+                            title="Preço acima do máximo legal (PMC) - viola a Lei 10.742/2003"
+                        >
+                            💰 Acima do PMC
+                        </span>
+
+                    )
+
+                }
+
+                {
+
                     editadaManualmente && (
 
                         <span className="badge-manual" title="Descrição editada manualmente">

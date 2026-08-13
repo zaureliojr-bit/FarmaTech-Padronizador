@@ -2,7 +2,11 @@
 
     display:grid;
 
-    grid-template-columns:repeat(3,1fr);
+    /* minmax(0,1fr) e não 1fr: "1fr" quer dizer minmax(auto,1fr), e esse
+       "auto" é o tamanho do conteúdo. Um nome de arquivo comprido virava
+       piso da coluna e empurrava a grade toda pra fora - a página inteira
+       rolava pro lado no celular. Com o mínimo em 0, quem cede é a coluna. */
+    grid-template-columns:repeat(3,minmax(0,1fr));
 
     gap:14px;
 
@@ -26,6 +30,10 @@
 
     gap:6px;
 
+    /* item de grade nasce com min-width:auto, que é o mesmo piso de novo:
+       sem isto o card estoura a coluna que acabou de ser liberada acima */
+    min-width:0;
+
 }
 
 .card span{
@@ -41,6 +49,10 @@
     font-size:20px;
 
     color:var(--text);
+
+    /* nome de arquivo não tem espaço onde quebrar: sem isto ele sai por
+       cima da borda do card em vez de passar pra linha de baixo */
+    overflow-wrap:anywhere;
 
 }
 
