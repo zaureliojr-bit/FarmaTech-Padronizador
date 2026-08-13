@@ -1,29 +1,6 @@
-const DB_NAME = "farmatech";
-const DB_VERSION = 1;
-const STORE = "imagens";
+import { abrirBanco, STORE_IMAGENS as STORE } from "./db";
 
-function abrirDB() {
-
-    return new Promise((resolve, reject) => {
-
-        const requisicao = indexedDB.open(DB_NAME, DB_VERSION);
-
-        requisicao.onupgradeneeded = () => {
-
-            const db = requisicao.result;
-
-            if (!db.objectStoreNames.contains(STORE)) {
-                db.createObjectStore(STORE, { keyPath: "ean" });
-            }
-
-        };
-
-        requisicao.onsuccess = () => resolve(requisicao.result);
-        requisicao.onerror = () => reject(requisicao.error);
-
-    });
-
-}
+const abrirDB = abrirBanco;
 
 // Baixa a imagem como blob. Retorna null se o site de origem não
 // liberar CORS para leitura dos bytes (nesse caso só dá pra exibir

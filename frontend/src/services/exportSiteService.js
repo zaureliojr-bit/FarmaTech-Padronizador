@@ -25,7 +25,7 @@ function resolverImagemSite(produto, imagensLocais) {
 // descricaoPesquisa/statusImagem/reajuste etc.
 function montarProdutoSite(produto, imagensLocais) {
 
-    return {
+    const base = {
         codigo: produto.codigo,
         ean: produto.ean,
         descricao: produto.descricaoSite || produto.descricaoOriginal || "",
@@ -37,6 +37,21 @@ function montarProdutoSite(produto, imagensLocais) {
         estoque: produto.estoque || 0,
         imagem: resolverImagemSite(produto, imagensLocais)
     };
+
+    // Vindos da CMED. tarja/exigeReceita são o que corrige quais produtos
+    // exigem receita de verdade (a categoria do PDV sozinha erra bastante
+    // esse número) - só saem quando têm conteúdo, porque a maior parte do
+    // catálogo não é medicamento e nunca vai ter tarja.
+    //
+    // pmc e acimaDoPmc ficam de fora de propósito: ao lado do preço de
+    // venda, o teto legal vira comparação de margem em cada card do site.
+    // Fica só no padronizador.
+    if (produto.tarja) base.tarja = produto.tarja;
+    if (produto.exigeReceita) base.exigeReceita = true;
+    if (produto.substancia) base.substancia = produto.substancia;
+    if (produto.registroAnvisa) base.registroAnvisa = produto.registroAnvisa;
+
+    return base;
 
 }
 

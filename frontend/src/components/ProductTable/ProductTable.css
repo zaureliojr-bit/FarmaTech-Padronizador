@@ -312,7 +312,9 @@ tbody tr:hover td:nth-last-child(-n+2){
 }
 
 tr:hover .celula-descricao-toolbar,
-.celula-descricao-toolbar:has(.badge-manual){
+.celula-descricao-toolbar:has(.badge-manual),
+.celula-descricao-toolbar:has(.badge-receita),
+.celula-descricao-toolbar:has(.badge-pmc){
 
     opacity:1;
 
@@ -350,6 +352,38 @@ tr:hover .celula-descricao-toolbar,
     color:var(--accent-purple);
 
     background:rgba(167,139,250,.14);
+
+    padding:2px 8px;
+
+    border-radius:999px;
+
+    white-space:nowrap;
+
+}
+
+.badge-receita{
+
+    font-size:11px;
+
+    color:var(--danger);
+
+    background:var(--danger-soft);
+
+    padding:2px 8px;
+
+    border-radius:999px;
+
+    white-space:nowrap;
+
+}
+
+.badge-pmc{
+
+    font-size:11px;
+
+    color:var(--warning);
+
+    background:var(--warning-soft);
 
     padding:2px 8px;
 

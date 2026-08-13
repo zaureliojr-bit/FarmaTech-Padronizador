@@ -1,0 +1,280 @@
+.cmed-box{
+
+    margin:24px 0;
+    padding:18px 20px;
+
+    background:var(--card);
+    border:1px solid var(--card-border);
+
+    border-radius:var(--radius);
+
+}
+
+.cmed-cabecalho{
+
+    display:flex;
+
+    align-items:baseline;
+
+    gap:12px;
+
+    flex-wrap:wrap;
+
+    margin-bottom:10px;
+
+}
+
+.cmed-cabecalho h2{
+
+    font-size:16px;
+
+    color:var(--text);
+
+}
+
+.cmed-fonte{
+
+    font-size:13px;
+
+    color:var(--text2);
+
+}
+
+.cmed-ajuda{
+
+    font-size:14px;
+
+    color:var(--text2);
+
+    line-height:1.5;
+
+    margin-bottom:14px;
+
+}
+
+.cmed-ajuda a{
+
+    color:var(--primary);
+
+}
+
+.cmed-acoes{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:16px;
+
+    flex-wrap:wrap;
+
+}
+
+.cmed-arquivo{
+
+    position:relative;
+
+    cursor:pointer;
+
+}
+
+.cmed-arquivo input[type="file"]{
+
+    position:absolute;
+
+    inset:0;
+
+    opacity:0;
+
+    cursor:pointer;
+
+}
+
+.cmed-opcao{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:6px;
+
+    font-size:13px;
+
+    color:var(--text2);
+
+    cursor:pointer;
+
+}
+
+.cmed-erro{
+
+    margin-top:10px;
+
+    color:var(--danger);
+
+    font-size:13px;
+
+}
+
+.cmed-relatorio{
+
+    margin-top:18px;
+
+    padding-top:16px;
+
+    border-top:1px solid var(--card-border);
+
+}
+
+.cmed-numeros{
+
+    display:grid;
+
+    grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
+
+    gap:12px;
+
+    margin-bottom:14px;
+
+}
+
+.cmed-numero{
+
+    padding:14px 16px;
+
+    border-radius:var(--radius-sm);
+
+    background:var(--bg-soft);
+    border:1px solid var(--card-border);
+
+    border-left:3px solid var(--card-border);
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:4px;
+
+}
+
+.cmed-numero span{
+
+    font-size:.8rem;
+
+    color:var(--text2);
+
+}
+
+.cmed-numero strong{
+
+    font-size:1.3rem;
+
+    color:var(--text);
+
+}
+
+.cmed-numero-verde{ border-left-color:var(--success); }
+.cmed-numero-amarelo{ border-left-color:var(--warning); }
+.cmed-numero-vermelho{ border-left-color:var(--danger); }
+
+.cmed-detalhe{
+
+    font-size:13px;
+
+    color:var(--text2);
+
+    line-height:1.5;
+
+    margin-bottom:8px;
+
+}
+
+.cmed-aviso{
+
+    color:var(--warning);
+
+}
+
+.cmed-alerta{
+
+    margin:14px 0;
+
+    padding:14px 16px;
+
+    border-radius:var(--radius-sm);
+
+    background:var(--danger-soft);
+
+    border:1px solid rgba(248,113,113,.35);
+
+}
+
+.cmed-alerta h3{
+
+    font-size:14px;
+
+    color:var(--danger);
+
+    margin-bottom:6px;
+
+}
+
+.cmed-alerta p{
+
+    font-size:13px;
+
+    color:var(--text2);
+
+    margin-bottom:10px;
+
+}
+
+.cmed-tabela-wrap{
+
+    overflow-x:auto;
+
+}
+
+.cmed-alerta table{
+
+    width:100%;
+
+    border-collapse:separate;
+    border-spacing:0;
+
+    font-size:13px;
+
+}
+
+.cmed-alerta th{
+
+    text-align:left;
+
+    padding:6px 10px;
+
+    color:var(--text2);
+
+    font-weight:600;
+
+    border-bottom:1px solid var(--card-border);
+
+    white-space:nowrap;
+
+}
+
+.cmed-alerta td{
+
+    padding:6px 10px;
+
+    border-bottom:1px solid var(--card-border);
+
+    white-space:nowrap;
+
+}
+
+.cmed-excesso{
+
+    color:var(--danger);
+    font-weight:700;
+
+}

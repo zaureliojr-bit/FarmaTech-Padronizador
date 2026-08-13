@@ -25,10 +25,13 @@ export async function exportarJSON(produtos) {
 
         produtos.map(async (produtoCompleto) => {
 
-            // precoCusto é informação comercial interna (margem) -
-            // não deve sair da máquina do farmacêutico em nenhum
-            // export, nem no de backup/uso interno.
-            const { precoCusto, ...produto } = produtoCompleto;
+            // precoCusto é informação comercial interna (margem) - não
+            // deve sair da máquina do farmacêutico em nenhum export, nem
+            // no de backup/uso interno. pmc (teto legal da CMED) some
+            // pelo mesmo motivo: ao lado do preço de venda, vira
+            // comparação de margem. acimaDoPmc (o alerta em si) some
+            // junto, já que só faz sentido ao lado do pmc.
+            const { precoCusto, pmc, acimaDoPmc, ...produto } = produtoCompleto;
 
             if (!produto.imagem?.startsWith("blob:")) return produto;
 

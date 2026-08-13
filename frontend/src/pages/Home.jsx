@@ -3,6 +3,7 @@ import { useState } from "react";
 import Header from "../components/Header/Header";
 import ImportBox from "../components/ImportBox/ImportBox";
 import ImportSummary from "../components/ImportSummary/ImportSummary";
+import CmedBox from "../components/CmedBox/CmedBox";
 import Toolbar from "../components/Toolbar/Toolbar";
 import ProductTable from "../components/ProductTable/ProductTable";
 import Pagination from "../components/Pagination/Pagination";
@@ -48,7 +49,17 @@ function Home() {
         totalPaginas,
 
         limparFiltros,
-        atualizarProduto
+        atualizarProduto,
+
+        indiceCmed,
+        relatorioCmed,
+        carregandoCmed,
+        erroCmed,
+        carregarListaCmed,
+        corrigirClasseCmed,
+        setCorrigirClasseCmed,
+        corrigirLaboratorioCmed,
+        setCorrigirLaboratorioCmed
 
     } = useProdutos();
 
@@ -78,6 +89,19 @@ function Home() {
 
             <ImportSummary
                 resumo={resultadoImportacao}
+            />
+
+            <CmedBox
+                indice={indiceCmed}
+                relatorio={relatorioCmed}
+                carregando={carregandoCmed}
+                erro={erroCmed}
+                carregarLista={carregarListaCmed}
+                corrigirClasse={corrigirClasseCmed}
+                setCorrigirClasse={setCorrigirClasseCmed}
+                corrigirLaboratorio={corrigirLaboratorioCmed}
+                setCorrigirLaboratorio={setCorrigirLaboratorioCmed}
+                mostrarToast={mostrarToast}
             />
             {
 
