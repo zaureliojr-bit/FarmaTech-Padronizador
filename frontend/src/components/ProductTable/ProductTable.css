@@ -313,7 +313,8 @@ tbody tr:hover td:nth-last-child(-n+2){
 
 tr:hover .celula-descricao-toolbar,
 .celula-descricao-toolbar:has(.badge-manual),
-.celula-descricao-toolbar:has(.badge-receita),
+.celula-descricao-toolbar:has(.badge-bloqueio),
+.celula-descricao-toolbar:has(.badge-remoto),
 .celula-descricao-toolbar:has(.badge-pmc){
 
     opacity:1;
@@ -361,13 +362,29 @@ tr:hover .celula-descricao-toolbar,
 
 }
 
-.badge-receita{
+.badge-bloqueio{
 
     font-size:11px;
 
     color:var(--danger);
 
     background:var(--danger-soft);
+
+    padding:2px 8px;
+
+    border-radius:999px;
+
+    white-space:nowrap;
+
+}
+
+.badge-remoto{
+
+    font-size:11px;
+
+    color:var(--accent-cyan);
+
+    background:rgba(34,211,238,.14);
 
     padding:2px 8px;
 

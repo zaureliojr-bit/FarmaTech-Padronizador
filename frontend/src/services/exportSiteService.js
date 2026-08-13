@@ -38,16 +38,25 @@ function montarProdutoSite(produto, imagensLocais) {
         imagem: resolverImagemSite(produto, imagensLocais)
     };
 
-    // Vindos da CMED. tarja/exigeReceita são o que corrige quais produtos
-    // exigem receita de verdade (a categoria do PDV sozinha erra bastante
-    // esse número) - só saem quando têm conteúdo, porque a maior parte do
-    // catálogo não é medicamento e nunca vai ter tarja.
+    // Vindos da CMED e da Portaria 344/1998. tarja é só informativo (mostra
+    // "venda sob prescrição" no card, não bloqueia nada - tem antibiótico e
+    // anticoncepcional que são tarja vermelha e vendem livre). Quem manda
+    // no carrinho é bloqueioPresencial/receitaRemota:
+    //   bloqueioPresencial - listas A/B, retenção sempre presencial, não
+    //   entra no carrinho.
+    //   receitaRemota - listas C, entra no carrinho normal, mas o
+    //   checkout cobra confirmação do envio da receita antes de despachar.
+    // Só saem quando têm conteúdo, porque a maior parte do catálogo não é
+    // medicamento e nunca vai ter nenhum destes campos.
     //
     // pmc e acimaDoPmc ficam de fora de propósito: ao lado do preço de
     // venda, o teto legal vira comparação de margem em cada card do site.
     // Fica só no padronizador.
     if (produto.tarja) base.tarja = produto.tarja;
-    if (produto.exigeReceita) base.exigeReceita = true;
+    if (produto.bloqueioPresencial) base.bloqueioPresencial = true;
+    if (produto.receitaRemota) base.receitaRemota = true;
+    if (produto.controleEspecial) base.controleEspecial = produto.controleEspecial;
+    if (produto.tipoReceita) base.tipoReceita = produto.tipoReceita;
     if (produto.substancia) base.substancia = produto.substancia;
     if (produto.registroAnvisa) base.registroAnvisa = produto.registroAnvisa;
 
