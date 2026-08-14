@@ -362,6 +362,7 @@ function ProductTable({
 
         modoManual,
         linkBusca,
+        origemAtual,
         adicionarImagemManual
 
     } = useImagem();
@@ -613,6 +614,8 @@ function ProductTable({
                 modoManual={modoManual}
 
                 linkBusca={linkBusca}
+
+                origemAtual={origemAtual}
 
                 adicionarImagemManual={adicionarImagemManual}
 

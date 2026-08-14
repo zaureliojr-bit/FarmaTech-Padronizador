@@ -21,6 +21,10 @@ export function useImagem() {
 
     const [linkBusca, setLinkBusca] = useState("");
 
+    // De onde veio a imagem atualmente selecionada (cosmos/serper/manual)
+    // - vai junto quando salvar, só pra registro no banco de imagens.
+    const [origemAtual, setOrigemAtual] = useState("");
+
     async function abrirModal(produto) {
 
         setProdutoSelecionado(produto);
@@ -28,6 +32,7 @@ export function useImagem() {
         setErro(null);
         setModoManual(false);
         setLinkBusca("");
+        setOrigemAtual("");
         setModalAberto(true);
 
         // Produto já resolvido: só exibe a imagem salva, sem gastar consulta.
@@ -49,6 +54,7 @@ export function useImagem() {
         setImagens(resultado.imagens);
         setModoManual(resultado.origem === "manual");
         setLinkBusca(resultado.linkBusca || "");
+        setOrigemAtual(resultado.origem);
 
         setLoading(false);
 
@@ -65,6 +71,7 @@ export function useImagem() {
         setLoading(false);
         setModoManual(false);
         setLinkBusca("");
+        setOrigemAtual("");
 
     }
 
@@ -87,6 +94,7 @@ export function useImagem() {
 
         setImagemSelecionada(url);
         setModoManual(false);
+        setOrigemAtual("manual");
 
     }
 
@@ -111,6 +119,7 @@ export function useImagem() {
 
         modoManual,
         linkBusca,
+        origemAtual,
 
         adicionarImagemManual
 

@@ -15,11 +15,13 @@ function ImageModal({
     mostrarToast,
     modoManual,
     linkBusca,
+    origemAtual,
     adicionarImagemManual
 }) {
 
     const [urlManual, setUrlManual] = useState("");
     const [arrastando, setArrastando] = useState(false);
+    const [salvando, setSalvando] = useState(false);
 
     if (!aberto) return null;
 
@@ -30,10 +32,14 @@ function ImageModal({
             return;
         }
 
-        const resultado = await salvarImagem(produto, imagemSelecionada);
+        setSalvando(true);
+
+        const resultado = await salvarImagem(produto, imagemSelecionada, origemAtual);
+
+        setSalvando(false);
 
         if (!resultado.sucesso) {
-            mostrarToast("Erro ao salvar imagem.", "erro");
+            mostrarToast(resultado.mensagem || "Erro ao salvar imagem.", "erro");
             return;
         }
 
@@ -183,9 +189,9 @@ function ImageModal({
                 <div className="acoes">
                     <button
                         onClick={salvar}
-                        disabled={!imagemSelecionada}
+                        disabled={!imagemSelecionada || salvando}
                     >
-                        💾 Salvar imagem
+                        {salvando ? "Salvando..." : "💾 Salvar imagem"}
                     </button>
 
                     <button onClick={fechar}>

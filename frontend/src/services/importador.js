@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import { encontrarCabecalho } from "../utils/detectarCabecalho";
 import { normalizarProduto } from "../utils/normalizarProduto";
-import { obterImagensLocais } from "./imagemDB";
+import { buscarImagensHospedadas } from "./imagemHostingService";
 
 export async function importarPlanilha(arquivo) {
 
@@ -60,25 +60,23 @@ export async function importarPlanilha(arquivo) {
 
                 });
 
-                // Reaproveita imagens já baixadas em sessões anteriores
-                // (guardadas no IndexedDB por EAN), sem baixar de novo.
+                // Reaproveita imagens já hospedadas (R2, indexadas por
+                // EAN no D1), sem buscar/salvar de novo.
                 const eans = produtos
                     .map((produto) => produto.ean)
                     .filter(Boolean);
 
-                const imagensLocais = await obterImagensLocais(eans);
+                const imagensHospedadas = await buscarImagensHospedadas(eans);
 
                 produtos = produtos.map((produto) => {
 
-                    const local = imagensLocais.get(produto.ean);
+                    const hospedada = imagensHospedadas.get(produto.ean);
 
-                    if (!local) return produto;
+                    if (!hospedada) return produto;
 
                     return {
                         ...produto,
-                        imagem: local.blob
-                            ? URL.createObjectURL(local.blob)
-                            : local.urlOriginal,
+                        imagem: hospedada.url,
                         statusImagem: "salva"
                     };
 

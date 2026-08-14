@@ -1,15 +1,15 @@
-import { obterImagensLocais } from "./imagemDB";
+import { buscarImagensHospedadas } from "./imagemHostingService";
 
-// A imagem em produto.imagem pode ser um blob: (URL de objeto, só
-// existe durante a sessão atual do navegador) - inútil num catálogo
-// público. Preferimos sempre a urlOriginal salva no IndexedDB por EAN;
-// se não houver, só usamos produto.imagem quando já for um link
-// remoto de verdade.
-function resolverImagemSite(produto, imagensLocais) {
+// A imagem fica hospedada no R2 (ver imagens-proxy/), servida por um
+// link estável da própria farmácia - não depende do site de origem
+// (Cosmos/Serper/manual) continuar no ar. produto.imagem só entra como
+// reserva se por algum motivo o produto não estiver no índice do D1
+// ainda (ex.: imagem escolhida numa sessão antes desta migração).
+function resolverImagemSite(produto, imagensHospedadas) {
 
-    const local = imagensLocais.get(produto.ean);
+    const hospedada = imagensHospedadas.get(produto.ean);
 
-    if (local?.urlOriginal) return local.urlOriginal;
+    if (hospedada?.url) return hospedada.url;
 
     if (produto.imagem && !produto.imagem.startsWith("blob:")) {
         return produto.imagem;
@@ -23,7 +23,7 @@ function resolverImagemSite(produto, imagensLocais) {
 // espera - ver publish-proxy/README.md e a análise no histórico do
 // projeto. Só os campos que o site realmente lê; nada de
 // descricaoPesquisa/statusImagem/reajuste etc.
-function montarProdutoSite(produto, imagensLocais) {
+function montarProdutoSite(produto, imagensHospedadas) {
 
     const base = {
         codigo: produto.codigo,
@@ -35,7 +35,7 @@ function montarProdutoSite(produto, imagensLocais) {
         precoVenda: produto.precoVenda || 0,
         precoPromocao: produto.precoPromocao || 0,
         estoque: produto.estoque || 0,
-        imagem: resolverImagemSite(produto, imagensLocais)
+        imagem: resolverImagemSite(produto, imagensHospedadas)
     };
 
     // Vindos da CMED e da Portaria 344/1998. tarja é só informativo (mostra
@@ -68,7 +68,7 @@ export async function gerarProdutosSite(produtos) {
 
     const eans = produtos.map((produto) => produto.ean).filter(Boolean);
 
-    const imagensLocais = await obterImagensLocais(eans);
+    const imagensHospedadas = await buscarImagensHospedadas(eans);
 
     return produtos
 
@@ -76,7 +76,7 @@ export async function gerarProdutosSite(produtos) {
         // sem descrição - já filtramos aqui pra não publicar lixo.
         .filter((produto) => produto.ean && (produto.descricaoSite || produto.descricaoOriginal))
 
-        .map((produto) => montarProdutoSite(produto, imagensLocais));
+        .map((produto) => montarProdutoSite(produto, imagensHospedadas));
 
 }
 
