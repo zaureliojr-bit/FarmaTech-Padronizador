@@ -40,7 +40,18 @@ export async function buscarImagens(produto) {
 
         const texto = produto.pesquisaImagem?.principal || produto.descricaoSite || produto.descricaoOriginal;
 
-        const imagens = await buscarImagensPorTexto(texto);
+        // Busca pelo EAN e pela descrição ao mesmo tempo. O EAN é único
+        // por produto - quando está bem indexado na web, a imagem certa
+        // vem logo de cara. A descrição funciona como rede de segurança
+        // pros EANs pouco indexados, que sozinhos não trariam nada.
+        const [porEan, porTexto] = await Promise.all([
+            buscarImagensPorTexto(produto.ean),
+            buscarImagensPorTexto(texto)
+        ]);
+
+        // EAN primeiro na galeria - maior chance de já ser a imagem certa.
+        // O Set tira link duplicado quando as duas buscas acham a mesma foto.
+        const imagens = [...new Set([...porEan, ...porTexto])];
 
         if (imagens.length) {
 
