@@ -8,11 +8,14 @@ function Toolbar({
     setPesquisa,
     laboratorios,
     categorias,
+    classes,
     abas,
     laboratorio,
     setLaboratorio,
     categoria,
     setCategoria,
+    classe,
+    setClasse,
     aba,
     setAba,
     total,
@@ -96,6 +99,20 @@ function Toolbar({
                     <option value="">Todas as Categorias</option>
 
                     {categorias.map(item => (
+                        <option key={item} value={item}>
+                            {item}
+                        </option>
+                    ))}
+
+                </select>
+
+                <select
+                    value={classe}
+                    onChange={(e) => setClasse(e.target.value)}
+                >
+                    <option value="">Todas as Classes</option>
+
+                    {classes.map(item => (
                         <option key={item} value={item}>
                             {item}
                         </option>
