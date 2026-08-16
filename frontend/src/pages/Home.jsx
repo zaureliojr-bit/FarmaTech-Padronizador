@@ -4,6 +4,7 @@ import Header from "../components/Header/Header";
 import ImportBox from "../components/ImportBox/ImportBox";
 import ImportSummary from "../components/ImportSummary/ImportSummary";
 import CmedBox from "../components/CmedBox/CmedBox";
+import MigrarImagensBox from "../components/MigrarImagensBox/MigrarImagensBox";
 import Toolbar from "../components/Toolbar/Toolbar";
 import ProductTable from "../components/ProductTable/ProductTable";
 import Pagination from "../components/Pagination/Pagination";
@@ -101,6 +102,10 @@ function Home() {
                 setCorrigirClasse={setCorrigirClasseCmed}
                 corrigirLaboratorio={corrigirLaboratorioCmed}
                 setCorrigirLaboratorio={setCorrigirLaboratorioCmed}
+                mostrarToast={mostrarToast}
+            />
+
+            <MigrarImagensBox
                 mostrarToast={mostrarToast}
             />
             {

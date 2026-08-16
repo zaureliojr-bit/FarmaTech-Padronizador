@@ -54,6 +54,13 @@ export async function buscarImagensHospedadas(eans) {
 
 }
 
+/** true se o link já aponta pro nosso próprio worker (já migrado/salvo). */
+export function ehImagemHospedada(url) {
+
+    return !!PROXY_URL && !!url && url.startsWith(PROXY_URL);
+
+}
+
 /**
  * Manda o worker baixar a imagem escolhida (a partir do link da
  * Cosmos/Serper/manual) e guardar no R2. Devolve a URL definitiva,
