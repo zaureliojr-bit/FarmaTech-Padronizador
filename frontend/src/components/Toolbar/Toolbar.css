@@ -172,6 +172,27 @@
 
 }
 
+.toolbar-filtro-checkbox{
+
+    display:flex;
+    align-items:center;
+    gap:6px;
+
+    font-size:14px;
+    color:var(--text2);
+
+    cursor:pointer;
+    user-select:none;
+
+}
+
+.toolbar-filtro-checkbox input{
+
+    padding:0;
+    width:auto;
+
+}
+
 .toolbar-contagem strong{
 
     color:var(--text);

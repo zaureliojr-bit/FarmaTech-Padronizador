@@ -13,6 +13,7 @@ export function useProdutos() {
     const [categoria, setCategoria] = useState("");
     const [classe, setClasse] = useState("");
     const [aba, setAba] = useState("");
+    const [apenasSemImagem, setApenasSemImagem] = useState(false);
 
     const [paginaAtual, setPaginaAtual] = useState(1);
 
@@ -22,7 +23,7 @@ export function useProdutos() {
 
         setPaginaAtual(1);
 
-    }, [pesquisa, laboratorio, categoria, classe, aba]);
+    }, [pesquisa, laboratorio, categoria, classe, aba, apenasSemImagem]);
 
     // =====================================================
     // CMED (tarja, exigência de receita, preço máximo legal)
@@ -214,6 +215,12 @@ export function useProdutos() {
 
                 produto.aba === aba;
 
+            const filtroSemImagem =
+
+                !apenasSemImagem ||
+
+                produto.statusImagem !== "salva";
+
             return (
 
                 busca &&
@@ -224,7 +231,9 @@ export function useProdutos() {
 
                 filtroClasse &&
 
-                filtroAba
+                filtroAba &&
+
+                filtroSemImagem
 
             );
 
@@ -242,7 +251,9 @@ export function useProdutos() {
 
         classe,
 
-        aba
+        aba,
+
+        apenasSemImagem
 
     ]);
 
@@ -293,6 +304,8 @@ export function useProdutos() {
         setClasse("");
 
         setAba("");
+
+        setApenasSemImagem(false);
 
     }
 
@@ -347,6 +360,10 @@ export function useProdutos() {
         aba,
 
         setAba,
+
+        apenasSemImagem,
+
+        setApenasSemImagem,
 
         laboratorios,
 

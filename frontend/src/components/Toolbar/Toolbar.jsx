@@ -18,6 +18,8 @@ function Toolbar({
     setClasse,
     aba,
     setAba,
+    apenasSemImagem,
+    setApenasSemImagem,
     total,
     limparFiltros,
     produtos,
@@ -133,6 +135,15 @@ function Toolbar({
                     ))}
 
                 </select>
+
+                <label className="toolbar-filtro-checkbox">
+                    <input
+                        type="checkbox"
+                        checked={apenasSemImagem}
+                        onChange={(e) => setApenasSemImagem(e.target.checked)}
+                    />
+                    Só sem imagem
+                </label>
 
                 <button className="btn btn-ghost" onClick={limparFiltros}>
                     Limpar
