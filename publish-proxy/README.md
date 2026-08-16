@@ -2,11 +2,25 @@
 
 Worker do Cloudflare que recebe o catálogo já padronizado pelo
 FarmaTech Padronizador e publica direto no repositório GitHub
-`zaureliojr-bit/Produtos`, sobrescrevendo `produtos.json` (o arquivo
+`zaureliojr-bit/Produtos`, atualizando `produtos.json` (o arquivo
 que o site "Drogaria Mais Barato" lê via `raw.githubusercontent.com`).
 
 O token do GitHub (PAT) e a chave de publicação ficam guardados como
 secrets no worker - nunca aparecem no navegador.
+
+## Modo mesclar x substituir
+
+O corpo da requisição aceita um campo `modo`:
+
+- `"mesclar"` (padrão, e o que o botão "Publicar no site" usa quando a
+  caixa "Substituir tudo" está desmarcada): busca o `produtos.json`
+  atual, atualiza/acrescenta pelo EAN os produtos enviados e **mantém**
+  quem não veio nesta chamada. Seguro pra publicar uma planilha parcial
+  (só o que mudou hoje) sem apagar o resto do catálogo.
+- `"substituir"`: publica exatamente a lista enviada, e quem não
+  estiver nela **some do site**. Só faz sentido junto de uma
+  reimportação do catálogo completo - é como usar pra descontinuar
+  produtos que saíram do cadastro do PDV.
 
 ## 1. Criar o token do GitHub (PAT)
 
@@ -56,8 +70,8 @@ secrets no worker - nunca aparecem no navegador.
 curl -X POST https://farmatech-publish-proxy.<seu-usuario>.workers.dev/ \
   -H "Content-Type: application/json" \
   -H "X-Publish-Key: <sua chave>" \
-  -d '{"produtos":[{"codigo":1,"ean":"7891234567895","descricao":"Teste","precoVenda":10}]}'
+  -d '{"produtos":[{"codigo":1,"ean":"7891234567895","descricao":"Teste","precoVenda":10}],"modo":"mesclar"}'
 ```
 
-Deve retornar `{"ok":true,"total":1}` e o commit aparecer no histórico
-do repositório `Produtos`.
+Deve retornar `{"ok":true,"total":<total no site depois de mesclar>,"enviados":1,"modo":"mesclar"}`
+e o commit aparecer no histórico do repositório `Produtos`.

@@ -42,6 +42,31 @@ function paraBase64Utf8(texto) {
 
 }
 
+// Caminho inverso - o conteúdo que a Contents API do GitHub devolve.
+function deBase64Utf8(base64) {
+
+    const binario = atob(base64.replace(/\n/g, ""));
+
+    const bytes = Uint8Array.from(binario, (c) => c.charCodeAt(0));
+
+    return new TextDecoder().decode(bytes);
+
+}
+
+// Junta o catálogo novo com o que já estava publicado, pelo EAN: quem
+// veio na planilha atual substitui a versão antiga (preço/estoque
+// atualizado); quem não veio, permanece como estava - só o modo
+// "substituir" apaga o que não veio.
+function mesclarPorEan(existentes, novos) {
+
+    const porEan = new Map(existentes.map((produto) => [produto.ean, produto]));
+
+    novos.forEach((produto) => porEan.set(produto.ean, produto));
+
+    return [...porEan.values()];
+
+}
+
 export default {
 
     async fetch(request, env) {
@@ -68,6 +93,12 @@ export default {
 
         const produtos = corpo?.produtos;
 
+        // "mesclar" (padrão): atualiza/acrescenta pelo EAN, mantém quem
+        // não veio na planilha atual. "substituir": apaga tudo que não
+        // estiver na lista enviada - só faz sentido numa reimportação do
+        // catálogo completo.
+        const modo = corpo?.modo === "substituir" ? "substituir" : "mesclar";
+
         if (!Array.isArray(produtos) || !produtos.length) {
             return jsonResponse({ erro: "Lista de produtos vazia ou inválida." }, 400);
         }
@@ -80,7 +111,8 @@ export default {
             "User-Agent": "farmatech-publish-proxy"
         };
 
-        // Precisa do sha do arquivo atual pra poder sobrescrevê-lo.
+        // Precisa do conteúdo atual (pra mesclar) e do sha (pra poder
+        // sobrescrever) - as duas coisas vêm da mesma chamada.
         const atual = await fetch(`${apiUrl}?ref=${BRANCH}`, { headers: headersGitHub });
 
         if (!atual.ok && atual.status !== 404) {
@@ -88,9 +120,35 @@ export default {
             return jsonResponse({ erro: `Falha ao ler arquivo atual: ${erro}` }, 502);
         }
 
-        const shaAtual = atual.ok ? (await atual.json()).sha : undefined;
+        let shaAtual;
+        let produtosExistentes = [];
 
-        const conteudoJson = JSON.stringify({ produtos }, null, 2);
+        if (atual.ok) {
+
+            const dadosAtual = await atual.json();
+
+            shaAtual = dadosAtual.sha;
+
+            try {
+
+                const jsonAtual = JSON.parse(deBase64Utf8(dadosAtual.content));
+
+                if (Array.isArray(jsonAtual.produtos)) produtosExistentes = jsonAtual.produtos;
+
+            } catch {
+
+                // produtos.json corrompido ou em formato inesperado - segue
+                // como se não houvesse nada publicado ainda, em vez de falhar.
+
+            }
+
+        }
+
+        const produtosFinais = modo === "mesclar"
+            ? mesclarPorEan(produtosExistentes, produtos)
+            : produtos;
+
+        const conteudoJson = JSON.stringify({ produtos: produtosFinais }, null, 2);
 
         const resposta = await fetch(apiUrl, {
 
@@ -98,7 +156,9 @@ export default {
             headers: { ...headersGitHub, "Content-Type": "application/json" },
 
             body: JSON.stringify({
-                message: `Publicar catálogo (${produtos.length} produtos) via FarmaTech Padronizador`,
+                message: modo === "mesclar"
+                    ? `Atualizar ${produtos.length} produto(s) via FarmaTech Padronizador`
+                    : `Publicar catálogo completo (${produtos.length} produtos) via FarmaTech Padronizador`,
                 content: paraBase64Utf8(conteudoJson),
                 branch: BRANCH,
                 ...(shaAtual ? { sha: shaAtual } : {})
@@ -111,7 +171,7 @@ export default {
             return jsonResponse({ erro: `Falha ao publicar: ${erro}` }, 502);
         }
 
-        return jsonResponse({ ok: true, total: produtos.length });
+        return jsonResponse({ ok: true, total: produtosFinais.length, enviados: produtos.length, modo });
 
     }
 

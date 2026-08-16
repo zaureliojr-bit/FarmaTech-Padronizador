@@ -151,6 +151,27 @@
 
 }
 
+.toolbar-modo-publicacao{
+
+    display:flex;
+    align-items:center;
+    gap:6px;
+
+    font-size:13px;
+    color:var(--text2);
+
+    cursor:help;
+    user-select:none;
+
+}
+
+.toolbar-modo-publicacao input{
+
+    padding:0;
+    width:auto;
+
+}
+
 .toolbar-contagem strong{
 
     color:var(--text);

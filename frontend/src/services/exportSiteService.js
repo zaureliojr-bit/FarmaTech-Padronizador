@@ -80,7 +80,12 @@ export async function gerarProdutosSite(produtos) {
 
 }
 
-export async function publicarNoSite(produtos) {
+// modo "mesclar" (padrão): atualiza/acrescenta pelo EAN, mantém no ar
+// quem não veio nesta planilha - seguro pra publicar uma planilha
+// parcial (só o que mudou) sem apagar o resto do catálogo. modo
+// "substituir": publica exatamente esta lista, apagando o que não
+// vier - só faz sentido junto de uma reimportação do catálogo inteiro.
+export async function publicarNoSite(produtos, modo = "mesclar") {
 
     const workerUrl = import.meta.env.VITE_PUBLISH_WORKER_URL;
     const chave = import.meta.env.VITE_PUBLISH_KEY;
@@ -104,7 +109,7 @@ export async function publicarNoSite(produtos) {
             "X-Publish-Key": chave || ""
         },
 
-        body: JSON.stringify({ produtos: listaSite })
+        body: JSON.stringify({ produtos: listaSite, modo })
 
     });
 
