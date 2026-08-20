@@ -2,6 +2,7 @@ import * as XLSX from "xlsx";
 import { encontrarCabecalho } from "../utils/detectarCabecalho";
 import { normalizarProduto } from "../utils/normalizarProduto";
 import { buscarImagensHospedadas } from "./imagemHostingService";
+import { buscarCorrecoes } from "./correcoesService";
 
 export async function importarPlanilha(arquivo) {
 
@@ -66,18 +67,32 @@ export async function importarPlanilha(arquivo) {
                     .map((produto) => produto.ean)
                     .filter(Boolean);
 
-                const imagensHospedadas = await buscarImagensHospedadas(eans);
+                const [imagensHospedadas, correcoes] = await Promise.all([
+                    buscarImagensHospedadas(eans),
+                    buscarCorrecoes(eans)
+                ]);
 
                 produtos = produtos.map((produto) => {
 
                     const hospedada = imagensHospedadas.get(produto.ean);
+                    const correcao = correcoes.get(produto.ean);
 
-                    if (!hospedada) return produto;
+                    if (!hospedada && !correcao) return produto;
 
                     return {
                         ...produto,
-                        imagem: hospedada.url,
-                        statusImagem: "salva"
+
+                        ...(hospedada && {
+                            imagem: hospedada.url,
+                            statusImagem: "salva"
+                        }),
+
+                        // só sobrescreve o que a correção realmente trouxe -
+                        // um campo vazio nela não deve apagar o da planilha.
+                        ...(correcao?.descricaoManual && { descricaoManual: correcao.descricaoManual }),
+                        ...(correcao?.classe && { classe: correcao.classe }),
+                        ...(correcao?.categoria && { categoria: correcao.categoria })
+
                     };
 
                 });
