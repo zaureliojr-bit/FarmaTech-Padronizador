@@ -6,10 +6,11 @@
 const PROXY_URL = import.meta.env.VITE_IMAGENS_PROXY_URL;
 const PROXY_KEY = import.meta.env.VITE_IMAGENS_KEY;
 
-// O worker limita a 500 EANs por chamada (proteção contra lote gigante
-// acidental) - um catálogo real passa disso fácil, então quem pede em
-// lote maior precisa dividir em páginas.
-const EANS_POR_PAGINA = 500;
+// O D1 recusa consulta com mais de 100 parâmetros amarrados (limite da
+// plataforma, não do worker) - IN (?1,...,?500) simplesmente falha e a
+// paginação existe pra nunca bater nisso. Catálogo real passa fácil de
+// 100 EANs, então sempre precisa dividir em páginas.
+const EANS_POR_PAGINA = 100;
 
 function dividirEmPaginas(lista, tamanho) {
 
@@ -45,7 +46,10 @@ export async function buscarImagensHospedadas(eans) {
 
             const resposta = await fetch(`${PROXY_URL}/lote?eans=${encodeURIComponent(pagina.join(","))}`);
 
-            if (!resposta.ok) return {};
+            if (!resposta.ok) {
+                console.error(`Falha ao buscar imagens hospedadas em lote (HTTP ${resposta.status}).`, await resposta.text().catch(() => ""));
+                return {};
+            }
 
             return resposta.json();
 

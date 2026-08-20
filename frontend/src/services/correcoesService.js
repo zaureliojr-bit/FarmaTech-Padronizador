@@ -6,7 +6,8 @@
 const PROXY_URL = import.meta.env.VITE_IMAGENS_PROXY_URL;
 const PROXY_KEY = import.meta.env.VITE_IMAGENS_KEY;
 
-const EANS_POR_PAGINA = 500;
+// Mesmo limite de 100 parâmetros por consulta do D1 - ver imagemHostingService.js.
+const EANS_POR_PAGINA = 100;
 
 function dividirEmPaginas(lista, tamanho) {
 
@@ -42,7 +43,10 @@ export async function buscarCorrecoes(eans) {
 
             const resposta = await fetch(`${PROXY_URL}/correcoes?eans=${encodeURIComponent(pagina.join(","))}`);
 
-            if (!resposta.ok) return {};
+            if (!resposta.ok) {
+                console.error(`Falha ao buscar correções em lote (HTTP ${resposta.status}).`, await resposta.text().catch(() => ""));
+                return {};
+            }
 
             return resposta.json();
 

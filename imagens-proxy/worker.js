@@ -31,9 +31,13 @@ const CORS_HEADERS = {
     "Access-Control-Allow-Headers": "Content-Type, X-Imagens-Key"
 };
 
-// Nenhum EAN de verdade passa disso - protege contra lote gigante
-// acidental (planilha inteira de uma vez, por exemplo).
-const MAX_EANS_POR_LOTE = 500;
+// D1 recusa consulta com mais de 100 parâmetros amarrados (limite da
+// plataforma) - um IN (...) com mais EANs que isso falha a query
+// inteira, então este teto tem que ficar dentro do limite do D1, não
+// só "razoável". O front-end já pagina em blocos de 100 por causa
+// disso, mas o corte aqui garante que uma chamada direta (fora do
+// front-end) nunca estoure o D1 por engano.
+const MAX_EANS_POR_LOTE = 100;
 
 function json(dados, status = 200) {
 
