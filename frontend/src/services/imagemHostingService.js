@@ -3,7 +3,10 @@
 // acham um link em outro site), aqui a farmácia guarda o arquivo de
 // verdade, indexado por EAN: não depende do site de origem continuar
 // no ar, e fica acessível de qualquer sessão/computador.
-const PROXY_URL = import.meta.env.VITE_IMAGENS_PROXY_URL;
+// Remove a barra final, se tiver - "url/" + "/lote" viraria "url//lote",
+// que não bate com a rota exata do worker (cai no fallback de servir
+// imagem por engano, e some tudo com "Imagem não encontrada.").
+const PROXY_URL = (import.meta.env.VITE_IMAGENS_PROXY_URL || "").replace(/\/+$/, "");
 const PROXY_KEY = import.meta.env.VITE_IMAGENS_KEY;
 
 // O D1 recusa consulta com mais de 100 parâmetros amarrados (limite da

@@ -3,7 +3,9 @@
 // nada específico de loja (preço/estoque/código nunca entram aqui), pra
 // que uma correção feita numa loja já sirva pra outra que importar o
 // mesmo EAN no futuro.
-const PROXY_URL = import.meta.env.VITE_IMAGENS_PROXY_URL;
+// Mesma normalização do imagemHostingService.js - sem isso, uma URL com
+// barra final vira "//correcoes" e quebra o roteamento do worker.
+const PROXY_URL = (import.meta.env.VITE_IMAGENS_PROXY_URL || "").replace(/\/+$/, "");
 const PROXY_KEY = import.meta.env.VITE_IMAGENS_KEY;
 
 // Mesmo limite de 100 parâmetros por consulta do D1 - ver imagemHostingService.js.

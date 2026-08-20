@@ -216,24 +216,30 @@ export default {
 
         const url = new URL(request.url);
 
-        if (request.method === "POST" && url.pathname === "/") {
+        // Tolera barra dupla ("//lote", "//correcoes") vinda de um
+        // PROXY_URL configurado com "/" no final em algum cliente - sem
+        // isso a rota exata não bate e cai no fallback de servir imagem,
+        // devolvendo "Imagem não encontrada." pra tudo sem aviso nenhum.
+        const caminho = url.pathname.replace(/\/{2,}/g, "/");
+
+        if (request.method === "POST" && caminho === "/") {
             return tratarSalvar(request, env);
         }
 
-        if (request.method === "GET" && url.pathname === "/lote") {
+        if (request.method === "GET" && caminho === "/lote") {
             return tratarLote(request, env);
         }
 
-        if (request.method === "POST" && url.pathname === "/correcoes") {
+        if (request.method === "POST" && caminho === "/correcoes") {
             return tratarSalvarCorrecao(request, env);
         }
 
-        if (request.method === "GET" && url.pathname === "/correcoes") {
+        if (request.method === "GET" && caminho === "/correcoes") {
             return tratarLoteCorrecoes(request, env);
         }
 
-        if (request.method === "GET" && url.pathname.length > 1) {
-            const ean = decodeURIComponent(url.pathname.slice(1));
+        if (request.method === "GET" && caminho.length > 1) {
+            const ean = decodeURIComponent(caminho.slice(1));
             return tratarServirImagem(ean, env);
         }
 
