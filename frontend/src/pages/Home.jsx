@@ -11,6 +11,7 @@ import ProductTable from "../components/ProductTable/ProductTable";
 import Pagination from "../components/Pagination/Pagination";
 import Toast from "../components/Toast/Toast";
 import DashboardStats from "../components/DashboardStats/DashboardStats";
+import CategoriasNaoReconhecidasBox from "../components/CategoriasNaoReconhecidasBox/CategoriasNaoReconhecidasBox";
 
 import { useProdutos } from "../hooks/useProdutos";
 
@@ -128,6 +129,18 @@ function Home() {
     )
 
 }
+
+            {
+
+                resultadoImportacao && (
+
+                    <CategoriasNaoReconhecidasBox
+                        produtos={produtos}
+                    />
+
+                )
+
+            }
             {
 
                 resultadoImportacao && (
