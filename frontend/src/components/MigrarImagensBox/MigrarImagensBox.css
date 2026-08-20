@@ -1,0 +1,95 @@
+.migrar-imagens-box{
+
+    margin:24px 0;
+    padding:18px 20px;
+
+    background:var(--card);
+    border:1px solid var(--card-border);
+
+    border-radius:var(--radius);
+
+}
+
+.migrar-imagens-cabecalho{
+
+    display:flex;
+
+    align-items:baseline;
+
+    gap:12px;
+
+    flex-wrap:wrap;
+
+    margin-bottom:14px;
+
+}
+
+.migrar-imagens-cabecalho h2{
+
+    font-size:16px;
+
+    color:var(--text);
+
+}
+
+.migrar-imagens-ajuda{
+
+    font-size:14px;
+
+    color:var(--text2);
+
+    line-height:1.5;
+
+}
+
+.migrar-imagens-progresso{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:12px;
+
+    margin-top:14px;
+
+    font-size:13px;
+
+    color:var(--text2);
+
+}
+
+.migrar-imagens-barra{
+
+    flex:1;
+
+    height:8px;
+
+    max-width:280px;
+
+    border-radius:999px;
+
+    background:var(--bg-soft);
+
+    overflow:hidden;
+
+}
+
+.migrar-imagens-barra-preenchida{
+
+    height:100%;
+
+    background:var(--primary);
+
+    transition:width .2s var(--ease);
+
+}
+
+.migrar-imagens-resultado{
+
+    margin-top:14px;
+
+    font-size:13px;
+
+    color:var(--text2);
+
+}

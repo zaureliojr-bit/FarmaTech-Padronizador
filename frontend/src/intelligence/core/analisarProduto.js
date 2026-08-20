@@ -32,7 +32,8 @@ import {
     extrairVolume,
     extrairApresentacao,
     extrairCategoria,
-    extrairLinha
+    extrairLinha,
+    extrairControleEspecial
 } from "../extractors";
 
 import {
@@ -93,6 +94,7 @@ export function analisarProduto(produtoImportado) {
 
     produto = extrairApresentacao(produto);
     produto = extrairCategoria(produto);
+    produto = extrairControleEspecial(produto);
 
     // =====================================================
     // ETAPA 06

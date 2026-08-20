@@ -11,7 +11,9 @@ export function useProdutos() {
     const [pesquisa, setPesquisa] = useState("");
     const [laboratorio, setLaboratorio] = useState("");
     const [categoria, setCategoria] = useState("");
+    const [classe, setClasse] = useState("");
     const [aba, setAba] = useState("");
+    const [apenasSemImagem, setApenasSemImagem] = useState(false);
 
     const [paginaAtual, setPaginaAtual] = useState(1);
 
@@ -21,7 +23,7 @@ export function useProdutos() {
 
         setPaginaAtual(1);
 
-    }, [pesquisa, laboratorio, categoria, aba]);
+    }, [pesquisa, laboratorio, categoria, classe, aba, apenasSemImagem]);
 
     // =====================================================
     // CMED (tarja, exigência de receita, preço máximo legal)
@@ -201,11 +203,23 @@ export function useProdutos() {
 
                 produto.categoria === categoria;
 
+            const filtroClasse =
+
+                !classe ||
+
+                produto.classe === classe;
+
             const filtroAba =
 
                 !aba ||
 
                 produto.aba === aba;
+
+            const filtroSemImagem =
+
+                !apenasSemImagem ||
+
+                produto.statusImagem !== "salva";
 
             return (
 
@@ -215,7 +229,11 @@ export function useProdutos() {
 
                 filtroCategoria &&
 
-                filtroAba
+                filtroClasse &&
+
+                filtroAba &&
+
+                filtroSemImagem
 
             );
 
@@ -231,7 +249,11 @@ export function useProdutos() {
 
         categoria,
 
-        aba
+        classe,
+
+        aba,
+
+        apenasSemImagem
 
     ]);
 
@@ -279,7 +301,11 @@ export function useProdutos() {
 
         setCategoria("");
 
+        setClasse("");
+
         setAba("");
+
+        setApenasSemImagem(false);
 
     }
 
@@ -327,9 +353,17 @@ export function useProdutos() {
 
         setCategoria,
 
+        classe,
+
+        setClasse,
+
         aba,
 
         setAba,
+
+        apenasSemImagem,
+
+        setApenasSemImagem,
 
         laboratorios,
 

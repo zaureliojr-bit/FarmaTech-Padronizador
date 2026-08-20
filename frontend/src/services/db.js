@@ -11,7 +11,6 @@
 const DB_NAME = "farmatech";
 const DB_VERSION = 2;
 
-export const STORE_IMAGENS = "imagens";
 export const STORE_CMED = "cmed";
 
 export function abrirBanco() {
@@ -24,10 +23,11 @@ export function abrirBanco() {
 
             const db = requisicao.result;
 
-            if (!db.objectStoreNames.contains(STORE_IMAGENS)) {
-                db.createObjectStore(STORE_IMAGENS, { keyPath: "ean" });
-            }
-
+            // A store "imagens" não é mais criada aqui - imagem passou a
+            // ser hospedada no R2 (ver imagens-proxy/ e
+            // imagemHostingService.js), não mais guardada localmente no
+            // navegador. Quem já tinha essa store de antes da migração
+            // mantém ela sem uso; não precisa apagar, só não cresce mais.
             if (!db.objectStoreNames.contains(STORE_CMED)) {
                 db.createObjectStore(STORE_CMED);
             }

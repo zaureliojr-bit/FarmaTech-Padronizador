@@ -1,32 +1,27 @@
-import { baixarBlob, salvarImagemLocal } from "./imagemDB";
+import { salvarImagemHospedada } from "./imagemHostingService";
 
-export async function salvarImagem(produto, imagem) {
+export async function salvarImagem(produto, imagem, origem) {
 
-    const blob = await baixarBlob(imagem);
+    try {
 
-    if (blob) {
-
-        await salvarImagemLocal(produto.ean, blob, imagem);
+        const resultado = await salvarImagemHospedada(produto.ean, imagem, origem);
 
         return {
             sucesso: true,
             baixado: true,
-            caminho: URL.createObjectURL(blob),
-            mensagem: "Imagem baixada e salva localmente!"
+            caminho: resultado.url,
+            mensagem: "Imagem baixada e hospedada!"
+        };
+
+    } catch (erro) {
+
+        return {
+            sucesso: false,
+            baixado: false,
+            caminho: "",
+            mensagem: erro.message || "Erro ao salvar imagem."
         };
 
     }
-
-    // Não deu pra baixar o arquivo (CORS do site de origem), mas ainda
-    // guardamos a referência por EAN pra não perder a escolha ao
-    // reimportar a planilha depois.
-    await salvarImagemLocal(produto.ean, null, imagem);
-
-    return {
-        sucesso: true,
-        baixado: false,
-        caminho: imagem,
-        mensagem: "Site de origem não permite baixar o arquivo (CORS); o link original foi salvo."
-    };
 
 }

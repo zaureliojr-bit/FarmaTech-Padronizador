@@ -8,13 +8,18 @@ function Toolbar({
     setPesquisa,
     laboratorios,
     categorias,
+    classes,
     abas,
     laboratorio,
     setLaboratorio,
     categoria,
     setCategoria,
+    classe,
+    setClasse,
     aba,
     setAba,
+    apenasSemImagem,
+    setApenasSemImagem,
     total,
     limparFiltros,
     produtos,
@@ -23,6 +28,7 @@ function Toolbar({
 }) {
 
     const [publicando, setPublicando] = useState(false);
+    const [substituirTudo, setSubstituirTudo] = useState(false);
 
     async function handlePublicar() {
 
@@ -33,8 +39,19 @@ function Toolbar({
             // Sempre publica o catálogo completo importado, nunca a lista
             // filtrada da tela - senão um filtro ativo (categoria, busca...)
             // apagaria do site tudo que não bate com o filtro.
-            const { total: totalPublicado } = await publicarNoSite(produtosCompletos || produtos);
-            mostrarToast?.(`${totalPublicado} produtos publicados no site!`, "sucesso");
+            const modo = substituirTudo ? "substituir" : "mesclar";
+
+            const { total: totalPublicado, enviados } = await publicarNoSite(produtosCompletos || produtos, modo);
+
+            mostrarToast?.(
+
+                modo === "mesclar"
+                    ? `${enviados} produto(s) atualizado(s) - catálogo no site ficou com ${totalPublicado} produtos.`
+                    : `Catálogo substituído: ${totalPublicado} produtos publicados no site.`,
+
+                "sucesso"
+
+            );
 
         } catch (erro) {
 
@@ -92,6 +109,20 @@ function Toolbar({
                 </select>
 
                 <select
+                    value={classe}
+                    onChange={(e) => setClasse(e.target.value)}
+                >
+                    <option value="">Todas as Classes</option>
+
+                    {classes.map(item => (
+                        <option key={item} value={item}>
+                            {item}
+                        </option>
+                    ))}
+
+                </select>
+
+                <select
                     value={aba}
                     onChange={(e) => setAba(e.target.value)}
                 >
@@ -104,6 +135,15 @@ function Toolbar({
                     ))}
 
                 </select>
+
+                <label className="toolbar-filtro-checkbox">
+                    <input
+                        type="checkbox"
+                        checked={apenasSemImagem}
+                        onChange={(e) => setApenasSemImagem(e.target.checked)}
+                    />
+                    Só sem imagem
+                </label>
 
                 <button className="btn btn-ghost" onClick={limparFiltros}>
                     Limpar
@@ -124,11 +164,24 @@ function Toolbar({
                     📤 Exportar JSON
                 </button>
 
+                <label className="toolbar-modo-publicacao" title="Marque só quando importar o catálogo completo e quiser que produtos ausentes desta planilha saiam do site (ex: descontinuados). Deixe desmarcado pra atualizar/acrescentar sem apagar o resto.">
+                    <input
+                        type="checkbox"
+                        checked={substituirTudo}
+                        onChange={(e) => setSubstituirTudo(e.target.checked)}
+                    />
+                    Substituir tudo (apaga do site quem não estiver aqui)
+                </label>
+
                 <button
                     className="btn btn-primary"
                     onClick={handlePublicar}
                     disabled={publicando}
-                    title={`Publica o catálogo completo (${(produtosCompletos || produtos).length} produtos), ignorando filtros ativos na tela`}
+                    title={
+                        substituirTudo
+                            ? `Substitui o catálogo inteiro do site por estes ${(produtosCompletos || produtos).length} produtos, ignorando filtros ativos na tela`
+                            : `Atualiza/acrescenta estes ${(produtosCompletos || produtos).length} produtos no site, sem apagar o que já estava publicado`
+                    }
                 >
                     {publicando ? "Publicando..." : "🌐 Publicar no site"}
                 </button>

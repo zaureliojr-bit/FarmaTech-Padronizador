@@ -107,13 +107,28 @@ function CelulaDescricao({ produto, atualizarProduto }) {
 
                 {
 
-                    produto.exigeReceita && (
+                    produto.bloqueioPresencial && (
 
                         <span
-                            className="badge-receita"
-                            title={`Exige receita (tarja ${produto.tarja || "?"}, pela CMED)`}
+                            className="badge-bloqueio"
+                            title={`Retenção de receita obrigatória - ${produto.controleEspecial} (${produto.tipoReceita}). Não entra no carrinho do site.`}
                         >
-                            🔴 Receita
+                            🔴 Retém receita
+                        </span>
+
+                    )
+
+                }
+
+                {
+
+                    produto.receitaRemota && (
+
+                        <span
+                            className="badge-remoto"
+                            title={`Controle especial - ${produto.controleEspecial} (${produto.tipoReceita}). Entra no carrinho; site cobra confirmação da receita antes do envio.`}
+                        >
+                            📋 Controle especial
                         </span>
 
                     )
@@ -347,6 +362,7 @@ function ProductTable({
 
         modoManual,
         linkBusca,
+        origemAtual,
         adicionarImagemManual
 
     } = useImagem();
@@ -598,6 +614,8 @@ function ProductTable({
                 modoManual={modoManual}
 
                 linkBusca={linkBusca}
+
+                origemAtual={origemAtual}
 
                 adicionarImagemManual={adicionarImagemManual}
 

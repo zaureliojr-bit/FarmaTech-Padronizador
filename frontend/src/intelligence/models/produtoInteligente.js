@@ -103,6 +103,20 @@ export function criarProdutoInteligente(produto = {}) {
 
         exigeReceita: !!produto.exigeReceita,
 
+        // Controle especial (Portaria 344/1998) - preenchidos por
+        // extrairControleEspecial a partir da substância. Diferente de
+        // exigeReceita (tarja da CMED, só informativo): estes dois é que
+        // decidem o que o site bloqueia de verdade.
+        controleEspecial: produto.controleEspecial || "",
+
+        controleEspecialNome: produto.controleEspecialNome || "",
+
+        tipoReceita: produto.tipoReceita || "",
+
+        bloqueioPresencial: !!produto.bloqueioPresencial,
+
+        receitaRemota: !!produto.receitaRemota,
+
         substancia: produto.substancia || "",
 
         classeTerapeutica: produto.classeTerapeutica || "",

@@ -1,15 +1,15 @@
-import { obterImagensLocais } from "./imagemDB";
+import { buscarImagensHospedadas } from "./imagemHostingService";
 
-// A imagem em produto.imagem pode ser um blob: (URL de objeto, só
-// existe durante a sessão atual do navegador) - inútil num catálogo
-// público. Preferimos sempre a urlOriginal salva no IndexedDB por EAN;
-// se não houver, só usamos produto.imagem quando já for um link
-// remoto de verdade.
-function resolverImagemSite(produto, imagensLocais) {
+// A imagem fica hospedada no R2 (ver imagens-proxy/), servida por um
+// link estável da própria farmácia - não depende do site de origem
+// (Cosmos/Serper/manual) continuar no ar. produto.imagem só entra como
+// reserva se por algum motivo o produto não estiver no índice do D1
+// ainda (ex.: imagem escolhida numa sessão antes desta migração).
+function resolverImagemSite(produto, imagensHospedadas) {
 
-    const local = imagensLocais.get(produto.ean);
+    const hospedada = imagensHospedadas.get(produto.ean);
 
-    if (local?.urlOriginal) return local.urlOriginal;
+    if (hospedada?.url) return hospedada.url;
 
     if (produto.imagem && !produto.imagem.startsWith("blob:")) {
         return produto.imagem;
@@ -23,7 +23,7 @@ function resolverImagemSite(produto, imagensLocais) {
 // espera - ver publish-proxy/README.md e a análise no histórico do
 // projeto. Só os campos que o site realmente lê; nada de
 // descricaoPesquisa/statusImagem/reajuste etc.
-function montarProdutoSite(produto, imagensLocais) {
+function montarProdutoSite(produto, imagensHospedadas) {
 
     const base = {
         codigo: produto.codigo,
@@ -35,19 +35,28 @@ function montarProdutoSite(produto, imagensLocais) {
         precoVenda: produto.precoVenda || 0,
         precoPromocao: produto.precoPromocao || 0,
         estoque: produto.estoque || 0,
-        imagem: resolverImagemSite(produto, imagensLocais)
+        imagem: resolverImagemSite(produto, imagensHospedadas)
     };
 
-    // Vindos da CMED. tarja/exigeReceita são o que corrige quais produtos
-    // exigem receita de verdade (a categoria do PDV sozinha erra bastante
-    // esse número) - só saem quando têm conteúdo, porque a maior parte do
-    // catálogo não é medicamento e nunca vai ter tarja.
+    // Vindos da CMED e da Portaria 344/1998. tarja é só informativo (mostra
+    // "venda sob prescrição" no card, não bloqueia nada - tem antibiótico e
+    // anticoncepcional que são tarja vermelha e vendem livre). Quem manda
+    // no carrinho é bloqueioPresencial/receitaRemota:
+    //   bloqueioPresencial - listas A/B, retenção sempre presencial, não
+    //   entra no carrinho.
+    //   receitaRemota - listas C, entra no carrinho normal, mas o
+    //   checkout cobra confirmação do envio da receita antes de despachar.
+    // Só saem quando têm conteúdo, porque a maior parte do catálogo não é
+    // medicamento e nunca vai ter nenhum destes campos.
     //
     // pmc e acimaDoPmc ficam de fora de propósito: ao lado do preço de
     // venda, o teto legal vira comparação de margem em cada card do site.
     // Fica só no padronizador.
     if (produto.tarja) base.tarja = produto.tarja;
-    if (produto.exigeReceita) base.exigeReceita = true;
+    if (produto.bloqueioPresencial) base.bloqueioPresencial = true;
+    if (produto.receitaRemota) base.receitaRemota = true;
+    if (produto.controleEspecial) base.controleEspecial = produto.controleEspecial;
+    if (produto.tipoReceita) base.tipoReceita = produto.tipoReceita;
     if (produto.substancia) base.substancia = produto.substancia;
     if (produto.registroAnvisa) base.registroAnvisa = produto.registroAnvisa;
 
@@ -59,7 +68,7 @@ export async function gerarProdutosSite(produtos) {
 
     const eans = produtos.map((produto) => produto.ean).filter(Boolean);
 
-    const imagensLocais = await obterImagensLocais(eans);
+    const imagensHospedadas = await buscarImagensHospedadas(eans);
 
     return produtos
 
@@ -67,11 +76,16 @@ export async function gerarProdutosSite(produtos) {
         // sem descrição - já filtramos aqui pra não publicar lixo.
         .filter((produto) => produto.ean && (produto.descricaoSite || produto.descricaoOriginal))
 
-        .map((produto) => montarProdutoSite(produto, imagensLocais));
+        .map((produto) => montarProdutoSite(produto, imagensHospedadas));
 
 }
 
-export async function publicarNoSite(produtos) {
+// modo "mesclar" (padrão): atualiza/acrescenta pelo EAN, mantém no ar
+// quem não veio nesta planilha - seguro pra publicar uma planilha
+// parcial (só o que mudou) sem apagar o resto do catálogo. modo
+// "substituir": publica exatamente esta lista, apagando o que não
+// vier - só faz sentido junto de uma reimportação do catálogo inteiro.
+export async function publicarNoSite(produtos, modo = "mesclar") {
 
     const workerUrl = import.meta.env.VITE_PUBLISH_WORKER_URL;
     const chave = import.meta.env.VITE_PUBLISH_KEY;
@@ -95,7 +109,7 @@ export async function publicarNoSite(produtos) {
             "X-Publish-Key": chave || ""
         },
 
-        body: JSON.stringify({ produtos: listaSite })
+        body: JSON.stringify({ produtos: listaSite, modo })
 
     });
 
