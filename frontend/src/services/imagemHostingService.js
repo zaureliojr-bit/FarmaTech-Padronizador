@@ -30,7 +30,10 @@ function dividirEmPaginas(lista, tamanho) {
  */
 export async function buscarImagensHospedadas(eans) {
 
-    const lista = [...new Set(eans.filter(Boolean))];
+    // Sempre string: o Map de retorno usa as chaves do JSON (sempre
+    // string) - comparar um EAN number contra isso nunca bate, mesmo
+    // sendo "o mesmo" EAN (bug real que já aconteceu aqui).
+    const lista = [...new Set(eans.filter(Boolean).map(String))];
 
     if (!PROXY_URL || !lista.length) return new Map();
 
@@ -81,7 +84,7 @@ export async function salvarImagemHospedada(ean, urlOrigem, origem) {
             "X-Imagens-Key": PROXY_KEY || ""
         },
 
-        body: JSON.stringify({ ean, url: urlOrigem, origem })
+        body: JSON.stringify({ ean: String(ean), url: urlOrigem, origem })
 
     });
 

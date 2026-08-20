@@ -27,7 +27,10 @@ function dividirEmPaginas(lista, tamanho) {
  */
 export async function buscarCorrecoes(eans) {
 
-    const lista = [...new Set(eans.filter(Boolean))];
+    // Sempre string - mesmo motivo do imagemHostingService: o Map de
+    // retorno usa as chaves do JSON (sempre string), e comparar contra
+    // um EAN number nunca bate.
+    const lista = [...new Set(eans.filter(Boolean).map(String))];
 
     if (!PROXY_URL || !lista.length) return new Map();
 
@@ -72,7 +75,7 @@ export async function salvarCorrecao(ean, correcao) {
                 "X-Imagens-Key": PROXY_KEY || ""
             },
 
-            body: JSON.stringify({ ean, ...correcao })
+            body: JSON.stringify({ ean: String(ean), ...correcao })
 
         });
 
