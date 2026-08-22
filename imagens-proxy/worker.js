@@ -27,7 +27,7 @@
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Imagens-Key"
 };
 
@@ -110,6 +110,20 @@ async function tratarServirImagem(ean, env) {
             ...CORS_HEADERS
         }
     });
+
+}
+
+async function tratarExcluir(ean, request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.IMAGENS_BUCKET.delete(ean);
+
+    await env.DB.prepare(`DELETE FROM imagens WHERE ean = ?1`).bind(ean).run();
+
+    return json({ sucesso: true });
 
 }
 
@@ -248,6 +262,11 @@ export default {
         if (request.method === "GET" && caminho.length > 1) {
             const ean = decodeURIComponent(caminho.slice(1));
             return tratarServirImagem(ean, env);
+        }
+
+        if (request.method === "DELETE" && caminho.length > 1) {
+            const ean = decodeURIComponent(caminho.slice(1));
+            return tratarExcluir(ean, request, env);
         }
 
         return json({ erro: "Rota não encontrada." }, 404);

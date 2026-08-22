@@ -104,3 +104,31 @@ export async function salvarImagemHospedada(ean, urlOrigem, origem) {
     return dados;
 
 }
+
+/**
+ * Apaga a imagem hospedada de um produto (R2 + D1) - volta pro estado
+ * "sem imagem", sem apagar o produto nem nenhum outro dado dele.
+ */
+export async function excluirImagemHospedada(ean) {
+
+    if (!PROXY_URL) {
+        throw new Error("Hospedagem de imagens não configurada (falta VITE_IMAGENS_PROXY_URL no .env).");
+    }
+
+    const resposta = await fetch(`${PROXY_URL}/${encodeURIComponent(String(ean))}`, {
+
+        method: "DELETE",
+
+        headers: { "X-Imagens-Key": PROXY_KEY || "" }
+
+    });
+
+    const dados = await resposta.json().catch(() => ({}));
+
+    if (!resposta.ok) {
+        throw new Error(dados.erro || `Falha ao excluir imagem (HTTP ${resposta.status})`);
+    }
+
+    return dados;
+
+}
