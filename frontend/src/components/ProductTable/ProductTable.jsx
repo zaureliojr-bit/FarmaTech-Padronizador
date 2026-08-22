@@ -4,6 +4,7 @@ import "./ProductTable.css";
 
 import ImageModal from "../ImageModal/ImageModal";
 import { useImagem } from "../../hooks/useImagem";
+import { excluirImagemHospedada } from "../../services/imagemHostingService";
 
 function classeQualidade(score) {
 
@@ -368,6 +369,38 @@ function ProductTable({
 
     } = useImagem();
 
+    const [excluindo, setExcluindo] = useState(new Set());
+
+    async function excluirImagem(produto) {
+
+        if (!window.confirm(`Excluir a imagem de "${produto.descricaoSite}"? Isso não pode ser desfeito.`)) return;
+
+        setExcluindo((atual) => new Set(atual).add(produto.ean));
+
+        try {
+
+            await excluirImagemHospedada(produto.ean);
+
+            atualizarProduto({ ean: produto.ean, imagem: "", statusImagem: "sem" });
+
+            mostrarToast?.("Imagem excluída.", "sucesso");
+
+        } catch (erro) {
+
+            mostrarToast?.(erro.message || "Erro ao excluir imagem.", "erro");
+
+        } finally {
+
+            setExcluindo((atual) => {
+                const novo = new Set(atual);
+                novo.delete(produto.ean);
+                return novo;
+            });
+
+        }
+
+    }
+
     return (
 
         <>
@@ -577,6 +610,30 @@ function ProductTable({
                                             }
 
                                         </button>
+
+                                        {
+
+                                            produto.statusImagem === "salva" && (
+
+                                                <button
+
+                                                    className="btn-imagem btn-excluir-imagem"
+
+                                                    onClick={() => excluirImagem(produto)}
+
+                                                    disabled={excluindo.has(produto.ean)}
+
+                                                    title="Excluir imagem"
+
+                                                >
+
+                                                    {excluindo.has(produto.ean) ? "Excluindo..." : "🗑️ Excluir"}
+
+                                                </button>
+
+                                            )
+
+                                        }
 
                                     </td>
 
