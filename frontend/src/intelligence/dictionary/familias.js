@@ -37,7 +37,7 @@ export const FAMILIAS = [
             "LOÇAO FACIAL", "LOCAO FACIAL", "SABONETE LIQUIDO", "SABONETE BARRA"] },
 
     { id: "perfumaria", nome: "Perfumaria",
-        cats: ["PERFUME", "DESODORANTE", "TALCO"] },
+        cats: ["PERFUME", "DESODORANTE", "TALCO", "PERFUMARIA"] },
 
     { id: "higiene", nome: "Higiene Pessoal",
         cats: ["HIGIENE BUCAL", "HIGIENE PESSOAL", "ABSORVENTE", "PRESERVATIVO",
