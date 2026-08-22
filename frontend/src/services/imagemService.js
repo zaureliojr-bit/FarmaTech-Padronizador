@@ -38,20 +38,20 @@ export async function buscarImagens(produto) {
 
     try {
 
-        const texto = produto.pesquisaImagem?.principal || produto.descricaoSite || produto.descricaoOriginal;
+        // A Serper cobra crédito por busca, não por imagem devolvida -
+        // então busca por EAN e só recorre à descrição (2º crédito) se a
+        // primeira não achou nada, em vez de gastar as duas sempre.
+        const porEan = await buscarImagensPorTexto(produto.ean);
 
-        // Busca pelo EAN e pela descrição ao mesmo tempo. O EAN é único
-        // por produto - quando está bem indexado na web, a imagem certa
-        // vem logo de cara. A descrição funciona como rede de segurança
-        // pros EANs pouco indexados, que sozinhos não trariam nada.
-        const [porEan, porTexto] = await Promise.all([
-            buscarImagensPorTexto(produto.ean),
-            buscarImagensPorTexto(texto)
-        ]);
+        let imagens = porEan;
 
-        // EAN primeiro na galeria - maior chance de já ser a imagem certa.
-        // O Set tira link duplicado quando as duas buscas acham a mesma foto.
-        const imagens = [...new Set([...porEan, ...porTexto])];
+        if (!imagens.length) {
+
+            const texto = produto.pesquisaImagem?.principal || produto.descricaoSite || produto.descricaoOriginal;
+
+            imagens = await buscarImagensPorTexto(texto);
+
+        }
 
         if (imagens.length) {
 
