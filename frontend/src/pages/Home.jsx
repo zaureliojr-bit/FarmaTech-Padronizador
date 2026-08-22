@@ -41,8 +41,8 @@ function Home() {
         aba,
         setAba,
 
-        apenasSemImagem,
-        setApenasSemImagem,
+        filtroImagem,
+        setFiltroImagem,
 
         laboratorios,
         categorias,
@@ -167,8 +167,8 @@ function Home() {
                         aba={aba}
                         setAba={setAba}
 
-                        apenasSemImagem={apenasSemImagem}
-                        setApenasSemImagem={setApenasSemImagem}
+                        filtroImagem={filtroImagem}
+                        setFiltroImagem={setFiltroImagem}
 
                         total={produtosFiltrados.length}
 

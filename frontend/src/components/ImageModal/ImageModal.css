@@ -33,6 +33,26 @@
 
 }
 
+.btn-buscar-novamente{
+
+    margin-top:12px;
+
+    padding:8px 14px;
+
+    border-radius:8px;
+
+    border:1px solid #cbd5e1;
+
+    background:#f8fafc;
+
+    color:#1976d2;
+
+    cursor:pointer;
+
+    font-size:.9rem;
+
+}
+
 .galeria{
 
     display:grid;
