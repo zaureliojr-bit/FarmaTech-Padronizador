@@ -102,6 +102,23 @@ async function tratarNovoPedido(request, env) {
         };
     });
 
+    // Se este número já existe, pode ser duas coisas muito diferentes:
+    // o mesmo cliente reenviando (rede oscilou, clicou duas vezes), que é
+    // inofensivo, ou uma colisão de número entre pedidos de pessoas
+    // diferentes. No segundo caso, seguir em frente apagaria os itens de
+    // um pedido e colocaria os do outro por cima, deixando um registro
+    // que não é nem um nem outro. É raro, mas silencioso — então recusa.
+    const jaExiste = await env.DB.prepare(
+        `SELECT telefone FROM pedidos WHERE ref = ?1`
+    ).bind(ref).first();
+
+    if (jaExiste && jaExiste.telefone !== telefone) {
+        return json({
+            erro: "Já existe outro pedido com este número.",
+            ref
+        }, 409);
+    }
+
     const comandos = [
 
         env.DB.prepare(
