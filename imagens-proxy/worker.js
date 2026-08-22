@@ -87,7 +87,11 @@ async function tratarSalvar(request, env) {
 
     const base = new URL(request.url).origin;
 
-    return json({ sucesso: true, url: `${base}/${encodeURIComponent(ean)}` });
+    // ?v=salvoEm muda toda vez que a imagem é trocada - sem isso a URL
+    // fica idêntica de antes (mesmo EAN), e o Cache-Control de 1 dia
+    // (tratarServirImagem) faz o navegador continuar mostrando a versão
+    // antiga por até 24h mesmo com o R2 já atualizado.
+    return json({ sucesso: true, url: `${base}/${encodeURIComponent(ean)}?v=${salvoEm}` });
 
 }
 
@@ -131,7 +135,10 @@ async function tratarLote(request, env) {
 
     (results || []).forEach((linha) => {
         mapa[linha.ean] = {
-            url: `${base}/${encodeURIComponent(linha.ean)}`,
+            // mesma URL versionada do tratarSalvar - senão o padronizador
+            // (e o site publicado) continuam mostrando a imagem antiga em
+            // cache depois de uma troca, mesmo com o arquivo já certo no R2.
+            url: `${base}/${encodeURIComponent(linha.ean)}?v=${linha.salvo_em}`,
             origem: linha.origem,
             salvoEm: linha.salvo_em
         };
