@@ -350,6 +350,7 @@ function ProductTable({
         modalAberto,
         abrirModal,
         fecharModal,
+        buscarNovamente,
 
         produtoSelecionado,
 
@@ -569,7 +570,7 @@ function ProductTable({
 
                                                 produto.statusImagem === "salva"
 
-                                                    ? "👁 Ver"
+                                                    ? "🔄 Trocar imagem"
 
                                                     : "🔍 Buscar"
 
@@ -606,6 +607,8 @@ function ProductTable({
                 loading={loading}
 
                 fechar={fecharModal}
+
+                buscarNovamente={buscarNovamente}
 
                 atualizarProduto={atualizarProduto}
 

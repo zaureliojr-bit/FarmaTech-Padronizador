@@ -33,3 +33,19 @@ export function salvarCache(ean, dados) {
     }
 
 }
+
+export function limparCache(ean) {
+
+    if (!ean) return;
+
+    try {
+
+        localStorage.removeItem(PREFIXO + ean);
+
+    } catch {
+
+        // localStorage indisponível — nada a limpar
+
+    }
+
+}

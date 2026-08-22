@@ -71,6 +71,18 @@ export function normalizarProduto(produto) {
 
     });
 
+    // EAN e código são chave de identidade do produto (usados como chave
+    // de Map/objeto em vários lugares: hospedagem de imagem, correções,
+    // CMED) - se a coluna do Excel estiver formatada como número, o XLSX
+    // devolve um Number aqui, não string. "7896111901984" (texto) e
+    // 7896111901984 (número) são o "mesmo" EAN pra gente, mas Map.get()
+    // exige tipo idêntico, então a comparação falhava sem isto - a busca
+    // por HTTP funcionava (a URL vira texto de qualquer jeito), mas a
+    // resposta nunca era encontrada de volta no Map local. Pior: EAN com
+    // zero à esquerda formatado como número perde o zero pra sempre.
+    novo.ean = String(novo.ean ?? "").trim();
+    novo.codigo = String(novo.codigo ?? "").trim();
+
     return novo;
 
 }

@@ -11,6 +11,7 @@ import ProductTable from "../components/ProductTable/ProductTable";
 import Pagination from "../components/Pagination/Pagination";
 import Toast from "../components/Toast/Toast";
 import DashboardStats from "../components/DashboardStats/DashboardStats";
+import CategoriasNaoReconhecidasBox from "../components/CategoriasNaoReconhecidasBox/CategoriasNaoReconhecidasBox";
 
 import { useProdutos } from "../hooks/useProdutos";
 
@@ -40,8 +41,8 @@ function Home() {
         aba,
         setAba,
 
-        apenasSemImagem,
-        setApenasSemImagem,
+        filtroImagem,
+        setFiltroImagem,
 
         laboratorios,
         categorias,
@@ -128,6 +129,18 @@ function Home() {
     )
 
 }
+
+            {
+
+                resultadoImportacao && (
+
+                    <CategoriasNaoReconhecidasBox
+                        produtos={produtos}
+                    />
+
+                )
+
+            }
             {
 
                 resultadoImportacao && (
@@ -154,8 +167,8 @@ function Home() {
                         aba={aba}
                         setAba={setAba}
 
-                        apenasSemImagem={apenasSemImagem}
-                        setApenasSemImagem={setApenasSemImagem}
+                        filtroImagem={filtroImagem}
+                        setFiltroImagem={setFiltroImagem}
 
                         total={produtosFiltrados.length}
 

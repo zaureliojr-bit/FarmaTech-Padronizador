@@ -11,6 +11,7 @@ function ImageModal({
     setImagemSelecionada,
     loading,
     fechar,
+    buscarNovamente,
     atualizarProduto,
     mostrarToast,
     modoManual,
@@ -104,6 +105,19 @@ function ImageModal({
                 <p>
                     <strong>Produto:</strong> {produto?.descricaoSite}
                 </p>
+
+                {
+                    produto?.statusImagem === "salva" && !loading && (
+
+                        <button
+                            className="btn-buscar-novamente"
+                            onClick={buscarNovamente}
+                        >
+                            🔄 Buscar novamente (Cosmos/Serper)
+                        </button>
+
+                    )
+                }
 
                 {
                     loading ? (

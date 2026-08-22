@@ -3,6 +3,12 @@ import { analisarProduto } from "../intelligence/core";
 import { importarListaCmed } from "../services/cmedService";
 import { carregarIndiceCmed, salvarIndiceCmed } from "../services/cmedStorage";
 import { padronizarComCmed } from "../services/padronizarCmed";
+import { salvarCorrecao } from "../services/correcoesService";
+
+// Só estes três campos são "correção" compartilhável entre lojas -
+// preço, promoção e estoque são do catálogo de cada loja e nunca podem
+// ir pro banco de correções.
+const CAMPOS_DE_CORRECAO = ["descricaoManual", "classe", "categoria"];
 
 export function useProdutos() {
 
@@ -13,7 +19,9 @@ export function useProdutos() {
     const [categoria, setCategoria] = useState("");
     const [classe, setClasse] = useState("");
     const [aba, setAba] = useState("");
-    const [apenasSemImagem, setApenasSemImagem] = useState(false);
+
+    // "" = todos, "sem" = só sem imagem, "com" = só com imagem.
+    const [filtroImagem, setFiltroImagem] = useState("");
 
     const [paginaAtual, setPaginaAtual] = useState(1);
 
@@ -23,7 +31,7 @@ export function useProdutos() {
 
         setPaginaAtual(1);
 
-    }, [pesquisa, laboratorio, categoria, classe, aba, apenasSemImagem]);
+    }, [pesquisa, laboratorio, categoria, classe, aba, filtroImagem]);
 
     // =====================================================
     // CMED (tarja, exigência de receita, preço máximo legal)
@@ -215,11 +223,13 @@ export function useProdutos() {
 
                 produto.aba === aba;
 
-            const filtroSemImagem =
+            const filtroImagemAtivo =
 
-                !apenasSemImagem ||
+                !filtroImagem ||
 
-                produto.statusImagem !== "salva";
+                (filtroImagem === "sem" && produto.statusImagem !== "salva") ||
+
+                (filtroImagem === "com" && produto.statusImagem === "salva");
 
             return (
 
@@ -233,7 +243,7 @@ export function useProdutos() {
 
                 filtroAba &&
 
-                filtroSemImagem
+                filtroImagemAtivo
 
             );
 
@@ -253,7 +263,7 @@ export function useProdutos() {
 
         aba,
 
-        apenasSemImagem
+        filtroImagem
 
     ]);
 
@@ -305,7 +315,7 @@ export function useProdutos() {
 
         setAba("");
 
-        setApenasSemImagem(false);
+        setFiltroImagem("");
 
     }
 
@@ -332,6 +342,21 @@ export function useProdutos() {
             )
 
         }));
+
+        // Espelha descrição/classe/categoria corrigidas manualmente no
+        // banco compartilhado (por EAN) - preço/estoque nunca entram
+        // aqui, ficam só localmente. Não bloqueia a edição na tela: se
+        // a chamada falhar, a correção continua valendo nesta sessão,
+        // só não fica salva pra reimportações futuras.
+        const correcao = {};
+
+        CAMPOS_DE_CORRECAO.forEach((campo) => {
+            if (campo in produtoAtualizado) correcao[campo] = produtoAtualizado[campo];
+        });
+
+        if (Object.keys(correcao).length) {
+            salvarCorrecao(produtoAtualizado.ean, correcao);
+        }
 
     }
 
@@ -361,9 +386,9 @@ export function useProdutos() {
 
         setAba,
 
-        apenasSemImagem,
+        filtroImagem,
 
-        setApenasSemImagem,
+        setFiltroImagem,
 
         laboratorios,
 

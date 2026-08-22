@@ -6,6 +6,13 @@ este worker baixa o arquivo uma vez e guarda no R2, indexado por EAN
 no D1. A partir daí, tanto o padronizador quanto o site publicado
 servem a imagem daqui, sem depender do site de origem continuar no ar.
 
+Também guarda **correções** - descrição/classe/categoria ajustadas à
+mão na tabela do padronizador, por EAN, sem nada específico de loja.
+Preço, estoque e código do PDV nunca entram aqui - são dados que têm
+que ficar por loja. A ideia é: se um dia existir mais de uma loja
+usando o padronizador, correção feita numa já nasce pronta pras outras
+herdarem ao importar (mesma lógica da imagem).
+
 ## Deploy (painel do Cloudflare, sem linha de comando)
 
 ### 1. Criar o bucket R2
@@ -18,8 +25,20 @@ servem a imagem daqui, sem depender do site de origem continuar no ar.
 1. **Armazenamento e Bancos de Dados** → **D1 SQL Database** → **Criar**.
 2. Nome: `farmatech-imagens-db`.
 3. Depois de criado, abra o **Console** dele e cole o conteúdo de
-   `schema.sql` deste diretório → **Executar**. Isso cria a tabela
-   `imagens` (só precisa fazer uma vez).
+   `schema.sql` deste diretório → **Executar**. Isso cria as tabelas
+   `imagens` e `correcoes` (só precisa fazer uma vez).
+
+> **Já tem o banco criado de antes (só com a tabela `imagens`)?** Não
+> precisa recriar nada - abra o Console dele e rode só a parte nova:
+> ```sql
+> CREATE TABLE IF NOT EXISTS correcoes (
+>     ean TEXT PRIMARY KEY,
+>     descricao_manual TEXT,
+>     classe TEXT,
+>     categoria TEXT,
+>     atualizado_em INTEGER NOT NULL
+> );
+> ```
 
 ### 3. Criar o worker
 
@@ -63,12 +82,11 @@ Buscar uma imagem já salva (deve dar 404 antes de salvar a primeira vez):
 https://farmatech-imagens-proxy.<seu-usuario>.workers.dev/7891234567895
 ```
 
-## Por que ainda não migrei as imagens antigas
+## Migração das imagens antigas
 
-As imagens já escolhidas antes desta mudança ficam guardadas só no
-navegador (IndexedDB) e continuam funcionando normalmente por lá até
-serem reprocessadas. Não existe hoje um script de migração em lote das
-imagens antigas pra cá - cada produto passa a usar o R2 automaticamente
-na próxima vez que a imagem dele for buscada ou salva de novo. Se
-quiser migrar tudo de uma vez em vez de esperar isso acontecer aos
-poucos, me avise que eu preparo esse passo separado.
+Imagens escolhidas antes deste worker existir ficam só no `produtos.json`
+já publicado (links externos, não hospedados aqui ainda). O botão
+"Migrar imagens antigas" no padronizador lê esse catálogo publicado e
+hospeda no R2 quem ainda não tiver sido migrado - ver
+`frontend/src/services/migracaoImagensService.js`. Idempotente: rodar
+de novo só processa quem faltar.

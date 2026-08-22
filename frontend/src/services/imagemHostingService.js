@@ -3,13 +3,17 @@
 // acham um link em outro site), aqui a farmácia guarda o arquivo de
 // verdade, indexado por EAN: não depende do site de origem continuar
 // no ar, e fica acessível de qualquer sessão/computador.
-const PROXY_URL = import.meta.env.VITE_IMAGENS_PROXY_URL;
+// Remove a barra final, se tiver - "url/" + "/lote" viraria "url//lote",
+// que não bate com a rota exata do worker (cai no fallback de servir
+// imagem por engano, e some tudo com "Imagem não encontrada.").
+const PROXY_URL = (import.meta.env.VITE_IMAGENS_PROXY_URL || "").replace(/\/+$/, "");
 const PROXY_KEY = import.meta.env.VITE_IMAGENS_KEY;
 
-// O worker limita a 500 EANs por chamada (proteção contra lote gigante
-// acidental) - um catálogo real passa disso fácil, então quem pede em
-// lote maior precisa dividir em páginas.
-const EANS_POR_PAGINA = 500;
+// O D1 recusa consulta com mais de 100 parâmetros amarrados (limite da
+// plataforma, não do worker) - IN (?1,...,?500) simplesmente falha e a
+// paginação existe pra nunca bater nisso. Catálogo real passa fácil de
+// 100 EANs, então sempre precisa dividir em páginas.
+const EANS_POR_PAGINA = 100;
 
 function dividirEmPaginas(lista, tamanho) {
 
@@ -30,7 +34,10 @@ function dividirEmPaginas(lista, tamanho) {
  */
 export async function buscarImagensHospedadas(eans) {
 
-    const lista = [...new Set(eans.filter(Boolean))];
+    // Sempre string: o Map de retorno usa as chaves do JSON (sempre
+    // string) - comparar um EAN number contra isso nunca bate, mesmo
+    // sendo "o mesmo" EAN (bug real que já aconteceu aqui).
+    const lista = [...new Set(eans.filter(Boolean).map(String))];
 
     if (!PROXY_URL || !lista.length) return new Map();
 
@@ -42,7 +49,10 @@ export async function buscarImagensHospedadas(eans) {
 
             const resposta = await fetch(`${PROXY_URL}/lote?eans=${encodeURIComponent(pagina.join(","))}`);
 
-            if (!resposta.ok) return {};
+            if (!resposta.ok) {
+                console.error(`Falha ao buscar imagens hospedadas em lote (HTTP ${resposta.status}).`, await resposta.text().catch(() => ""));
+                return {};
+            }
 
             return resposta.json();
 
@@ -81,7 +91,7 @@ export async function salvarImagemHospedada(ean, urlOrigem, origem) {
             "X-Imagens-Key": PROXY_KEY || ""
         },
 
-        body: JSON.stringify({ ean, url: urlOrigem, origem })
+        body: JSON.stringify({ ean: String(ean), url: urlOrigem, origem })
 
     });
 
