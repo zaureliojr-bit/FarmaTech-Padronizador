@@ -26,6 +26,7 @@ const CORS_HEADERS = {
 const MAX_ITENS = 100;          // carrinho de farmácia não passa disso
 const MAX_TEXTO = 200;          // nome, endereço, descrição de item
 const MAX_DIAS_RELATORIO = 366;
+const MAX_TERMO = 60;           // ninguém busca remédio com mais que isso
 
 function json(dados, status = 200) {
 
@@ -66,6 +67,36 @@ function autorizado(request, env) {
 }
 
 /* ========================= GRAVAR ========================= */
+
+/* Registra o que foi digitado na busca do site.
+
+   Aberto, sem chave, pelo mesmo motivo do /pedidos: quem chama é a
+   página pública, e chave no código-fonte não protege nada. A diferença
+   é que aqui o estrago possível é menor — o pior caso é alguém sujar a
+   estatística, não forjar um pedido.
+
+   Guarda o termo e nada mais. Sem telefone, sem IP, sem sessão: o que
+   entra aqui não volta a ser ligado a uma pessoa. */
+async function tratarNovaBusca(request, env) {
+
+    const corpo = await request.json().catch(() => null);
+
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    const termo = texto(corpo.termo, MAX_TERMO).toLowerCase();
+
+    // 2 letras não dizem nada sobre intenção de compra e enchem a tabela
+    if (termo.length < 3) return json({ erro: "Termo curto demais." }, 400);
+
+    const resultados = Math.round(numero(corpo.resultados));
+
+    await env.DB.prepare(
+        `INSERT INTO buscas (termo, criado_em, resultados) VALUES (?1, ?2, ?3)`
+    ).bind(termo, Date.now(), resultados).run();
+
+    return json({ ok: true });
+
+}
 
 async function tratarNovoPedido(request, env) {
 
@@ -201,7 +232,8 @@ async function tratarResumo(request, env) {
         agoraSP.getUTCFullYear(), agoraSP.getUTCMonth(), agoraSP.getUTCDate()
     ) + 3 * 3600000;
 
-    const [hoje, periodo, porDia, topProdutos, recentes, aguardando] = await env.DB.batch([
+    const [hoje, periodo, porDia, topProdutos, recentes, aguardando,
+           maisProcurados, naoEncontrados] = await env.DB.batch([
 
         env.DB.prepare(
             `SELECT COUNT(*) AS pedidos, COALESCE(SUM(total),0) AS faturamento
@@ -242,7 +274,26 @@ async function tratarResumo(request, env) {
         env.DB.prepare(
             `SELECT COUNT(*) AS n FROM pedidos
               WHERE tem_receita = 1 AND status = 'novo'`
-        )
+        ),
+
+        // o que mais procuram, com quantas dessas vezes não acharam nada
+        env.DB.prepare(
+            `SELECT termo,
+                    COUNT(*) AS buscas,
+                    SUM(CASE WHEN resultados = 0 THEN 1 ELSE 0 END) AS vazias
+               FROM buscas WHERE criado_em >= ?1
+              GROUP BY termo ORDER BY buscas DESC, termo
+              LIMIT 20`
+        ).bind(desde),
+
+        // procuraram e o site não tinha: cada linha é uma venda perdida
+        env.DB.prepare(
+            `SELECT termo, COUNT(*) AS buscas, MAX(criado_em) AS ultima
+               FROM buscas
+              WHERE criado_em >= ?1 AND resultados = 0
+              GROUP BY termo ORDER BY buscas DESC, ultima DESC
+              LIMIT 20`
+        ).bind(desde)
 
     ]);
 
@@ -253,7 +304,9 @@ async function tratarResumo(request, env) {
         porDia: porDia.results || [],
         topProdutos: topProdutos.results || [],
         recentes: recentes.results || [],
-        aguardandoReceita: (aguardando.results[0] || {}).n || 0
+        aguardandoReceita: (aguardando.results[0] || {}).n || 0,
+        maisProcurados: maisProcurados.results || [],
+        naoEncontrados: naoEncontrados.results || []
     });
 
 }
@@ -323,6 +376,11 @@ export default {
             // gravar pedido: aberto, porque quem chama é o site público
             if (request.method === "POST" && rota === "/pedidos") {
                 return await tratarNovoPedido(request, env);
+            }
+
+            // idem: quem grava é o site público
+            if (request.method === "POST" && rota === "/busca") {
+                return await tratarNovaBusca(request, env);
             }
 
             // daqui para baixo é a loja olhando os próprios dados
