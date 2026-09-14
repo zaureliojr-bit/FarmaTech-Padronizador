@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { analisarProduto } from "../intelligence/core";
+import { definirOverridesCategoria } from "../intelligence/dictionary/familias";
 import { importarListaCmed } from "../services/cmedService";
 import { carregarIndiceCmed, salvarIndiceCmed } from "../services/cmedStorage";
 import { padronizarComCmed } from "../services/padronizarCmed";
 import { salvarCorrecao } from "../services/correcoesService";
+import { buscarFamiliasOverride, salvarFamiliaOverride } from "../services/familiasOverrideService";
 
 // Só estes três campos são "correção" compartilhável entre lojas -
 // preço, promoção e estoque são do catálogo de cada loja e nunca podem
@@ -90,6 +92,48 @@ export function useProdutos() {
     }
 
     // =====================================================
+    // Correções de categoria -> família (banco compartilhado)
+    // =====================================================
+    // Carregadas uma vez ao abrir o padronizador - definirOverridesCategoria
+    // guarda num Map do próprio módulo familias.js, e "overridesVersao"
+    // força o useMemo dos produtos a recalcular a família de cada um
+    // depois que a busca termina (ela é assíncrona, então na primeira
+    // renderização o Map ainda está vazio).
+
+    const [overridesVersao, setOverridesVersao] = useState(0);
+
+    useEffect(() => {
+
+        let ativo = true;
+
+        buscarFamiliasOverride().then((mapa) => {
+
+            if (!ativo) return;
+
+            definirOverridesCategoria(mapa);
+            setOverridesVersao((v) => v + 1);
+
+        });
+
+        return () => { ativo = false; };
+
+    }, []);
+
+    // Usado pela caixa de categorias não reconhecidas - salva a escolha
+    // no banco compartilhado e já reaplica na tela na hora, sem precisar
+    // reimportar a planilha pra ver o produto mudar de família.
+    async function corrigirFamiliaCategoria(categoria, familiaId) {
+
+        await salvarFamiliaOverride(categoria, familiaId);
+
+        const atual = await buscarFamiliasOverride();
+
+        definirOverridesCategoria(atual);
+        setOverridesVersao((v) => v + 1);
+
+    }
+
+    // =====================================================
     // Produtos Inteligentes
     // =====================================================
 
@@ -119,7 +163,11 @@ export function useProdutos() {
 
         return resultadoCmed.produtos.map(analisarProduto);
 
-    }, [resultadoCmed]);
+        // overridesVersao não é usado no corpo, mas precisa recalcular
+        // a família de cada produto assim que os overrides carregam (ou
+        // mudam) - análise já rodou com o Map de overrides ainda vazio.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [resultadoCmed, overridesVersao]);
 
     // =====================================================
     // Filtros
@@ -413,6 +461,8 @@ export function useProdutos() {
         limparFiltros,
 
         atualizarProduto,
+
+        corrigirFamiliaCategoria,
 
         indiceCmed,
 

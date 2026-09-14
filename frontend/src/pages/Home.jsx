@@ -59,6 +59,7 @@ function Home() {
 
         limparFiltros,
         atualizarProduto,
+        corrigirFamiliaCategoria,
 
         indiceCmed,
         relatorioCmed,
@@ -136,6 +137,8 @@ function Home() {
 
                     <CategoriasNaoReconhecidasBox
                         produtos={produtos}
+                        corrigirFamilia={corrigirFamiliaCategoria}
+                        mostrarToast={mostrarToast}
                     />
 
                 )
