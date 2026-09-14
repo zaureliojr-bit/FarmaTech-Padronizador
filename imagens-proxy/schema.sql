@@ -22,3 +22,14 @@ CREATE TABLE IF NOT EXISTS correcoes (
     categoria TEXT,
     atualizado_em INTEGER NOT NULL
 );
+
+-- A que família do site (perfumaria, higiene, etc.) cada categoria
+-- bruta do PDV pertence, quando ela não bate com o dicionário fixo do
+-- padronizador (familias.js) - evita ter que mexer em código toda vez
+-- que aparece uma categoria nova numa planilha. Chave é a categoria já
+-- normalizada (maiúscula, espaços colapsados), igual o padronizador faz.
+CREATE TABLE IF NOT EXISTS familias_categoria (
+    categoria TEXT PRIMARY KEY,
+    familia_id TEXT NOT NULL,
+    atualizado_em INTEGER NOT NULL
+);

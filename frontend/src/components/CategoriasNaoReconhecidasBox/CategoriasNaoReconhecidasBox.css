@@ -72,6 +72,10 @@
 
     justify-content:space-between;
 
+    align-items:center;
+
+    flex-wrap:wrap;
+
     gap:12px;
 
     padding:8px 12px;
@@ -95,5 +99,40 @@
     color:var(--text2);
 
     white-space:nowrap;
+
+}
+
+.categorias-outros-item-info{
+
+    display:flex;
+
+    align-items:baseline;
+
+    gap:10px;
+
+}
+
+.categorias-outros-item-acao{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:8px;
+
+}
+
+.categorias-outros-item-acao select{
+
+    padding:6px 8px;
+
+    border-radius:var(--radius-sm);
+
+    border:1px solid var(--card-border);
+
+    background:var(--card);
+    color:var(--text);
+
+    font-size:12px;
 
 }

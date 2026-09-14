@@ -72,8 +72,33 @@ FAMILIAS.forEach((familia) =>
     familia.cats.forEach((cat) => _indiceFamilia.set(chaveCategoria(cat), familia))
 );
 
+const _indicePorId = new Map(FAMILIAS.map((familia) => [familia.id, familia]));
+
+// Correções feitas na tela (categoria -> id de família), carregadas do
+// D1 compartilhado ao abrir o padronizador - existem pra não precisar
+// mexer no dicionário fixo acima (e esperar um deploy) toda vez que uma
+// planilha nova traz uma categoria que a lista original não previu.
+const _overrides = new Map();
+
+export function definirOverridesCategoria(mapaCategoriaParaFamiliaId) {
+
+    _overrides.clear();
+
+    mapaCategoriaParaFamiliaId.forEach((familiaId, categoria) => {
+        _overrides.set(chaveCategoria(categoria), familiaId);
+    });
+
+}
+
 export function familiaDe(categoria) {
 
-    return _indiceFamilia.get(chaveCategoria(categoria)) || FAMILIA_OUTROS;
+    const chave = chaveCategoria(categoria);
+
+    const overrideId = _overrides.get(chave);
+    const familiaOverride = overrideId && _indicePorId.get(overrideId);
+
+    if (familiaOverride) return familiaOverride;
+
+    return _indiceFamilia.get(chave) || FAMILIA_OUTROS;
 
 }
