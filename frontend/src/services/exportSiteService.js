@@ -41,11 +41,15 @@ function montarProdutoSite(produto, imagensHospedadas) {
     // Vindos da CMED e da Portaria 344/1998. tarja é só informativo (mostra
     // "venda sob prescrição" no card, não bloqueia nada - tem antibiótico e
     // anticoncepcional que são tarja vermelha e vendem livre). Quem manda
-    // no carrinho é bloqueioPresencial/receitaRemota:
+    // no carrinho/checkout é:
     //   bloqueioPresencial - listas A/B, retenção sempre presencial, não
     //   entra no carrinho.
-    //   receitaRemota - listas C, entra no carrinho normal, mas o
-    //   checkout cobra confirmação do envio da receita antes de despachar.
+    //   confirmarReceita - antibiótico OU controlado de receita remota
+    //   (listas C): entra no carrinho normal, mas o checkout deve cobrar
+    //   confirmação do envio da receita antes de despachar. É ESTE campo
+    //   que o site precisa checar pra disparar a conferência por
+    //   WhatsApp - não a tarja/exigeReceita sozinha, que também é
+    //   verdadeira pra anticoncepcional e outros que vendem livre.
     // Só saem quando têm conteúdo, porque a maior parte do catálogo não é
     // medicamento e nunca vai ter nenhum destes campos.
     //
@@ -55,6 +59,7 @@ function montarProdutoSite(produto, imagensHospedadas) {
     if (produto.tarja) base.tarja = produto.tarja;
     if (produto.bloqueioPresencial) base.bloqueioPresencial = true;
     if (produto.receitaRemota) base.receitaRemota = true;
+    if (produto.confirmarReceita) base.confirmarReceita = true;
     if (produto.controleEspecial) base.controleEspecial = produto.controleEspecial;
     if (produto.tipoReceita) base.tipoReceita = produto.tipoReceita;
     if (produto.substancia) base.substancia = produto.substancia;
