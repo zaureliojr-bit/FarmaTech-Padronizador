@@ -13,11 +13,15 @@ export async function buscarProdutoPorEan(ean) {
 
     const dados = await resposta.json();
 
-    if (!dados?.thumbnail) return null;
+    // Antes exigia thumbnail pra devolver qualquer coisa - certo
+    // enquanto só servia busca de imagem, mas passou a descartar
+    // produto com descrição cadastrada e sem foto (usado agora também
+    // na busca de descrição). Devolve se tiver pelo menos um dos dois.
+    if (!dados?.thumbnail && !dados?.description) return null;
 
     return {
 
-        imagem: dados.thumbnail,
+        imagem: dados.thumbnail || "",
         descricao: dados.description || "",
         marca: dados.brand?.name || ""
 
