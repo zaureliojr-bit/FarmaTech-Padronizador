@@ -117,6 +117,16 @@ export function criarProdutoInteligente(produto = {}) {
 
         receitaRemota: !!produto.receitaRemota,
 
+        // true só pra antibiótico (classeTerapeutica da CMED) ou
+        // controlado de receita remota (listas C) - é o sinal que o site
+        // deve usar pra pedir confirmação da receita por WhatsApp antes
+        // de despachar. NÃO é a mesma coisa que exigeReceita/tarja: a
+        // maioria dos medicamentos de tarja vermelha (anticoncepcional,
+        // por exemplo) vende livre, sem essa conferência.
+        antibiotico: !!produto.antibiotico,
+
+        confirmarReceita: !!produto.confirmarReceita,
+
         substancia: produto.substancia || "",
 
         classeTerapeutica: produto.classeTerapeutica || "",
