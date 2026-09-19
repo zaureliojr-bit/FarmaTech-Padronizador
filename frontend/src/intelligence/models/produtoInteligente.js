@@ -135,6 +135,11 @@ export function criarProdutoInteligente(produto = {}) {
 
         registroAnvisa: produto.registroAnvisa || "",
 
+        // Nome comercial da CMED - segunda fonte da busca de descrição
+        // (ver ProductTable), pro caso em que o produto é medicamento e
+        // a Cosmos não tem esse EAN indexado.
+        produtoCmed: produto.produtoCmed || "",
+
         pmc: produto.pmc ?? "",
 
         acimaDoPmc: !!produto.acimaDoPmc,
