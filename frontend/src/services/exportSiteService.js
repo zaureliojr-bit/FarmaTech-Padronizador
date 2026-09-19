@@ -81,10 +81,14 @@ export async function gerarProdutosSite(produtos) {
 }
 
 // modo "mesclar" (padrão): atualiza/acrescenta pelo EAN, mantém no ar
-// quem não veio nesta planilha - seguro pra publicar uma planilha
-// parcial (só o que mudou) sem apagar o resto do catálogo. modo
-// "substituir": publica exatamente esta lista, apagando o que não
-// vier - só faz sentido junto de uma reimportação do catálogo inteiro.
+// quem não veio nesta planilha do jeito que estava - seguro pra
+// publicar uma planilha parcial (só o que mudou) sem apagar o resto do
+// catálogo. modo "encomenda": igual o mesclar, mas quem já estava
+// publicado e não veio agora fica com estoque zerado e marcado pra
+// oferecer encomenda no site - pensado pra planilha só dos itens que
+// têm estoque agora. modo "substituir": publica exatamente esta lista,
+// apagando o que não vier - só faz sentido junto de uma reimportação
+// do catálogo inteiro.
 export async function publicarNoSite(produtos, modo = "mesclar") {
 
     const workerUrl = import.meta.env.VITE_PUBLISH_WORKER_URL;
