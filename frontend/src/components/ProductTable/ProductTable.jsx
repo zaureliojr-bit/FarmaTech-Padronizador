@@ -5,6 +5,7 @@ import "./ProductTable.css";
 import ImageModal from "../ImageModal/ImageModal";
 import { useImagem } from "../../hooks/useImagem";
 import { excluirImagemHospedada } from "../../services/imagemHostingService";
+import { buscarProdutoPorEan } from "../../services/cosmosService";
 
 function classeQualidade(score) {
 
@@ -15,10 +16,11 @@ function classeQualidade(score) {
 
 }
 
-function CelulaDescricao({ produto, atualizarProduto }) {
+function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
 
     const [editando, setEditando] = useState(false);
     const [valor, setValor] = useState(produto.descricaoSite);
+    const [buscandoDescricao, setBuscandoDescricao] = useState(false);
 
     const editadaManualmente = !!produto.descricaoManual;
 
@@ -26,6 +28,50 @@ function CelulaDescricao({ produto, atualizarProduto }) {
 
         setValor(produto.descricaoSite);
         setEditando(true);
+
+    }
+
+    // Cosmos já devolve uma descrição de catálogo de verdade pelo EAN
+    // (a mesma consulta usada na busca de imagem) - útil pra planilha do
+    // PDV que vem abreviada demais. Não sobrescreve sozinho: só abre a
+    // edição já preenchida com a sugestão, pra revisar/ajustar antes de
+    // salvar, igual uma edição manual normal.
+    async function buscarDescricao() {
+
+        if (!produto.ean) {
+            mostrarToast?.("Produto sem EAN - não dá pra buscar na Cosmos.", "erro");
+            return;
+        }
+
+        setBuscandoDescricao(true);
+
+        try {
+
+            const encontrado = await buscarProdutoPorEan(produto.ean);
+            const descricaoCosmos = encontrado?.descricao?.trim();
+
+            if (!descricaoCosmos) {
+                mostrarToast?.("Não achei descrição na Cosmos pra este EAN.", "erro");
+                return;
+            }
+
+            if (descricaoCosmos.toLowerCase() === produto.descricaoSite.trim().toLowerCase()) {
+                mostrarToast?.("A descrição da Cosmos é igual à atual.", "aviso");
+                return;
+            }
+
+            setValor(descricaoCosmos);
+            setEditando(true);
+
+        } catch (erro) {
+
+            mostrarToast?.(erro.message || "Erro ao buscar descrição na Cosmos.", "erro");
+
+        } finally {
+
+            setBuscandoDescricao(false);
+
+        }
 
     }
 
@@ -169,6 +215,15 @@ function CelulaDescricao({ produto, atualizarProduto }) {
                     title="Editar descrição"
                 >
                     ✏️
+                </button>
+
+                <button
+                    className="btn-editar-descricao"
+                    onClick={buscarDescricao}
+                    disabled={buscandoDescricao}
+                    title="Buscar descrição na Cosmos pelo EAN"
+                >
+                    {buscandoDescricao ? "⏳" : "🔍"}
                 </button>
 
                 {
@@ -461,6 +516,7 @@ function ProductTable({
                                         <CelulaDescricao
                                             produto={produto}
                                             atualizarProduto={atualizarProduto}
+                                            mostrarToast={mostrarToast}
                                         />
 
                                     </td>
