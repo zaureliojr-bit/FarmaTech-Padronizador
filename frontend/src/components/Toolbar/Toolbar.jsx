@@ -28,7 +28,12 @@ function Toolbar({
 }) {
 
     const [publicando, setPublicando] = useState(false);
-    const [substituirTudo, setSubstituirTudo] = useState(false);
+
+    // "mesclar" (padrão): atualiza/acrescenta, sem mexer em quem não veio.
+    // "encomenda": pra planilha só dos itens com estoque - quem não veio
+    // fica marcado sem estoque/pra encomendar, sem sumir do site.
+    // "substituir": apaga do site quem não estiver nesta planilha.
+    const [modoPublicacao, setModoPublicacao] = useState("mesclar");
 
     async function handlePublicar() {
 
@@ -39,19 +44,15 @@ function Toolbar({
             // Sempre publica o catálogo completo importado, nunca a lista
             // filtrada da tela - senão um filtro ativo (categoria, busca...)
             // apagaria do site tudo que não bate com o filtro.
-            const modo = substituirTudo ? "substituir" : "mesclar";
+            const { total: totalPublicado, enviados } = await publicarNoSite(produtosCompletos || produtos, modoPublicacao);
 
-            const { total: totalPublicado, enviados } = await publicarNoSite(produtosCompletos || produtos, modo);
+            const mensagens = {
+                mesclar: `${enviados} produto(s) atualizado(s) - catálogo no site ficou com ${totalPublicado} produtos.`,
+                encomenda: `${enviados} produto(s) atualizado(s) - quem não veio nesta planilha ficou marcado sem estoque/pra encomenda.`,
+                substituir: `Catálogo substituído: ${totalPublicado} produtos publicados no site.`
+            };
 
-            mostrarToast?.(
-
-                modo === "mesclar"
-                    ? `${enviados} produto(s) atualizado(s) - catálogo no site ficou com ${totalPublicado} produtos.`
-                    : `Catálogo substituído: ${totalPublicado} produtos publicados no site.`,
-
-                "sucesso"
-
-            );
+            mostrarToast?.(mensagens[modoPublicacao], "sucesso");
 
         } catch (erro) {
 
@@ -164,23 +165,27 @@ function Toolbar({
                     📤 Exportar JSON
                 </button>
 
-                <label className="toolbar-modo-publicacao" title="Marque só quando importar o catálogo completo e quiser que produtos ausentes desta planilha saiam do site (ex: descontinuados). Deixe desmarcado pra atualizar/acrescentar sem apagar o resto.">
-                    <input
-                        type="checkbox"
-                        checked={substituirTudo}
-                        onChange={(e) => setSubstituirTudo(e.target.checked)}
-                    />
-                    Substituir tudo (apaga do site quem não estiver aqui)
-                </label>
+                <select
+                    className="toolbar-modo-publicacao"
+                    value={modoPublicacao}
+                    onChange={(e) => setModoPublicacao(e.target.value)}
+                    title="Como tratar, no site, os produtos que não vierem nesta planilha"
+                >
+                    <option value="mesclar">Mesclar (mantém quem não veio do jeito que estava)</option>
+                    <option value="encomenda">Mesclar e marcar sem estoque quem não veio (planilha só do que tem estoque)</option>
+                    <option value="substituir">Substituir tudo (apaga do site quem não estiver aqui)</option>
+                </select>
 
                 <button
                     className="btn btn-primary"
                     onClick={handlePublicar}
                     disabled={publicando}
                     title={
-                        substituirTudo
+                        modoPublicacao === "substituir"
                             ? `Substitui o catálogo inteiro do site por estes ${(produtosCompletos || produtos).length} produtos, ignorando filtros ativos na tela`
-                            : `Atualiza/acrescenta estes ${(produtosCompletos || produtos).length} produtos no site, sem apagar o que já estava publicado`
+                            : modoPublicacao === "encomenda"
+                                ? `Atualiza estes ${(produtosCompletos || produtos).length} produtos e marca sem estoque/pra encomenda quem já estava publicado mas não veio nesta planilha`
+                                : `Atualiza/acrescenta estes ${(produtosCompletos || produtos).length} produtos no site, sem apagar o que já estava publicado`
                     }
                 >
                     {publicando ? "Publicando..." : "🌐 Publicar no site"}

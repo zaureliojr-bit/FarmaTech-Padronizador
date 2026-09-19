@@ -117,6 +117,16 @@ export function criarProdutoInteligente(produto = {}) {
 
         receitaRemota: !!produto.receitaRemota,
 
+        // true só pra antibiótico (classeTerapeutica da CMED) ou
+        // controlado de receita remota (listas C) - é o sinal que o site
+        // deve usar pra pedir confirmação da receita por WhatsApp antes
+        // de despachar. NÃO é a mesma coisa que exigeReceita/tarja: a
+        // maioria dos medicamentos de tarja vermelha (anticoncepcional,
+        // por exemplo) vende livre, sem essa conferência.
+        antibiotico: !!produto.antibiotico,
+
+        confirmarReceita: !!produto.confirmarReceita,
+
         substancia: produto.substancia || "",
 
         classeTerapeutica: produto.classeTerapeutica || "",
@@ -124,6 +134,11 @@ export function criarProdutoInteligente(produto = {}) {
         tipoProduto: produto.tipoProduto || "",
 
         registroAnvisa: produto.registroAnvisa || "",
+
+        // Nome comercial da CMED - segunda fonte da busca de descrição
+        // (ver ProductTable), pro caso em que o produto é medicamento e
+        // a Cosmos não tem esse EAN indexado.
+        produtoCmed: produto.produtoCmed || "",
 
         pmc: produto.pmc ?? "",
 

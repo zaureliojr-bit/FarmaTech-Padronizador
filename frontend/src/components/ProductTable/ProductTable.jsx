@@ -4,6 +4,8 @@ import "./ProductTable.css";
 
 import ImageModal from "../ImageModal/ImageModal";
 import { useImagem } from "../../hooks/useImagem";
+import { excluirImagemHospedada } from "../../services/imagemHostingService";
+import { buscarProdutoPorEan } from "../../services/cosmosService";
 
 function classeQualidade(score) {
 
@@ -14,10 +16,11 @@ function classeQualidade(score) {
 
 }
 
-function CelulaDescricao({ produto, atualizarProduto }) {
+function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
 
     const [editando, setEditando] = useState(false);
     const [valor, setValor] = useState(produto.descricaoSite);
+    const [buscandoDescricao, setBuscandoDescricao] = useState(false);
 
     const editadaManualmente = !!produto.descricaoManual;
 
@@ -25,6 +28,53 @@ function CelulaDescricao({ produto, atualizarProduto }) {
 
         setValor(produto.descricaoSite);
         setEditando(true);
+
+    }
+
+    // Cosmos já devolve uma descrição de catálogo de verdade pelo EAN
+    // (a mesma consulta usada na busca de imagem) - útil pra planilha do
+    // PDV que vem abreviada demais. Cobre bem produto de varejo em geral
+    // (perfumaria, higiene), mas é fraca pra medicamento - por isso cai
+    // pro nome comercial da CMED (produtoCmed) quando a Cosmos não acha
+    // nada. Nenhuma das duas sobrescreve sozinha: só abre a edição já
+    // preenchida com a sugestão, pra revisar/ajustar antes de salvar,
+    // igual uma edição manual normal.
+    async function buscarDescricao() {
+
+        if (!produto.ean) {
+            mostrarToast?.("Produto sem EAN - não dá pra buscar descrição.", "erro");
+            return;
+        }
+
+        setBuscandoDescricao(true);
+
+        try {
+
+            const encontrado = await buscarProdutoPorEan(produto.ean);
+            const sugestao = encontrado?.descricao?.trim() || produto.produtoCmed?.trim();
+
+            if (!sugestao) {
+                mostrarToast?.("Não achei descrição na Cosmos nem na CMED pra este EAN.", "erro");
+                return;
+            }
+
+            if (sugestao.toLowerCase() === produto.descricaoSite.trim().toLowerCase()) {
+                mostrarToast?.("A descrição encontrada é igual à atual.", "aviso");
+                return;
+            }
+
+            setValor(sugestao);
+            setEditando(true);
+
+        } catch (erro) {
+
+            mostrarToast?.(erro.message || "Erro ao buscar descrição.", "erro");
+
+        } finally {
+
+            setBuscandoDescricao(false);
+
+        }
 
     }
 
@@ -168,6 +218,15 @@ function CelulaDescricao({ produto, atualizarProduto }) {
                     title="Editar descrição"
                 >
                     ✏️
+                </button>
+
+                <button
+                    className="btn-editar-descricao"
+                    onClick={buscarDescricao}
+                    disabled={buscandoDescricao}
+                    title="Buscar descrição pelo EAN (Cosmos, ou CMED se for medicamento)"
+                >
+                    {buscandoDescricao ? "⏳" : "🔍"}
                 </button>
 
                 {
@@ -368,6 +427,38 @@ function ProductTable({
 
     } = useImagem();
 
+    const [excluindo, setExcluindo] = useState(new Set());
+
+    async function excluirImagem(produto) {
+
+        if (!window.confirm(`Excluir a imagem de "${produto.descricaoSite}"? Isso não pode ser desfeito.`)) return;
+
+        setExcluindo((atual) => new Set(atual).add(produto.ean));
+
+        try {
+
+            await excluirImagemHospedada(produto.ean);
+
+            atualizarProduto({ ean: produto.ean, imagem: "", statusImagem: "sem" });
+
+            mostrarToast?.("Imagem excluída.", "sucesso");
+
+        } catch (erro) {
+
+            mostrarToast?.(erro.message || "Erro ao excluir imagem.", "erro");
+
+        } finally {
+
+            setExcluindo((atual) => {
+                const novo = new Set(atual);
+                novo.delete(produto.ean);
+                return novo;
+            });
+
+        }
+
+    }
+
     return (
 
         <>
@@ -428,6 +519,7 @@ function ProductTable({
                                         <CelulaDescricao
                                             produto={produto}
                                             atualizarProduto={atualizarProduto}
+                                            mostrarToast={mostrarToast}
                                         />
 
                                     </td>
@@ -577,6 +669,30 @@ function ProductTable({
                                             }
 
                                         </button>
+
+                                        {
+
+                                            produto.statusImagem === "salva" && (
+
+                                                <button
+
+                                                    className="btn-imagem btn-excluir-imagem"
+
+                                                    onClick={() => excluirImagem(produto)}
+
+                                                    disabled={excluindo.has(produto.ean)}
+
+                                                    title="Excluir imagem"
+
+                                                >
+
+                                                    {excluindo.has(produto.ean) ? "Excluindo..." : "🗑️ Excluir"}
+
+                                                </button>
+
+                                            )
+
+                                        }
 
                                     </td>
 
