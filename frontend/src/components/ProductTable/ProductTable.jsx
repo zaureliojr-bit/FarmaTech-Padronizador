@@ -33,13 +33,16 @@ function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
 
     // Cosmos já devolve uma descrição de catálogo de verdade pelo EAN
     // (a mesma consulta usada na busca de imagem) - útil pra planilha do
-    // PDV que vem abreviada demais. Não sobrescreve sozinho: só abre a
-    // edição já preenchida com a sugestão, pra revisar/ajustar antes de
-    // salvar, igual uma edição manual normal.
+    // PDV que vem abreviada demais. Cobre bem produto de varejo em geral
+    // (perfumaria, higiene), mas é fraca pra medicamento - por isso cai
+    // pro nome comercial da CMED (produtoCmed) quando a Cosmos não acha
+    // nada. Nenhuma das duas sobrescreve sozinha: só abre a edição já
+    // preenchida com a sugestão, pra revisar/ajustar antes de salvar,
+    // igual uma edição manual normal.
     async function buscarDescricao() {
 
         if (!produto.ean) {
-            mostrarToast?.("Produto sem EAN - não dá pra buscar na Cosmos.", "erro");
+            mostrarToast?.("Produto sem EAN - não dá pra buscar descrição.", "erro");
             return;
         }
 
@@ -48,24 +51,24 @@ function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
         try {
 
             const encontrado = await buscarProdutoPorEan(produto.ean);
-            const descricaoCosmos = encontrado?.descricao?.trim();
+            const sugestao = encontrado?.descricao?.trim() || produto.produtoCmed?.trim();
 
-            if (!descricaoCosmos) {
-                mostrarToast?.("Não achei descrição na Cosmos pra este EAN.", "erro");
+            if (!sugestao) {
+                mostrarToast?.("Não achei descrição na Cosmos nem na CMED pra este EAN.", "erro");
                 return;
             }
 
-            if (descricaoCosmos.toLowerCase() === produto.descricaoSite.trim().toLowerCase()) {
-                mostrarToast?.("A descrição da Cosmos é igual à atual.", "aviso");
+            if (sugestao.toLowerCase() === produto.descricaoSite.trim().toLowerCase()) {
+                mostrarToast?.("A descrição encontrada é igual à atual.", "aviso");
                 return;
             }
 
-            setValor(descricaoCosmos);
+            setValor(sugestao);
             setEditando(true);
 
         } catch (erro) {
 
-            mostrarToast?.(erro.message || "Erro ao buscar descrição na Cosmos.", "erro");
+            mostrarToast?.(erro.message || "Erro ao buscar descrição.", "erro");
 
         } finally {
 
@@ -221,7 +224,7 @@ function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
                     className="btn-editar-descricao"
                     onClick={buscarDescricao}
                     disabled={buscandoDescricao}
-                    title="Buscar descrição na Cosmos pelo EAN"
+                    title="Buscar descrição pelo EAN (Cosmos, ou CMED se for medicamento)"
                 >
                     {buscandoDescricao ? "⏳" : "🔍"}
                 </button>
