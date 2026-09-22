@@ -9,6 +9,13 @@ export async function buscarProdutoPorEan(ean) {
 
     const resposta = await fetch(`${PROXY_URL}?ean=${encodeURIComponent(ean)}`);
 
+    // Cota diária da Cosmos estourada - diferente de "não achou nada",
+    // e sem isso a busca de descrição mostrava "não encontrei" enganoso
+    // (parecia falta de dado, quando na verdade é limite do dia).
+    if (resposta.status === 429) {
+        throw new Error("Cosmos sem cota disponível agora (limite diário atingido) - tenta de novo amanhã.");
+    }
+
     if (!resposta.ok) return null;
 
     const dados = await resposta.json();
