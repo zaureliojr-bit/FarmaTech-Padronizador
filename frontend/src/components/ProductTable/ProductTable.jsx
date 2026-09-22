@@ -5,8 +5,7 @@ import "./ProductTable.css";
 import ImageModal from "../ImageModal/ImageModal";
 import { useImagem } from "../../hooks/useImagem";
 import { excluirImagemHospedada } from "../../services/imagemHostingService";
-import { buscarProdutoPorEan } from "../../services/cosmosService";
-import { buscarDescricaoOpenFacts } from "../../services/openFactsService";
+import { buscarDescricaoProduto } from "../../services/descricaoService";
 
 function classeQualidade(score) {
 
@@ -32,12 +31,11 @@ function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
 
     }
 
-    // Cascata: Cosmos (catálogo de varejo em geral, pode estourar cota
-    // diária) -> Open Beauty/Food Facts (aberta, sem cota apertada, boa
-    // em perfumaria/cosmético/alimento) -> nome comercial da CMED
-    // (produtoCmed, só existe se for medicamento). Nenhuma sobrescreve
-    // sozinha: só abre a edição já preenchida com a sugestão, pra
-    // revisar/ajustar antes de salvar, igual uma edição manual normal.
+    // Cascata (Cosmos -> Open Beauty/Food Facts -> CMED) fica em
+    // descricaoService.js, compartilhada com a busca em lote. Não
+    // sobrescreve sozinha: só abre a edição já preenchida com a
+    // sugestão, pra revisar/ajustar antes de salvar, igual uma edição
+    // manual normal.
     async function buscarDescricao() {
 
         if (!produto.ean) {
@@ -49,24 +47,7 @@ function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
 
         try {
 
-            let sugestao = "";
-
-            try {
-
-                const cosmos = await buscarProdutoPorEan(produto.ean);
-                sugestao = cosmos?.descricao?.trim() || "";
-
-            } catch (erroCosmos) {
-
-                // Cota estourada ou indisponível - não trava a busca,
-                // as próximas fontes ainda podem achar algo.
-                console.warn("Cosmos indisponível na busca de descrição, tentando outras fontes.", erroCosmos);
-
-            }
-
-            if (!sugestao) sugestao = await buscarDescricaoOpenFacts(produto.ean);
-
-            if (!sugestao) sugestao = produto.produtoCmed?.trim() || "";
+            const sugestao = await buscarDescricaoProduto(produto);
 
             if (!sugestao) {
                 mostrarToast?.("Não achei descrição em nenhuma fonte (Cosmos, Open Beauty/Food Facts, CMED) pra este EAN.", "erro");

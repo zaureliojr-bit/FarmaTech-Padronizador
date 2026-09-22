@@ -6,6 +6,7 @@ import ImportSummary from "../components/ImportSummary/ImportSummary";
 import CmedBox from "../components/CmedBox/CmedBox";
 import MigrarImagensBox from "../components/MigrarImagensBox/MigrarImagensBox";
 import BuscaLoteImagensBox from "../components/BuscaLoteImagensBox/BuscaLoteImagensBox";
+import BuscaLoteDescricoesBox from "../components/BuscaLoteDescricoesBox/BuscaLoteDescricoesBox";
 import Toolbar from "../components/Toolbar/Toolbar";
 import ProductTable from "../components/ProductTable/ProductTable";
 import Pagination from "../components/Pagination/Pagination";
@@ -191,6 +192,20 @@ function Home() {
                 resultadoImportacao && (
 
                     <BuscaLoteImagensBox
+                        produtos={produtosFiltrados}
+                        atualizarProduto={atualizarProduto}
+                        mostrarToast={mostrarToast}
+                    />
+
+                )
+
+            }
+
+            {
+
+                resultadoImportacao && (
+
+                    <BuscaLoteDescricoesBox
                         produtos={produtosFiltrados}
                         atualizarProduto={atualizarProduto}
                         mostrarToast={mostrarToast}
