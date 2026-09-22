@@ -6,6 +6,7 @@ import ImageModal from "../ImageModal/ImageModal";
 import { useImagem } from "../../hooks/useImagem";
 import { excluirImagemHospedada } from "../../services/imagemHostingService";
 import { buscarProdutoPorEan } from "../../services/cosmosService";
+import { buscarDescricaoOpenFacts } from "../../services/openFactsService";
 
 function classeQualidade(score) {
 
@@ -31,14 +32,12 @@ function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
 
     }
 
-    // Cosmos já devolve uma descrição de catálogo de verdade pelo EAN
-    // (a mesma consulta usada na busca de imagem) - útil pra planilha do
-    // PDV que vem abreviada demais. Cobre bem produto de varejo em geral
-    // (perfumaria, higiene), mas é fraca pra medicamento - por isso cai
-    // pro nome comercial da CMED (produtoCmed) quando a Cosmos não acha
-    // nada. Nenhuma das duas sobrescreve sozinha: só abre a edição já
-    // preenchida com a sugestão, pra revisar/ajustar antes de salvar,
-    // igual uma edição manual normal.
+    // Cascata: Cosmos (catálogo de varejo em geral, pode estourar cota
+    // diária) -> Open Beauty/Food Facts (aberta, sem cota apertada, boa
+    // em perfumaria/cosmético/alimento) -> nome comercial da CMED
+    // (produtoCmed, só existe se for medicamento). Nenhuma sobrescreve
+    // sozinha: só abre a edição já preenchida com a sugestão, pra
+    // revisar/ajustar antes de salvar, igual uma edição manual normal.
     async function buscarDescricao() {
 
         if (!produto.ean) {
@@ -50,11 +49,27 @@ function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
 
         try {
 
-            const encontrado = await buscarProdutoPorEan(produto.ean);
-            const sugestao = encontrado?.descricao?.trim() || produto.produtoCmed?.trim();
+            let sugestao = "";
+
+            try {
+
+                const cosmos = await buscarProdutoPorEan(produto.ean);
+                sugestao = cosmos?.descricao?.trim() || "";
+
+            } catch (erroCosmos) {
+
+                // Cota estourada ou indisponível - não trava a busca,
+                // as próximas fontes ainda podem achar algo.
+                console.warn("Cosmos indisponível na busca de descrição, tentando outras fontes.", erroCosmos);
+
+            }
+
+            if (!sugestao) sugestao = await buscarDescricaoOpenFacts(produto.ean);
+
+            if (!sugestao) sugestao = produto.produtoCmed?.trim() || "";
 
             if (!sugestao) {
-                mostrarToast?.("Não achei descrição na Cosmos nem na CMED pra este EAN.", "erro");
+                mostrarToast?.("Não achei descrição em nenhuma fonte (Cosmos, Open Beauty/Food Facts, CMED) pra este EAN.", "erro");
                 return;
             }
 
@@ -224,7 +239,7 @@ function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
                     className="btn-editar-descricao"
                     onClick={buscarDescricao}
                     disabled={buscandoDescricao}
-                    title="Buscar descrição pelo EAN (Cosmos, ou CMED se for medicamento)"
+                    title="Buscar descrição pelo EAN (Cosmos, Open Beauty/Food Facts, ou CMED se for medicamento)"
                 >
                     {buscandoDescricao ? "⏳" : "🔍"}
                 </button>
