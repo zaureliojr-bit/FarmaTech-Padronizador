@@ -8,6 +8,7 @@ import MigrarImagensBox from "../components/MigrarImagensBox/MigrarImagensBox";
 import BuscaLoteImagensBox from "../components/BuscaLoteImagensBox/BuscaLoteImagensBox";
 import BuscaLoteDescricoesBox from "../components/BuscaLoteDescricoesBox/BuscaLoteDescricoesBox";
 import TrocarImagensLoteBox from "../components/TrocarImagensLoteBox/TrocarImagensLoteBox";
+import AplicarImagemLoteBox from "../components/AplicarImagemLoteBox/AplicarImagemLoteBox";
 import Toolbar from "../components/Toolbar/Toolbar";
 import ProductTable from "../components/ProductTable/ProductTable";
 import Pagination from "../components/Pagination/Pagination";
@@ -207,6 +208,20 @@ function Home() {
                 resultadoImportacao && (
 
                     <TrocarImagensLoteBox
+                        produtos={produtosFiltrados}
+                        atualizarProduto={atualizarProduto}
+                        mostrarToast={mostrarToast}
+                    />
+
+                )
+
+            }
+
+            {
+
+                resultadoImportacao && (
+
+                    <AplicarImagemLoteBox
                         produtos={produtosFiltrados}
                         atualizarProduto={atualizarProduto}
                         mostrarToast={mostrarToast}
