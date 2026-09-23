@@ -4,6 +4,7 @@ import Header from "../components/Header/Header";
 import ImportBox from "../components/ImportBox/ImportBox";
 import ImportSummary from "../components/ImportSummary/ImportSummary";
 import CmedBox from "../components/CmedBox/CmedBox";
+import DistribuidorBox from "../components/DistribuidorBox/DistribuidorBox";
 import MigrarImagensBox from "../components/MigrarImagensBox/MigrarImagensBox";
 import BuscaLoteImagensBox from "../components/BuscaLoteImagensBox/BuscaLoteImagensBox";
 import BuscaLoteDescricoesBox from "../components/BuscaLoteDescricoesBox/BuscaLoteDescricoesBox";
@@ -72,7 +73,12 @@ function Home() {
         corrigirClasseCmed,
         setCorrigirClasseCmed,
         corrigirLaboratorioCmed,
-        setCorrigirLaboratorioCmed
+        setCorrigirLaboratorioCmed,
+
+        indiceDistribuidor,
+        carregandoDistribuidor,
+        erroDistribuidor,
+        carregarListaDistribuidor
 
     } = useProdutos();
 
@@ -114,6 +120,14 @@ function Home() {
                 setCorrigirClasse={setCorrigirClasseCmed}
                 corrigirLaboratorio={corrigirLaboratorioCmed}
                 setCorrigirLaboratorio={setCorrigirLaboratorioCmed}
+                mostrarToast={mostrarToast}
+            />
+
+            <DistribuidorBox
+                indice={indiceDistribuidor}
+                carregando={carregandoDistribuidor}
+                erro={erroDistribuidor}
+                carregarLista={carregarListaDistribuidor}
                 mostrarToast={mostrarToast}
             />
 

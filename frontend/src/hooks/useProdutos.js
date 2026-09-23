@@ -4,6 +4,8 @@ import { definirOverridesCategoria } from "../intelligence/dictionary/familias";
 import { importarListaCmed } from "../services/cmedService";
 import { carregarIndiceCmed, salvarIndiceCmed } from "../services/cmedStorage";
 import { padronizarComCmed } from "../services/padronizarCmed";
+import { importarListaDistribuidor, consultarEanDistribuidor } from "../services/distribuidorService";
+import { carregarIndiceDistribuidor, salvarIndiceDistribuidor } from "../services/distribuidorStorage";
 import { salvarCorrecao } from "../services/correcoesService";
 import { buscarFamiliasOverride, salvarFamiliaOverride } from "../services/familiasOverrideService";
 
@@ -92,6 +94,60 @@ export function useProdutos() {
     }
 
     // =====================================================
+    // Distribuidora (fonte extra de descrição/laboratório/categoria)
+    // =====================================================
+    // Mesmo padrão da CMED: fica guardada no navegador, aplicada
+    // automaticamente em toda planilha importada dali pra frente. Não
+    // mexe em preço/estoque nem em regra de negócio nenhuma - só
+    // acrescenta descricaoDistribuidor, usada como primeira fonte na
+    // cascata de busca de descrição (ver descricaoService.js).
+
+    const [indiceDistribuidor, setIndiceDistribuidor] = useState(null);
+    const [carregandoDistribuidor, setCarregandoDistribuidor] = useState(false);
+    const [erroDistribuidor, setErroDistribuidor] = useState("");
+
+    useEffect(() => {
+
+        let ativo = true;
+
+        carregarIndiceDistribuidor().then((indice) => {
+            if (ativo && indice) setIndiceDistribuidor(indice);
+        });
+
+        return () => { ativo = false; };
+
+    }, []);
+
+    async function carregarListaDistribuidor(arquivo) {
+
+        setErroDistribuidor("");
+        setCarregandoDistribuidor(true);
+
+        try {
+
+            const indice = await importarListaDistribuidor(arquivo);
+
+            setIndiceDistribuidor(indice);
+
+            const guardou = await salvarIndiceDistribuidor(indice);
+
+            return { sucesso: true, guardou, totalLinhas: indice.totalLinhas };
+
+        } catch (erro) {
+
+            setErroDistribuidor(erro.message || "Não consegui ler esta planilha da distribuidora.");
+
+            return { sucesso: false };
+
+        } finally {
+
+            setCarregandoDistribuidor(false);
+
+        }
+
+    }
+
+    // =====================================================
     // Correções de categoria -> família (banco compartilhado)
     // =====================================================
     // Carregadas uma vez ao abrir o padronizador - definirOverridesCategoria
@@ -157,17 +213,37 @@ export function useProdutos() {
 
     const relatorioCmed = resultadoCmed?.relatorio || null;
 
-    const produtos = useMemo(() => {
+    // Cruza com a distribuidora (se a lista já estiver carregada) -
+    // só acrescenta descricaoDistribuidor, sem regra de negócio.
+    const produtosComDistribuidor = useMemo(() => {
 
         if (!resultadoCmed) return [];
 
-        return resultadoCmed.produtos.map(analisarProduto);
+        if (!indiceDistribuidor) return resultadoCmed.produtos;
+
+        return resultadoCmed.produtos.map((produto) => {
+
+            const info = consultarEanDistribuidor(indiceDistribuidor, produto.ean);
+
+            if (!info?.descricao) return produto;
+
+            return { ...produto, descricaoDistribuidor: info.descricao };
+
+        });
+
+    }, [resultadoCmed, indiceDistribuidor]);
+
+    const produtos = useMemo(() => {
+
+        if (!produtosComDistribuidor.length) return [];
+
+        return produtosComDistribuidor.map(analisarProduto);
 
         // overridesVersao não é usado no corpo, mas precisa recalcular
         // a família de cada produto assim que os overrides carregam (ou
         // mudam) - análise já rodou com o Map de overrides ainda vazio.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [resultadoCmed, overridesVersao]);
+    }, [produtosComDistribuidor, overridesVersao]);
 
     // =====================================================
     // Filtros
@@ -480,7 +556,15 @@ export function useProdutos() {
 
         corrigirLaboratorioCmed,
 
-        setCorrigirLaboratorioCmed
+        setCorrigirLaboratorioCmed,
+
+        indiceDistribuidor,
+
+        carregandoDistribuidor,
+
+        erroDistribuidor,
+
+        carregarListaDistribuidor
 
     };
 

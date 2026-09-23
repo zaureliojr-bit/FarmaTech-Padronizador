@@ -135,10 +135,16 @@ export function criarProdutoInteligente(produto = {}) {
 
         registroAnvisa: produto.registroAnvisa || "",
 
-        // Nome comercial da CMED - segunda fonte da busca de descrição
-        // (ver ProductTable), pro caso em que o produto é medicamento e
-        // a Cosmos não tem esse EAN indexado.
+        // Nome comercial da CMED - fonte da busca de descrição (ver
+        // descricaoService.js), pro caso em que o produto é medicamento
+        // e a Cosmos não tem esse EAN indexado.
         produtoCmed: produto.produtoCmed || "",
+
+        // Descrição vinda da lista de uma distribuidora, cruzada por
+        // EAN (ver distribuidorService.js) - primeira fonte da cascata
+        // de busca de descrição, por ser dado direto do setor (sem
+        // cota, sem depender de banco de código de barras genérico).
+        descricaoDistribuidor: produto.descricaoDistribuidor || "",
 
         pmc: produto.pmc ?? "",
 
