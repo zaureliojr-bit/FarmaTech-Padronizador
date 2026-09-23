@@ -16,6 +16,7 @@
  */
 
 import { classificarControleEspecial } from "../dictionary/substanciasControladas";
+import { ehAntimicrobiano } from "../dictionary/antimicrobianos";
 
 export function extrairControleEspecial(produto) {
 
@@ -23,13 +24,26 @@ export function extrairControleEspecial(produto) {
 
     const classificacao = classificarControleEspecial(alvo);
 
+    /* Duas regras diferentes, mesma consequência no site: a receita fica
+       retida, então o cliente precisa se comprometer a mandar a foto
+       antes de o pedido sair.
+         - listas C da Portaria 344  (classificacao.receitaRemota)
+         - antimicrobiano da RDC 20/2011
+       Não entra o que já está fora do carrinho: listas A/B são retirada
+       presencial, e pedir foto de receita para elas seria prometer uma
+       entrega que não existe. */
+    const confirmarReceita =
+        !classificacao.bloqueioPresencial &&
+        (classificacao.receitaRemota || ehAntimicrobiano(alvo));
+
     return {
         ...produto,
         controleEspecial: classificacao.lista || "",
         controleEspecialNome: classificacao.listaNome,
         tipoReceita: classificacao.tipoReceita,
         bloqueioPresencial: classificacao.bloqueioPresencial,
-        receitaRemota: classificacao.receitaRemota
+        receitaRemota: classificacao.receitaRemota,
+        confirmarReceita
     };
 
 }

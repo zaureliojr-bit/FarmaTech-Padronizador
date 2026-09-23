@@ -55,6 +55,9 @@ function montarProdutoSite(produto, imagensHospedadas) {
     if (produto.tarja) base.tarja = produto.tarja;
     if (produto.bloqueioPresencial) base.bloqueioPresencial = true;
     if (produto.receitaRemota) base.receitaRemota = true;
+    // listas C + antimicrobianos: é este que o checkout do site usa para
+    // cobrar a confirmação do envio da receita
+    if (produto.confirmarReceita) base.confirmarReceita = true;
     if (produto.controleEspecial) base.controleEspecial = produto.controleEspecial;
     if (produto.tipoReceita) base.tipoReceita = produto.tipoReceita;
     if (produto.substancia) base.substancia = produto.substancia;

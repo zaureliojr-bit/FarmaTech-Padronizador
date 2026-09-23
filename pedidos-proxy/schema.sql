@@ -63,3 +63,27 @@ CREATE TABLE IF NOT EXISTS clientes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_clientes_ultimo ON clientes (ultimo_pedido);
+
+-- O que o cliente digitou na busca. Serve para duas perguntas que os
+-- pedidos não respondem:
+--   1. o que procuram muito (e a loja deve manter sempre em estoque)
+--   2. o que procuram e NÃO acham (o que falta no catálogo)
+-- A segunda é a mais valiosa: é uma venda que não aconteceu e que
+-- ninguém veria olhando só o histórico de pedidos.
+--
+-- NÃO guarda quem buscou. Sem telefone, sem IP, sem identificador de
+-- sessão — de propósito. Assim isto é estatística de loja, e não dado
+-- pessoal: ninguém consegue reconstruir o que uma pessoa específica
+-- procurou, nem cruzar com o cadastro de clientes.
+CREATE TABLE IF NOT EXISTS buscas (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- já chega normalizado do site: minúsculo e sem acento, para
+    -- "Dipirona", "dipirona" e "DIPIRONA" somarem na mesma linha
+    termo       TEXT NOT NULL,
+    criado_em   INTEGER NOT NULL,       -- epoch em milissegundos, UTC
+    -- quantos produtos a busca devolveu. Zero é o caso interessante.
+    resultados  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_buscas_data ON buscas (criado_em);
+CREATE INDEX IF NOT EXISTS idx_buscas_termo ON buscas (termo);

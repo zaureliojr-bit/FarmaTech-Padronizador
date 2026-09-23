@@ -10,6 +10,26 @@
 
 }
 
+/* sem nada caindo em "Outros" não há o que alertar: só o resumo do
+   roteamento, com a borda neutra */
+.categorias-outros-box-sem-alerta{
+
+    border-color:var(--border, rgba(0,0,0,.12));
+
+}
+
+/* o bloco do roteamento é informativo, não alerta - fica separado do
+   aviso de "Outros" por uma linha, e não pela cor da borda */
+.categorias-roteadas{
+
+    padding-bottom:18px;
+
+    margin-bottom:18px;
+
+    border-bottom:1px solid var(--border, rgba(0,0,0,.12));
+
+}
+
 .categorias-outros-cabecalho{
 
     display:flex;
