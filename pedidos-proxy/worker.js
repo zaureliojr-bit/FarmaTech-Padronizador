@@ -342,6 +342,59 @@ async function tratarPedido(request, env, ref) {
 
 }
 
+/* A fila de trabalho do balcão: os pedidos que ainda não terminaram,
+   já com os itens de cada um.
+
+   Existe separada do /resumo porque as duas perguntas são diferentes. O
+   resumo responde "como foi o mês" e é consultado quando alguém abre o
+   relatório; a fila responde "o que tem para fazer agora" e é consultada
+   a cada meio minuto, o dia inteiro. Misturar as duas faria o balcão
+   recalcular faturamento e ranking de produtos 2.880 vezes por dia à toa.
+
+   Os itens vêm na mesma resposta, e não um pedido por vez: separar dez
+   pedidos custaria onze idas ao servidor em vez de uma. */
+async function tratarFila(request, env) {
+
+    const ABERTOS = ["novo", "separando", "receita-ok"];
+
+    const pedidos = await env.DB.prepare(
+        `SELECT ref, criado_em, cliente, telefone, entrega, endereco,
+                pagamento, subtotal, frete, total, tem_receita, status
+           FROM pedidos
+          WHERE status IN ('novo','separando','receita-ok')
+          ORDER BY criado_em ASC
+          LIMIT 60`
+    ).all();
+
+    const lista = pedidos.results || [];
+
+    if (!lista.length) return json({ pedidos: [], abertos: ABERTOS });
+
+    /* Um IN com as refs desta página, em vez de um JOIN com a tabela
+       inteira: são no máximo 60 pedidos, e assim o índice de pedido_itens
+       faz todo o trabalho. */
+    const refs = lista.map(p => p.ref);
+    const marcadores = refs.map((_, i) => `?${i + 1}`).join(",");
+
+    const itens = await env.DB.prepare(
+        `SELECT ref, ean, codigo, descricao, qtd, preco_unit, total_item
+           FROM pedido_itens
+          WHERE ref IN (${marcadores})
+          ORDER BY id`
+    ).bind(...refs).all();
+
+    const porRef = new Map(refs.map(r => [r, []]));
+    for (const item of (itens.results || [])) {
+        porRef.get(item.ref)?.push(item);
+    }
+
+    return json({
+        pedidos: lista.map(p => ({ ...p, itens: porRef.get(p.ref) || [] })),
+        abertos: ABERTOS
+    });
+
+}
+
 async function tratarStatus(request, env) {
 
     const { ref, status } = await request.json().catch(() => ({}));
@@ -388,6 +441,7 @@ export default {
                 return json({ erro: "Não autorizado." }, 401);
             }
 
+            if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env);
             if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env);
             if (request.method === "GET" && rota === "/clientes") return await tratarClientes(request, env);
             if (request.method === "POST" && rota === "/status")  return await tratarStatus(request, env);
