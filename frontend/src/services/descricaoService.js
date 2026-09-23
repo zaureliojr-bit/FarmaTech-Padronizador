@@ -1,8 +1,9 @@
 // Cascata de busca de descrição por EAN, compartilhada entre a busca
 // individual (ProductTable) e a busca em lote (BuscaLoteDescricoesBox):
-// Cosmos (catálogo de varejo em geral, pode estourar cota diária) ->
-// Open Beauty/Food Facts (aberta, sem cota apertada) -> nome comercial
-// da CMED (produtoCmed, só existe se for medicamento já cruzado).
+// descrição da distribuidora (local, sem rede, se a lista já estiver
+// carregada) -> Cosmos (catálogo de varejo em geral, pode estourar
+// cota diária) -> Open Beauty/Food Facts (aberta, sem cota apertada) ->
+// nome comercial da CMED (produtoCmed, só existe se for medicamento).
 import { buscarProdutoPorEan } from "./cosmosService";
 import { buscarDescricaoOpenFacts } from "./openFactsService";
 
@@ -10,7 +11,9 @@ export async function buscarDescricaoProduto(produto) {
 
     if (!produto.ean) return "";
 
-    let sugestao = "";
+    let sugestao = produto.descricaoDistribuidor?.trim() || "";
+
+    if (sugestao) return sugestao;
 
     try {
 
