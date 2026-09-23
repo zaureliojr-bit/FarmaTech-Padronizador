@@ -9,6 +9,29 @@ const BASES = [
     "https://world.openfoodfacts.org/api/v2/product/"
 ];
 
+// fetch() não tem timeout nenhum por padrão - se essa base não
+// responder (trava a conexão sem erro), a busca em lote inteira para
+// no item, porque só tem poucas buscas rodando ao mesmo tempo. 8s é
+// tempo de sobra pra uma API que costuma responder rápido.
+const TIMEOUT_MS = 8000;
+
+async function buscarComTimeout(url) {
+
+    const controlador = new AbortController();
+    const timeout = setTimeout(() => controlador.abort(), TIMEOUT_MS);
+
+    try {
+
+        return await fetch(url, { signal: controlador.signal });
+
+    } finally {
+
+        clearTimeout(timeout);
+
+    }
+
+}
+
 export async function buscarDescricaoOpenFacts(ean) {
 
     if (!ean) return "";
@@ -17,7 +40,7 @@ export async function buscarDescricaoOpenFacts(ean) {
 
         try {
 
-            const resposta = await fetch(`${base}${encodeURIComponent(ean)}.json`);
+            const resposta = await buscarComTimeout(`${base}${encodeURIComponent(ean)}.json`);
 
             if (!resposta.ok) continue;
 
