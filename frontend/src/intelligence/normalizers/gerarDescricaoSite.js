@@ -17,9 +17,15 @@
  * (produto.descricaoManual), ela prevalece sobre a gerada
  * automaticamente - mas a versão automática continua sendo
  * calculada e guardada em descricaoSiteAuto, pra dar pra
- * comparar/reverter na interface.
+ * comparar/reverter na interface. Também formata a manual em
+ * Primeira Letra Maiúscula - ela pode ter vindo de qualquer lugar
+ * (planilha da distribuidora, CMED, correção reimportada do banco
+ * compartilhado, digitada à mão), e nem toda origem guarda o texto
+ * já formatado assim.
  * =====================================================
  */
+
+import { primeiraLetraMaiuscula } from "../../utils/texto";
 
 const EMBALAGENS_COM_QUANTIDADE = [
     "Caixa",
@@ -50,7 +56,9 @@ export function gerarDescricaoSite(produto) {
 
     produto.descricaoSiteAuto = descricao;
 
-    produto.descricaoSite = produto.descricaoManual || descricao;
+    produto.descricaoSite = produto.descricaoManual
+        ? primeiraLetraMaiuscula(produto.descricaoManual)
+        : descricao;
 
     return produto;
 
