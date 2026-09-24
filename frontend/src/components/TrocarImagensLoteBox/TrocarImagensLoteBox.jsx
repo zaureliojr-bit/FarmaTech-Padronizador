@@ -1,10 +1,10 @@
 import { useState } from "react";
 
-import "./BuscaLoteImagensBox.css";
-import { buscarImagensEmLote } from "../../services/buscaLoteImagensService";
+import "../BuscaLoteImagensBox/BuscaLoteImagensBox.css";
+import { trocarImagensEmLote } from "../../services/trocarImagensLoteService";
 import { useAcumuladorAtualizacoes } from "../../hooks/useAcumuladorAtualizacoes";
 
-function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }) {
+function TrocarImagensLoteBox({ produtos, atualizarProdutosEmLote, mostrarToast }) {
 
     const [rodando, setRodando] = useState(false);
     const [progresso, setProgresso] = useState(null);
@@ -12,11 +12,20 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
 
     const { adicionar, finalizar } = useAcumuladorAtualizacoes(atualizarProdutosEmLote);
 
-    const semImagem = produtos.filter(
-        (produto) => produto.ean && produto.statusImagem !== "salva"
+    const comImagem = produtos.filter(
+        (produto) => produto.ean && produto.statusImagem === "salva"
     ).length;
 
     async function iniciar() {
+
+        // Diferente da busca em lote normal (só preenche vazio), isto
+        // SUBSTITUI imagem já salva - inclusive uma que alguém escolheu
+        // à mão. Vale confirmar antes, já que não tem revisão por item.
+        const confirmou = window.confirm(
+            `Isso vai buscar de novo e substituir a imagem de ${comImagem.toLocaleString("pt-BR")} produto(s) que já têm imagem salva (na lista filtrada), sem revisão individual. Continuar?`
+        );
+
+        if (!confirmou) return;
 
         setRodando(true);
         setResultado(null);
@@ -24,7 +33,7 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
 
         try {
 
-            const relatorio = await buscarImagensEmLote(produtos, {
+            const relatorio = await trocarImagensEmLote(produtos, {
 
                 onProgresso: setProgresso,
 
@@ -39,8 +48,8 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
             mostrarToast?.(
 
                 relatorio.total
-                    ? `Busca em lote concluída: ${relatorio.sucesso} de ${relatorio.total} imagens encontradas e salvas.`
-                    : "Nenhum produto sem imagem nesta lista filtrada.",
+                    ? `Troca em lote concluída: ${relatorio.sucesso} de ${relatorio.total} imagens substituídas.`
+                    : "Nenhum produto com imagem salva nesta lista filtrada.",
 
                 relatorio.falha ? "aviso" : "sucesso"
 
@@ -48,7 +57,7 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
 
         } catch (erro) {
 
-            mostrarToast?.(erro.message || "Erro na busca em lote.", "erro");
+            mostrarToast?.(erro.message || "Erro na troca em lote.", "erro");
 
         } finally {
 
@@ -70,15 +79,16 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
 
             <div className="busca-lote-cabecalho">
 
-                <h2>🔎 Buscar imagens em lote</h2>
+                <h2>🔄 Trocar imagens em lote</h2>
 
                 <span className="busca-lote-ajuda">
-                    Busca automaticamente (Cosmos + Serper) e salva a primeira
-                    imagem encontrada pra cada produto sem imagem <strong>na
-                    lista filtrada abaixo</strong> ({semImagem.toLocaleString("pt-BR")} produtos).
-                    Sem revisão manual - confira depois os que parecerem
-                    estranhos. Use os filtros de categoria/classe da barra
-                    acima pra restringir antes de rodar.
+                    Busca de novo (ignorando a imagem atual) e substitui pra
+                    cada produto que já tem imagem salva <strong>na lista
+                    filtrada abaixo</strong> ({comImagem.toLocaleString("pt-BR")} produtos).
+                    Sem revisão manual - use os filtros de categoria/classe da
+                    barra acima pra restringir antes de rodar, e confira
+                    depois os que parecerem estranhos (o botão 🗑️ Excluir
+                    some com a imagem se a troca sair pior que a original).
                 </span>
 
             </div>
@@ -86,9 +96,9 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
             <button
                 className="btn btn-outline"
                 onClick={iniciar}
-                disabled={rodando || !semImagem}
+                disabled={rodando || !comImagem}
             >
-                {rodando ? "Buscando..." : `Buscar imagens em lote (${semImagem})`}
+                {rodando ? "Trocando..." : `Trocar imagens em lote (${comImagem})`}
             </button>
 
             {
@@ -120,8 +130,8 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
                 !rodando && resultado && (
 
                     <p className="busca-lote-resultado">
-                        {resultado.sucesso.toLocaleString("pt-BR")} imagens salvas
-                        {" · "}{resultado.semResultado.toLocaleString("pt-BR")} sem resultado nas buscas
+                        {resultado.sucesso.toLocaleString("pt-BR")} imagens substituídas
+                        {" · "}{resultado.semResultado.toLocaleString("pt-BR")} sem resultado (ou igual à atual)
                         {resultado.falha ? ` · ${resultado.falha.toLocaleString("pt-BR")} falharam` : ""}
                     </p>
 
@@ -135,4 +145,4 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
 
 }
 
-export default BuscaLoteImagensBox;
+export default TrocarImagensLoteBox;

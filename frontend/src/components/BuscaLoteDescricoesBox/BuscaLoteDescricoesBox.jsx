@@ -1,10 +1,10 @@
 import { useState } from "react";
 
-import "./BuscaLoteImagensBox.css";
-import { buscarImagensEmLote } from "../../services/buscaLoteImagensService";
+import "../BuscaLoteImagensBox/BuscaLoteImagensBox.css";
+import { buscarDescricoesEmLote } from "../../services/buscaLoteDescricoesService";
 import { useAcumuladorAtualizacoes } from "../../hooks/useAcumuladorAtualizacoes";
 
-function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }) {
+function BuscaLoteDescricoesBox({ produtos, atualizarProdutosEmLote, mostrarToast }) {
 
     const [rodando, setRodando] = useState(false);
     const [progresso, setProgresso] = useState(null);
@@ -12,8 +12,8 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
 
     const { adicionar, finalizar } = useAcumuladorAtualizacoes(atualizarProdutosEmLote);
 
-    const semImagem = produtos.filter(
-        (produto) => produto.ean && produto.statusImagem !== "salva"
+    const semDescricaoRevisada = produtos.filter(
+        (produto) => produto.ean && !produto.descricaoManual
     ).length;
 
     async function iniciar() {
@@ -24,12 +24,12 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
 
         try {
 
-            const relatorio = await buscarImagensEmLote(produtos, {
+            const relatorio = await buscarDescricoesEmLote(produtos, {
 
                 onProgresso: setProgresso,
 
-                onProdutoResolvido: ({ ean, imagem }) => {
-                    adicionar({ ean, imagem, statusImagem: "salva" });
+                onProdutoResolvido: ({ ean, descricaoManual }) => {
+                    adicionar({ ean, descricaoManual });
                 }
 
             });
@@ -39,8 +39,8 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
             mostrarToast?.(
 
                 relatorio.total
-                    ? `Busca em lote concluída: ${relatorio.sucesso} de ${relatorio.total} imagens encontradas e salvas.`
-                    : "Nenhum produto sem imagem nesta lista filtrada.",
+                    ? `Busca em lote concluída: ${relatorio.sucesso} de ${relatorio.total} descrições atualizadas.`
+                    : "Nenhum produto pendente de descrição nesta lista filtrada.",
 
                 relatorio.falha ? "aviso" : "sucesso"
 
@@ -70,15 +70,17 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
 
             <div className="busca-lote-cabecalho">
 
-                <h2>🔎 Buscar imagens em lote</h2>
+                <h2>📝 Buscar descrições em lote</h2>
 
                 <span className="busca-lote-ajuda">
-                    Busca automaticamente (Cosmos + Serper) e salva a primeira
-                    imagem encontrada pra cada produto sem imagem <strong>na
-                    lista filtrada abaixo</strong> ({semImagem.toLocaleString("pt-BR")} produtos).
+                    Busca automaticamente (Cosmos + Open Beauty/Food Facts + CMED)
+                    e usa a primeira descrição encontrada pra cada produto sem
+                    correção manual ainda <strong>na lista filtrada abaixo</strong>
+                    {" "}({semDescricaoRevisada.toLocaleString("pt-BR")} produtos).
                     Sem revisão manual - confira depois os que parecerem
-                    estranhos. Use os filtros de categoria/classe da barra
-                    acima pra restringir antes de rodar.
+                    estranhos (o botão ↺ reverte pra descrição automática). Use
+                    os filtros de categoria/classe da barra acima pra restringir
+                    antes de rodar.
                 </span>
 
             </div>
@@ -86,9 +88,9 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
             <button
                 className="btn btn-outline"
                 onClick={iniciar}
-                disabled={rodando || !semImagem}
+                disabled={rodando || !semDescricaoRevisada}
             >
-                {rodando ? "Buscando..." : `Buscar imagens em lote (${semImagem})`}
+                {rodando ? "Buscando..." : `Buscar descrições em lote (${semDescricaoRevisada})`}
             </button>
 
             {
@@ -120,7 +122,7 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
                 !rodando && resultado && (
 
                     <p className="busca-lote-resultado">
-                        {resultado.sucesso.toLocaleString("pt-BR")} imagens salvas
+                        {resultado.sucesso.toLocaleString("pt-BR")} descrições atualizadas
                         {" · "}{resultado.semResultado.toLocaleString("pt-BR")} sem resultado nas buscas
                         {resultado.falha ? ` · ${resultado.falha.toLocaleString("pt-BR")} falharam` : ""}
                     </p>
@@ -135,4 +137,4 @@ function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }
 
 }
 
-export default BuscaLoteImagensBox;
+export default BuscaLoteDescricoesBox;

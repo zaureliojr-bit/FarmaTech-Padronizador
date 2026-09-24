@@ -27,7 +27,7 @@
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Imagens-Key"
 };
 
@@ -113,6 +113,20 @@ async function tratarServirImagem(ean, env) {
 
 }
 
+async function tratarExcluir(ean, request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.IMAGENS_BUCKET.delete(ean);
+
+    await env.DB.prepare(`DELETE FROM imagens WHERE ean = ?1`).bind(ean).run();
+
+    return json({ sucesso: true });
+
+}
+
 async function tratarLote(request, env) {
 
     const url = new URL(request.url);
@@ -182,6 +196,51 @@ async function tratarSalvarCorrecao(request, env) {
 
 }
 
+async function tratarSalvarFamilia(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const { categoria, familiaId } = await request.json().catch(() => ({}));
+
+    if (!categoria || !familiaId) {
+        return json({ erro: "'categoria' e 'familiaId' são obrigatórios." }, 400);
+    }
+
+    // Mesma normalização do familias.js (maiúscula, espaços colapsados) -
+    // sem isso "Perfumaria" e "PERFUMARIA" virariam entradas diferentes
+    // e o front-end não acharia a correspondência na hora de comparar.
+    const chave = categoria.trim().toUpperCase().replace(/\s+/g, " ");
+
+    await env.DB.prepare(
+        `INSERT INTO familias_categoria (categoria, familia_id, atualizado_em)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(categoria) DO UPDATE SET
+            familia_id = excluded.familia_id,
+            atualizado_em = excluded.atualizado_em`
+    ).bind(chave, familiaId, Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarListarFamilias(env) {
+
+    const { results } = await env.DB.prepare(
+        `SELECT categoria, familia_id FROM familias_categoria`
+    ).all();
+
+    const mapa = {};
+
+    (results || []).forEach((linha) => {
+        mapa[linha.categoria] = linha.familia_id;
+    });
+
+    return json(mapa);
+
+}
+
 async function tratarLoteCorrecoes(request, env) {
 
     const url = new URL(request.url);
@@ -245,9 +304,22 @@ export default {
             return tratarLoteCorrecoes(request, env);
         }
 
+        if (request.method === "POST" && caminho === "/familias") {
+            return tratarSalvarFamilia(request, env);
+        }
+
+        if (request.method === "GET" && caminho === "/familias") {
+            return tratarListarFamilias(env);
+        }
+
         if (request.method === "GET" && caminho.length > 1) {
             const ean = decodeURIComponent(caminho.slice(1));
             return tratarServirImagem(ean, env);
+        }
+
+        if (request.method === "DELETE" && caminho.length > 1) {
+            const ean = decodeURIComponent(caminho.slice(1));
+            return tratarExcluir(ean, request, env);
         }
 
         return json({ erro: "Rota não encontrada." }, 404);

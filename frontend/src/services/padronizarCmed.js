@@ -151,7 +151,13 @@ export function padronizarComCmed(produtos, indice, opcoes = {}) {
             tipoProduto: cmed.tipo,
             registroAnvisa: cmed.registroAnvisa,
             pmc: cmed.pmc ?? "",
-            acimaDoPmc: false
+            acimaDoPmc: false,
+            // Nome comercial registrado na CMED - segunda fonte pra busca
+            // de descrição (ver botão 🔍 na tabela), só usado quando a
+            // Cosmos não acha nada. Cosmos cobre bem produto de varejo em
+            // geral, mas é fraca pra medicamento - a CMED é exatamente o
+            // contrário.
+            produtoCmed: cmed.produto || ""
         };
 
         // ---- preço acima do teto legal ---------------------------------

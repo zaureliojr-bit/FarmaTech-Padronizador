@@ -164,6 +164,24 @@ tbody tr:hover td:nth-last-child(-n+2){
     opacity:.9;
 
 }
+
+.btn-excluir-imagem{
+
+    margin-top:6px;
+
+    background:#fee2e2;
+
+    color:#b91c1c;
+
+}
+
+.btn-excluir-imagem:disabled{
+
+    opacity:.6;
+
+    cursor:not-allowed;
+
+}
 .status-imagem{
 
     display:flex;

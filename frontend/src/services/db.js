@@ -9,9 +9,10 @@
 // dele inexistente pra sempre (erro silencioso só na hora de usar).
 
 const DB_NAME = "farmatech";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export const STORE_CMED = "cmed";
+export const STORE_DISTRIBUIDOR = "distribuidor";
 
 export function abrirBanco() {
 
@@ -30,6 +31,13 @@ export function abrirBanco() {
             // mantém ela sem uso; não precisa apagar, só não cresce mais.
             if (!db.objectStoreNames.contains(STORE_CMED)) {
                 db.createObjectStore(STORE_CMED);
+            }
+
+            // Lista de produtos de distribuidora (EAN -> descrição/
+            // laboratório/categoria) - mesmo motivo da CMED: guardada
+            // localmente pra não precisar reimportar toda vez.
+            if (!db.objectStoreNames.contains(STORE_DISTRIBUIDOR)) {
+                db.createObjectStore(STORE_DISTRIBUIDOR);
             }
 
         };
