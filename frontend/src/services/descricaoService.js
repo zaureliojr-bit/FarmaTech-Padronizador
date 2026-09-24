@@ -6,18 +6,7 @@
 // nome comercial da CMED (produtoCmed, só existe se for medicamento).
 import { buscarProdutoPorEan } from "./cosmosService";
 import { buscarDescricaoOpenFacts } from "./openFactsService";
-
-// Mesma formatação que a descrição gerada automaticamente já usa
-// (refinarDescricaoPesquisa.js) - sem isso, fonte que guarda tudo em
-// maiúsculo (a planilha da distribuidora é assim) sugeria a descrição
-// inteira em caixa alta, destoando do resto do catálogo.
-function primeiraLetraMaiuscula(texto) {
-
-    return texto
-        .toLowerCase()
-        .replace(/\b\w/g, (letra) => letra.toUpperCase());
-
-}
+import { primeiraLetraMaiuscula } from "../utils/texto";
 
 export async function buscarDescricaoProduto(produto) {
 
