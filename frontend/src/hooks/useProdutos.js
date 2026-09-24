@@ -484,6 +484,49 @@ export function useProdutos() {
 
     }
 
+    // Usado pelas caixas de busca em lote (imagem/descrição): aplicar
+    // uma atualização por item resolvido dispara uma re-análise de TODO
+    // o catálogo a cada chamada (analisarProduto roda de novo pra todo
+    // mundo) - com vários itens resolvendo rápido (ex: descrição achada
+    // na distribuidora, sem rede nenhuma), isso enfileira re-análises
+    // demais e trava a aba. Aplicando o lote inteiro de uma vez só, a
+    // re-análise roda uma vez só pro grupo inteiro.
+    function atualizarProdutosEmLote(atualizacoes) {
+
+        if (!atualizacoes?.length) return;
+
+        const porEan = new Map(atualizacoes.map((item) => [item.ean, item]));
+
+        setResultadoImportacao((anterior) => ({
+
+            ...anterior,
+
+            produtos: anterior.produtos.map((produto) => {
+
+                const atualizacao = porEan.get(produto.ean);
+
+                return atualizacao ? { ...produto, ...atualizacao } : produto;
+
+            })
+
+        }));
+
+        atualizacoes.forEach((produtoAtualizado) => {
+
+            const correcao = {};
+
+            CAMPOS_DE_CORRECAO.forEach((campo) => {
+                if (campo in produtoAtualizado) correcao[campo] = produtoAtualizado[campo];
+            });
+
+            if (Object.keys(correcao).length) {
+                salvarCorrecao(produtoAtualizado.ean, correcao);
+            }
+
+        });
+
+    }
+
     return {
 
         resultadoImportacao,
@@ -537,6 +580,8 @@ export function useProdutos() {
         limparFiltros,
 
         atualizarProduto,
+
+        atualizarProdutosEmLote,
 
         corrigirFamiliaCategoria,
 

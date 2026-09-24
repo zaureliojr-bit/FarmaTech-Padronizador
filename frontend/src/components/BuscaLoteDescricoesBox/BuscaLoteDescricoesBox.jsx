@@ -2,12 +2,15 @@ import { useState } from "react";
 
 import "../BuscaLoteImagensBox/BuscaLoteImagensBox.css";
 import { buscarDescricoesEmLote } from "../../services/buscaLoteDescricoesService";
+import { useAcumuladorAtualizacoes } from "../../hooks/useAcumuladorAtualizacoes";
 
-function BuscaLoteDescricoesBox({ produtos, atualizarProduto, mostrarToast }) {
+function BuscaLoteDescricoesBox({ produtos, atualizarProdutosEmLote, mostrarToast }) {
 
     const [rodando, setRodando] = useState(false);
     const [progresso, setProgresso] = useState(null);
     const [resultado, setResultado] = useState(null);
+
+    const { adicionar, finalizar } = useAcumuladorAtualizacoes(atualizarProdutosEmLote);
 
     const semDescricaoRevisada = produtos.filter(
         (produto) => produto.ean && !produto.descricaoManual
@@ -26,7 +29,7 @@ function BuscaLoteDescricoesBox({ produtos, atualizarProduto, mostrarToast }) {
                 onProgresso: setProgresso,
 
                 onProdutoResolvido: ({ ean, descricaoManual }) => {
-                    atualizarProduto({ ean, descricaoManual });
+                    adicionar({ ean, descricaoManual });
                 }
 
             });
@@ -48,6 +51,8 @@ function BuscaLoteDescricoesBox({ produtos, atualizarProduto, mostrarToast }) {
             mostrarToast?.(erro.message || "Erro na busca em lote.", "erro");
 
         } finally {
+
+            finalizar();
 
             setRodando(false);
 

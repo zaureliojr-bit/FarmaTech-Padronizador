@@ -2,12 +2,15 @@ import { useState } from "react";
 
 import "./BuscaLoteImagensBox.css";
 import { buscarImagensEmLote } from "../../services/buscaLoteImagensService";
+import { useAcumuladorAtualizacoes } from "../../hooks/useAcumuladorAtualizacoes";
 
-function BuscaLoteImagensBox({ produtos, atualizarProduto, mostrarToast }) {
+function BuscaLoteImagensBox({ produtos, atualizarProdutosEmLote, mostrarToast }) {
 
     const [rodando, setRodando] = useState(false);
     const [progresso, setProgresso] = useState(null);
     const [resultado, setResultado] = useState(null);
+
+    const { adicionar, finalizar } = useAcumuladorAtualizacoes(atualizarProdutosEmLote);
 
     const semImagem = produtos.filter(
         (produto) => produto.ean && produto.statusImagem !== "salva"
@@ -26,7 +29,7 @@ function BuscaLoteImagensBox({ produtos, atualizarProduto, mostrarToast }) {
                 onProgresso: setProgresso,
 
                 onProdutoResolvido: ({ ean, imagem }) => {
-                    atualizarProduto({ ean, imagem, statusImagem: "salva" });
+                    adicionar({ ean, imagem, statusImagem: "salva" });
                 }
 
             });
@@ -48,6 +51,8 @@ function BuscaLoteImagensBox({ produtos, atualizarProduto, mostrarToast }) {
             mostrarToast?.(erro.message || "Erro na busca em lote.", "erro");
 
         } finally {
+
+            finalizar();
 
             setRodando(false);
 
