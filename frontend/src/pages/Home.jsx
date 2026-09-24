@@ -63,6 +63,7 @@ function Home() {
 
         limparFiltros,
         atualizarProduto,
+        atualizarProdutosEmLote,
         corrigirFamiliaCategoria,
 
         indiceCmed,
@@ -209,7 +210,7 @@ function Home() {
 
                     <BuscaLoteImagensBox
                         produtos={produtosFiltrados}
-                        atualizarProduto={atualizarProduto}
+                        atualizarProdutosEmLote={atualizarProdutosEmLote}
                         mostrarToast={mostrarToast}
                     />
 
@@ -223,7 +224,7 @@ function Home() {
 
                     <TrocarImagensLoteBox
                         produtos={produtosFiltrados}
-                        atualizarProduto={atualizarProduto}
+                        atualizarProdutosEmLote={atualizarProdutosEmLote}
                         mostrarToast={mostrarToast}
                     />
 
@@ -237,7 +238,7 @@ function Home() {
 
                     <AplicarImagemLoteBox
                         produtos={produtosFiltrados}
-                        atualizarProduto={atualizarProduto}
+                        atualizarProdutosEmLote={atualizarProdutosEmLote}
                         mostrarToast={mostrarToast}
                     />
 
@@ -251,7 +252,7 @@ function Home() {
 
                     <BuscaLoteDescricoesBox
                         produtos={produtosFiltrados}
-                        atualizarProduto={atualizarProduto}
+                        atualizarProdutosEmLote={atualizarProdutosEmLote}
                         mostrarToast={mostrarToast}
                     />
 

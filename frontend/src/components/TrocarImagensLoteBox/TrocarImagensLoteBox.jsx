@@ -2,12 +2,15 @@ import { useState } from "react";
 
 import "../BuscaLoteImagensBox/BuscaLoteImagensBox.css";
 import { trocarImagensEmLote } from "../../services/trocarImagensLoteService";
+import { useAcumuladorAtualizacoes } from "../../hooks/useAcumuladorAtualizacoes";
 
-function TrocarImagensLoteBox({ produtos, atualizarProduto, mostrarToast }) {
+function TrocarImagensLoteBox({ produtos, atualizarProdutosEmLote, mostrarToast }) {
 
     const [rodando, setRodando] = useState(false);
     const [progresso, setProgresso] = useState(null);
     const [resultado, setResultado] = useState(null);
+
+    const { adicionar, finalizar } = useAcumuladorAtualizacoes(atualizarProdutosEmLote);
 
     const comImagem = produtos.filter(
         (produto) => produto.ean && produto.statusImagem === "salva"
@@ -35,7 +38,7 @@ function TrocarImagensLoteBox({ produtos, atualizarProduto, mostrarToast }) {
                 onProgresso: setProgresso,
 
                 onProdutoResolvido: ({ ean, imagem }) => {
-                    atualizarProduto({ ean, imagem, statusImagem: "salva" });
+                    adicionar({ ean, imagem, statusImagem: "salva" });
                 }
 
             });
@@ -57,6 +60,8 @@ function TrocarImagensLoteBox({ produtos, atualizarProduto, mostrarToast }) {
             mostrarToast?.(erro.message || "Erro na troca em lote.", "erro");
 
         } finally {
+
+            finalizar();
 
             setRodando(false);
 

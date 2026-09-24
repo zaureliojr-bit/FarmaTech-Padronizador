@@ -3,13 +3,16 @@ import { useState } from "react";
 import "../BuscaLoteImagensBox/BuscaLoteImagensBox.css";
 import "./AplicarImagemLoteBox.css";
 import { aplicarImagemEmLote } from "../../services/aplicarImagemLoteService";
+import { useAcumuladorAtualizacoes } from "../../hooks/useAcumuladorAtualizacoes";
 
-function AplicarImagemLoteBox({ produtos, atualizarProduto, mostrarToast }) {
+function AplicarImagemLoteBox({ produtos, atualizarProdutosEmLote, mostrarToast }) {
 
     const [url, setUrl] = useState("");
     const [rodando, setRodando] = useState(false);
     const [progresso, setProgresso] = useState(null);
     const [resultado, setResultado] = useState(null);
+
+    const { adicionar, finalizar } = useAcumuladorAtualizacoes(atualizarProdutosEmLote);
 
     const total = produtos.filter((produto) => produto.ean).length;
 
@@ -41,7 +44,7 @@ function AplicarImagemLoteBox({ produtos, atualizarProduto, mostrarToast }) {
                 onProgresso: setProgresso,
 
                 onProdutoResolvido: ({ ean, imagem }) => {
-                    atualizarProduto({ ean, imagem, statusImagem: "salva" });
+                    adicionar({ ean, imagem, statusImagem: "salva" });
                 }
 
             });
@@ -63,6 +66,8 @@ function AplicarImagemLoteBox({ produtos, atualizarProduto, mostrarToast }) {
             mostrarToast?.(erro.message || "Erro ao aplicar imagem em lote.", "erro");
 
         } finally {
+
+            finalizar();
 
             setRodando(false);
 
