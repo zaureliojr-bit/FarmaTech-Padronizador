@@ -599,6 +599,145 @@ async function tratarArquivoDeBanner(request, env, nome) {
 
 }
 
+/* ========================= PROMOÇÕES =========================
+
+   Camada por cima do preço da planilha. O catálogo é reexportado do
+   FarmaxPDV e a reexportação sobrescreve tudo; promoção que morasse lá
+   sumiria na importação seguinte. Aqui ela sobrevive.
+
+   Guarda o preço FINAL, não o percentual. Com percentual, um reajuste
+   na planilha mudaria sozinho o que o cliente paga, sem ninguém
+   decidir. O percentual só existe na hora de aplicar em lote, para
+   calcular; depois vale o número que a loja viu na tela.
+*/
+
+const MAX_PROMOCOES_POR_LOTE = 500;
+
+/* O que o SITE lê. Aberto, como o preço da vitrine — que é público de
+   qualquer jeito. Já sai filtrado por data: o site aplica e pronto. */
+async function tratarPromocoesPublicas(request, env) {
+
+    const hoje = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+
+    const { results } = await env.DB.prepare(
+        `SELECT codigo, preco
+           FROM promocoes
+          WHERE ativo = 1
+            AND (inicio IS NULL OR inicio = '' OR inicio <= ?1)
+            AND (fim    IS NULL OR fim    = '' OR fim    >= ?1)`
+    ).bind(hoje).all();
+
+    return json({ promocoes: results || [] });
+
+}
+
+async function tratarPromocoesDaLoja(request, env) {
+
+    const { results } = await env.DB.prepare(
+        `SELECT codigo, preco, inicio, fim, ativo, lote, criado_em
+           FROM promocoes ORDER BY criado_em DESC`
+    ).all();
+
+    const lotes = await env.DB.prepare(
+        `SELECT lote, COUNT(*) AS itens, MIN(inicio) AS inicio, MAX(fim) AS fim
+           FROM promocoes WHERE lote IS NOT NULL AND lote <> ''
+          GROUP BY lote ORDER BY MAX(criado_em) DESC`
+    ).all();
+
+    return json({ promocoes: results || [], lotes: lotes.results || [] });
+
+}
+
+/* Grava uma ou muitas de uma vez.
+
+   A conta do percentual é feita no PAINEL, não aqui: é lá que a loja vê
+   o preço que vai valer, item por item, antes de confirmar. O worker
+   recebe preços prontos justamente para não existir um segundo lugar
+   onde o valor possa sair diferente do que foi mostrado. */
+async function tratarSalvarPromocoes(request, env) {
+
+    const corpo = await request.json().catch(() => null);
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    const itens = Array.isArray(corpo.itens) ? corpo.itens : [];
+    if (!itens.length) return json({ erro: "Nenhum produto na lista." }, 400);
+    if (itens.length > MAX_PROMOCOES_POR_LOTE) {
+        return json({ erro: `Máximo de ${MAX_PROMOCOES_POR_LOTE} produtos por vez.` }, 400);
+    }
+
+    const inicio = dataISO(corpo.inicio);
+    const fim = dataISO(corpo.fim);
+    if (inicio && fim && fim < inicio) {
+        return json({ erro: "A data final não pode ser antes da inicial." }, 400);
+    }
+
+    const ativo = corpo.ativo === false ? 0 : 1;
+    const lote = texto(corpo.lote, 60) || null;
+    const agora = Date.now();
+
+    const comandos = [];
+
+    for (const item of itens) {
+        const codigo = texto(item?.codigo, 40);
+        const preco = numero(item?.preco);
+
+        // preço zero apagaria a promoção pela porta dos fundos, sem a
+        // loja perceber que apagou. Para tirar, existe a rota de excluir.
+        if (!codigo || preco <= 0) {
+            return json({ erro: `Produto inválido na lista (código "${codigo}").` }, 400);
+        }
+
+        comandos.push(
+            env.DB.prepare(
+                `INSERT INTO promocoes (codigo, preco, inicio, fim, ativo, lote, criado_em)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)
+                 ON CONFLICT(codigo) DO UPDATE SET
+                    preco = excluded.preco, inicio = excluded.inicio, fim = excluded.fim,
+                    ativo = excluded.ativo, lote = excluded.lote, criado_em = excluded.criado_em`
+            ).bind(codigo, Number(preco.toFixed(2)), inicio, fim, ativo, lote, agora)
+        );
+    }
+
+    // uma transação só: ou o lote inteiro entra, ou nada. Meio lote de
+    // promoção aplicado é pior do que nenhum — ninguém sabe onde parou.
+    await env.DB.batch(comandos);
+
+    return json({ sucesso: true, gravados: comandos.length, lote });
+
+}
+
+/* Tira promoção: um código, uma lista de códigos, ou um lote inteiro.
+
+   O lote existe para isto. Sem ele, desfazer uma promoção de 300 itens
+   seria trezentos cliques, e na prática ninguém desfaz — a promoção fica
+   no ar para sempre. */
+async function tratarExcluirPromocoes(request, env) {
+
+    const corpo = await request.json().catch(() => ({}));
+
+    const lote = texto(corpo.lote, 60);
+    if (lote) {
+        const r = await env.DB.prepare(`DELETE FROM promocoes WHERE lote = ?1`).bind(lote).run();
+        return json({ sucesso: true, apagados: r.meta?.changes ?? 0 });
+    }
+
+    const codigos = (Array.isArray(corpo.codigos) ? corpo.codigos : [corpo.codigo])
+        .map(c => texto(c, 40)).filter(Boolean);
+
+    if (!codigos.length) return json({ erro: "Informe 'codigo', 'codigos' ou 'lote'." }, 400);
+    if (codigos.length > MAX_PROMOCOES_POR_LOTE) {
+        return json({ erro: `Máximo de ${MAX_PROMOCOES_POR_LOTE} por vez.` }, 400);
+    }
+
+    const marcadores = codigos.map((_, i) => `?${i + 1}`).join(",");
+    const r = await env.DB.prepare(
+        `DELETE FROM promocoes WHERE codigo IN (${marcadores})`
+    ).bind(...codigos).run();
+
+    return json({ sucesso: true, apagados: r.meta?.changes ?? 0 });
+
+}
+
 async function tratarStatus(request, env) {
 
     const { ref, status } = await request.json().catch(() => ({}));
@@ -646,6 +785,11 @@ export default {
                 return await tratarBannersPublicos(request, env);
             }
 
+            // preço de vitrine é público de qualquer jeito
+            if (request.method === "GET" && rota === "/promocoes") {
+                return await tratarPromocoesPublicas(request, env);
+            }
+
             const arquivoBanner = rota.match(/^\/banners\/arquivo\/([A-Za-z0-9._-]+)$/);
             if (request.method === "GET" && arquivoBanner) {
                 return await tratarArquivoDeBanner(request, env, arquivoBanner[1]);
@@ -665,6 +809,10 @@ export default {
             if (request.method === "POST" && rota === "/banners")         return await tratarSalvarBanner(request, env);
             if (request.method === "POST" && rota === "/banners/excluir") return await tratarExcluirBanner(request, env);
             if (request.method === "POST" && rota === "/banners/imagem")  return await tratarEnviarImagemDeBanner(request, env);
+
+            if (request.method === "GET"  && rota === "/promocoes/todas")   return await tratarPromocoesDaLoja(request, env);
+            if (request.method === "POST" && rota === "/promocoes")         return await tratarSalvarPromocoes(request, env);
+            if (request.method === "POST" && rota === "/promocoes/excluir") return await tratarExcluirPromocoes(request, env);
 
             const umPedido = rota.match(/^\/pedidos\/(.+)$/);
             if (request.method === "GET" && umPedido) {

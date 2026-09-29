@@ -120,3 +120,37 @@ CREATE TABLE IF NOT EXISTS banners (
 );
 
 CREATE INDEX IF NOT EXISTS idx_banners_ativo ON banners (ativo, ordem);
+
+-- ===================================================================
+-- Promoções feitas pela loja, por cima do preço que vem da planilha.
+--
+-- O catálogo é reexportado do FarmaxPDV toda semana, e a reexportação
+-- sobrescreve tudo. Se a promoção morasse no catálogo, ela sumiria na
+-- próxima importação — que é justamente o que acontecia antes, com o
+-- preço promocional vindo só da planilha.
+--
+-- Aqui ela é uma CAMADA. A planilha manda no preço normal; esta tabela
+-- manda no preço promocional enquanto a promoção estiver valendo. Uma
+-- reexportação não apaga nada daqui.
+--
+-- GUARDA O PREÇO FINAL, e não o percentual, de propósito. Guardando
+-- percentual, um reajuste na planilha mudaria sozinho o valor que o
+-- cliente paga, sem ninguém decidir. O percentual existe só na hora de
+-- aplicar em lote, para calcular os preços — depois disso o que vale é
+-- o número que a loja viu na tela.
+-- ===================================================================
+CREATE TABLE IF NOT EXISTS promocoes (
+    codigo      TEXT PRIMARY KEY,        -- o mesmo código do produto no catálogo
+    preco       REAL NOT NULL,           -- preço final da promoção
+    inicio      TEXT,                    -- aaaa-mm-dd; vazio = já vale
+    fim         TEXT,                    -- aaaa-mm-dd; vazio = não expira
+    ativo       INTEGER NOT NULL DEFAULT 1,
+    -- rótulo do lote, quando veio de uma aplicação em massa. Serve para
+    -- desfazer tudo de uma vez: sem isso, uma promoção de 300 itens só
+    -- se desfaz item por item.
+    lote        TEXT,
+    criado_em   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_promocoes_ativo ON promocoes (ativo);
+CREATE INDEX IF NOT EXISTS idx_promocoes_lote ON promocoes (lote);
