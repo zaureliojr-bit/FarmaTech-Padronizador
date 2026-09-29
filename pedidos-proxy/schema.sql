@@ -87,3 +87,36 @@ CREATE TABLE IF NOT EXISTS buscas (
 
 CREATE INDEX IF NOT EXISTS idx_buscas_data ON buscas (criado_em);
 CREATE INDEX IF NOT EXISTS idx_buscas_termo ON buscas (termo);
+
+-- ===================================================================
+-- Banners de promoção e de parceiros da home.
+--
+-- Começaram num arquivo JSON no repositório, editado à mão no GitHub.
+-- Funcionava, mas só para quem sabe o que é um repositório: um erro de
+-- vírgula derrubava a faixa inteira, e não havia como a loja conferir
+-- antes de publicar. Aqui a loja mexe pelo painel, com formulário.
+--
+-- A tabela guarda só o endereço da imagem, nunca o arquivo. O arquivo
+-- vive no R2, que é feito para isso; linha de banco com imagem dentro
+-- fica lenta de ler e cara de servir a cada visita da home.
+-- ===================================================================
+CREATE TABLE IF NOT EXISTS banners (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    imagem      TEXT NOT NULL,           -- https://... (R2 ou externo)
+    alt         TEXT NOT NULL,           -- o que a imagem diz, escrito
+    link        TEXT,                    -- para onde o clique leva; vazio = não clicável
+    -- aaaa-mm-dd, como TEXTO. Comparar data como texto evita o fuso:
+    -- guardada como número, uma campanha que termina em 30/09 sumiria
+    -- às 21h do dia 29 para quem está no Brasil.
+    inicio      TEXT,                    -- vazio = vale desde já
+    fim         TEXT,                    -- vazio = não expira
+    ativo       INTEGER NOT NULL DEFAULT 1,
+    ordem       INTEGER NOT NULL DEFAULT 0,   -- menor aparece primeiro
+    criado_em   INTEGER NOT NULL,
+    -- chave do arquivo no R2, quando a imagem foi enviada pelo painel.
+    -- Guardada para o arquivo poder ser apagado junto com o banner, em
+    -- vez de ficar ocupando o balde para sempre.
+    r2_chave    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_banners_ativo ON banners (ativo, ordem);

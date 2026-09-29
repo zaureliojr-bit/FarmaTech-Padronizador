@@ -20,7 +20,8 @@
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Painel-Key"
+    "Access-Control-Allow-Headers": "Content-Type, X-Painel-Key",
+    "Access-Control-Max-Age": "86400"
 };
 
 const MAX_ITENS = 100;          // carrinho de farmácia não passa disso
@@ -395,6 +396,209 @@ async function tratarFila(request, env) {
 
 }
 
+/* ========================= BANNERS =========================
+
+   A home tinha os banners num JSON do repositório, editado à mão no
+   GitHub. Funcionava, mas só para quem sabe o que é um repositório —
+   e uma vírgula fora do lugar derrubava a faixa inteira sem aviso.
+   Aqui a loja mexe pelo painel, com formulário e conferência.
+
+   O arquivo da imagem, quando enviado pelo painel, vai para o R2. A
+   tabela guarda só o endereço: linha de banco com imagem dentro fica
+   lenta de ler e cara de servir a cada visita da home.
+*/
+
+const MAX_BANNER_BYTES = 3 * 1024 * 1024;   // 3 MB: banner é peça larga e leve
+const TIPOS_DE_IMAGEM = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"];
+
+/* aaaa-mm-dd, e só. Data mal formada vira vazio em vez de derrubar a
+   comparação lá no site — melhor um banner sem prazo do que a faixa
+   inteira fora do ar. */
+function dataISO(valor) {
+    const t = texto(valor, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : "";
+}
+
+/* Endereço de imagem: só https, e só http para 127.0.0.1 (teste local).
+   Sem isto, um "javascript:" digitado no campo viraria link clicável na
+   home da loja. */
+function urlSegura(valor, { permitirVazio = false } = {}) {
+    const t = texto(valor, 600);
+    if (!t) return permitirVazio ? "" : null;
+    try {
+        const u = new URL(t);
+        if (u.protocol === "https:") return u.href;
+        if (u.protocol === "http:" && /^(127\.0\.0\.1|localhost)$/.test(u.hostname)) return u.href;
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/* O que o SITE lê. Aberto, sem chave: é conteúdo de vitrine, aparece
+   para qualquer visitante de qualquer jeito. Já sai filtrado por data,
+   para o site não precisar saber a regra nem conferir o relógio. */
+async function tratarBannersPublicos(request, env) {
+
+    const hoje = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+
+    const { results } = await env.DB.prepare(
+        `SELECT id, imagem, alt, link
+           FROM banners
+          WHERE ativo = 1
+            AND (inicio IS NULL OR inicio = '' OR inicio <= ?1)
+            AND (fim    IS NULL OR fim    = '' OR fim    >= ?1)
+          ORDER BY ordem, id`
+    ).bind(hoje).all();
+
+    return json({ banners: results || [] });
+
+}
+
+/* O que o PAINEL lê: tudo, inclusive desligado e fora do prazo, porque
+   é justamente isso que a loja precisa ver para editar. */
+async function tratarBannersDaLoja(request, env) {
+
+    const { results } = await env.DB.prepare(
+        `SELECT id, imagem, alt, link, inicio, fim, ativo, ordem, criado_em, r2_chave
+           FROM banners ORDER BY ordem, id`
+    ).all();
+
+    return json({ banners: results || [], podeEnviarArquivo: !!env.BANNERS_BUCKET });
+
+}
+
+async function tratarSalvarBanner(request, env) {
+
+    const corpo = await request.json().catch(() => null);
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    const imagem = urlSegura(corpo.imagem);
+    if (!imagem) return json({ erro: "Informe o endereço da imagem (https://...)." }, 400);
+
+    const alt = texto(corpo.alt, 200);
+    if (!alt) return json({ erro: "Escreva o texto alternativo da imagem." }, 400);
+
+    const link = urlSegura(corpo.link, { permitirVazio: true });
+    if (link === null) return json({ erro: "O link precisa começar com https://." }, 400);
+
+    const inicio = dataISO(corpo.inicio);
+    const fim = dataISO(corpo.fim);
+
+    if (inicio && fim && fim < inicio) {
+        return json({ erro: "A data final não pode ser antes da inicial." }, 400);
+    }
+
+    const ativo = corpo.ativo ? 1 : 0;
+    const ordem = Math.round(numero(corpo.ordem));
+    const id = Math.round(numero(corpo.id));
+
+    if (id > 0) {
+        await env.DB.prepare(
+            `UPDATE banners
+                SET imagem = ?2, alt = ?3, link = ?4, inicio = ?5, fim = ?6,
+                    ativo = ?7, ordem = ?8, r2_chave = COALESCE(?9, r2_chave)
+              WHERE id = ?1`
+        ).bind(id, imagem, alt, link, inicio, fim, ativo, ordem,
+               texto(corpo.r2Chave, 200) || null).run();
+
+        return json({ sucesso: true, id });
+    }
+
+    const r = await env.DB.prepare(
+        `INSERT INTO banners (imagem, alt, link, inicio, fim, ativo, ordem, criado_em, r2_chave)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`
+    ).bind(imagem, alt, link, inicio, fim, ativo, ordem, Date.now(),
+           texto(corpo.r2Chave, 200) || null).run();
+
+    return json({ sucesso: true, id: r.meta?.last_row_id ?? null });
+
+}
+
+async function tratarExcluirBanner(request, env) {
+
+    const { id } = await request.json().catch(() => ({}));
+    const alvo = Math.round(numero(id));
+    if (!alvo) return json({ erro: "Informe o id do banner." }, 400);
+
+    /* Apaga o arquivo junto. Sem isto o balde vira depósito de imagem
+       de campanha de dois anos atrás, que ninguém sabe se ainda serve
+       para alguma coisa e por isso ninguém apaga. */
+    const linha = await env.DB.prepare(
+        `SELECT r2_chave FROM banners WHERE id = ?1`
+    ).bind(alvo).first();
+
+    if (linha?.r2_chave && env.BANNERS_BUCKET) {
+        await env.BANNERS_BUCKET.delete(linha.r2_chave).catch(() => {});
+    }
+
+    const r = await env.DB.prepare(`DELETE FROM banners WHERE id = ?1`).bind(alvo).run();
+
+    return json({ sucesso: true, apagados: r.meta?.changes ?? 0 });
+
+}
+
+/* Recebe o arquivo do painel e devolve o endereço definitivo.
+
+   Só funciona com o balde do R2 ligado nas configurações do worker. Sem
+   ele a rota diz isso em português, e o painel continua aceitando
+   endereço colado à mão — o recurso a mais não pode impedir o de
+   sempre de funcionar. */
+async function tratarEnviarImagemDeBanner(request, env) {
+
+    if (!env.BANNERS_BUCKET) {
+        return json({
+            erro: "Envio de arquivo não está ligado. Cole o endereço de uma imagem já publicada, " +
+                  "ou ligue um bucket R2 chamado BANNERS_BUCKET nas configurações do worker."
+        }, 501);
+    }
+
+    const tipo = request.headers.get("Content-Type") || "";
+    if (!TIPOS_DE_IMAGEM.includes(tipo.split(";")[0].trim())) {
+        return json({ erro: "Formato não aceito. Use JPG, PNG, WebP, GIF ou AVIF." }, 415);
+    }
+
+    const bytes = await request.arrayBuffer();
+    if (!bytes.byteLength) return json({ erro: "Arquivo vazio." }, 400);
+    if (bytes.byteLength > MAX_BANNER_BYTES) {
+        return json({ erro: "Arquivo grande demais. O limite é 3 MB." }, 413);
+    }
+
+    const extensao = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+                       "image/gif": "gif", "image/avif": "avif" }[tipo.split(";")[0].trim()];
+
+    const chave = `banner/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${extensao}`;
+
+    await env.BANNERS_BUCKET.put(chave, bytes, { httpMetadata: { contentType: tipo } });
+
+    const base = new URL(request.url).origin;
+
+    return json({ sucesso: true, chave, url: `${base}/banners/arquivo/${chave.split("/")[1]}` });
+
+}
+
+/* Serve o arquivo do R2. Aberto, como qualquer imagem de vitrine.
+
+   O cache longo é seguro porque o nome do arquivo tem a hora e um
+   sorteio dentro: trocar o banner gera nome novo, então nunca é preciso
+   invalidar cache — o endereço antigo simplesmente deixa de ser usado. */
+async function tratarArquivoDeBanner(request, env, nome) {
+
+    if (!env.BANNERS_BUCKET) return json({ erro: "Não encontrado." }, 404);
+
+    const objeto = await env.BANNERS_BUCKET.get(`banner/${nome}`);
+    if (!objeto) return json({ erro: "Não encontrado." }, 404);
+
+    return new Response(objeto.body, {
+        headers: {
+            "Content-Type": objeto.httpMetadata?.contentType || "application/octet-stream",
+            "Cache-Control": "public, max-age=31536000, immutable",
+            ...CORS_HEADERS
+        }
+    });
+
+}
+
 async function tratarStatus(request, env) {
 
     const { ref, status } = await request.json().catch(() => ({}));
@@ -436,6 +640,17 @@ export default {
                 return await tratarNovaBusca(request, env);
             }
 
+            // Banners: a lista e os arquivos são conteúdo de vitrine, e a
+            // vitrine é pública. Quem EDITA, mais abaixo, precisa da chave.
+            if (request.method === "GET" && rota === "/banners") {
+                return await tratarBannersPublicos(request, env);
+            }
+
+            const arquivoBanner = rota.match(/^\/banners\/arquivo\/([A-Za-z0-9._-]+)$/);
+            if (request.method === "GET" && arquivoBanner) {
+                return await tratarArquivoDeBanner(request, env, arquivoBanner[1]);
+            }
+
             // daqui para baixo é a loja olhando os próprios dados
             if (!autorizado(request, env)) {
                 return json({ erro: "Não autorizado." }, 401);
@@ -445,6 +660,11 @@ export default {
             if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env);
             if (request.method === "GET" && rota === "/clientes") return await tratarClientes(request, env);
             if (request.method === "POST" && rota === "/status")  return await tratarStatus(request, env);
+
+            if (request.method === "GET"  && rota === "/banners/todos")   return await tratarBannersDaLoja(request, env);
+            if (request.method === "POST" && rota === "/banners")         return await tratarSalvarBanner(request, env);
+            if (request.method === "POST" && rota === "/banners/excluir") return await tratarExcluirBanner(request, env);
+            if (request.method === "POST" && rota === "/banners/imagem")  return await tratarEnviarImagemDeBanner(request, env);
 
             const umPedido = rota.match(/^\/pedidos\/(.+)$/);
             if (request.method === "GET" && umPedido) {
