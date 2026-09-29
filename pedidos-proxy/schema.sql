@@ -154,3 +154,41 @@ CREATE TABLE IF NOT EXISTS promocoes (
 
 CREATE INDEX IF NOT EXISTS idx_promocoes_ativo ON promocoes (ativo);
 CREATE INDEX IF NOT EXISTS idx_promocoes_lote ON promocoes (lote);
+
+-- ===================================================================
+-- Encarte de promoções do mês.
+--
+-- É a peça que a loja já faz para o WhatsApp e para imprimir. Aqui ela
+-- ganha um lugar no site, com prazo: o de outubro entra e sai sozinho,
+-- sem ninguém lembrar de tirar o de setembro do ar — que é o jeito mais
+-- comum de um encarte virar propaganda de preço vencido.
+--
+-- Uma linha por encarte; as páginas ficam na tabela ao lado. Encarte de
+-- farmácia tem duas, quatro, oito páginas, e elas precisam de ordem.
+-- ===================================================================
+CREATE TABLE IF NOT EXISTS encartes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    titulo      TEXT NOT NULL,           -- "Encarte de outubro", "Semana do bebê"
+    inicio      TEXT,                    -- aaaa-mm-dd; vazio = já vale
+    fim         TEXT,                    -- aaaa-mm-dd; vazio = não expira
+    ativo       INTEGER NOT NULL DEFAULT 1,
+    -- PDF opcional, para quem quiser baixar ou imprimir. As páginas em
+    -- imagem continuam sendo o que aparece na tela: PDF no celular abre
+    -- em visualizador de arquivo, e metade das pessoas desiste ali.
+    pdf         TEXT,
+    pdf_chave   TEXT,
+    criado_em   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_encartes_ativo ON encartes (ativo);
+
+CREATE TABLE IF NOT EXISTS encarte_paginas (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    encarte_id  INTEGER NOT NULL,
+    imagem      TEXT NOT NULL,
+    r2_chave    TEXT,
+    ordem       INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (encarte_id) REFERENCES encartes (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_paginas_encarte ON encarte_paginas (encarte_id, ordem);
