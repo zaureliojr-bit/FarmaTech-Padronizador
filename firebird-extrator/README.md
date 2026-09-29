@@ -56,8 +56,9 @@ Preço Custo, Estoque).
 
 ## O que a consulta traz
 
-Só produtos com `STATUS = 'A'` (ativo) - se isso não for o filtro
-certo no seu Farmax, ajusta a cláusula `WHERE` em `extrair.js`.
+Só produtos com `STATUS = 'A'` (ativo) **e com estoque acima de zero**
+na sua filial - se isso não for o filtro certo no seu Farmax, ajusta a
+cláusula `WHERE` em `extrair.js`.
 
 Estoque e preço vêm das colunas por filial (`ESTOQUE_<n>`,
 `PRECO_VENDA_<n>`, `CUSTO_UNITARIO_<n>`) - `FB_FILIAL` no `.env`
