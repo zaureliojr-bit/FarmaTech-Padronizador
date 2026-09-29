@@ -1,0 +1,16 @@
+{
+  "name": "firebird-extrator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Extrai o catálogo de produtos direto do banco Firebird do Farmax e gera uma planilha pronta pro FarmaTech Padronizador importar.",
+  "type": "commonjs",
+  "main": "extrair.js",
+  "scripts": {
+    "extrair": "node extrair.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-firebird": "^1.1.9",
+    "xlsx": "^0.18.5"
+  }
+}
