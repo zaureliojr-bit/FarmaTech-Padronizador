@@ -64,6 +64,10 @@ export function criarProdutoInteligente(produto = {}) {
 
         familiaNome: "",
 
+        // true quando a categoria veio do nome do produto, e não do PDV
+        // (ver extrairCategoria + dictionary/roteamentoPorNome).
+        categoriaRoteada: false,
+
         linha: "",
 
         tamanho: "",

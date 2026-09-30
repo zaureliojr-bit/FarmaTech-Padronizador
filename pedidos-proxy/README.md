@@ -60,12 +60,27 @@ no topo do `script.js` do site, em `API_PEDIDOS_D1`.
 | Método | Rota | Precisa de senha | Para quê |
 |---|---|---|---|
 | POST | `/pedidos` | não | o site grava um pedido |
+| POST | `/busca` | não | o site grava um termo buscado |
 | GET | `/resumo?dias=30` | sim | números do painel |
 | GET | `/pedidos/{ref}` | sim | um pedido com os itens |
 | GET | `/clientes?limite=100` | sim | quem já comprou |
 | POST | `/status` | sim | muda o status de um pedido |
 
 Status aceitos: `novo`, `separando`, `receita-ok`, `entregue`, `cancelado`.
+
+O `/resumo` traz, junto dos números de venda, `maisProcurados` (o que foi
+digitado na busca do site) e `naoEncontrados` (o que foi procurado e não
+devolveu produto nenhum). O segundo é o relatório que mostra o que falta
+no catálogo — vendas que não aconteceram e que o histórico de pedidos,
+por definição, nunca mostraria.
+
+## O que a tabela de buscas NÃO guarda
+
+Termo e contagem, nada mais. Sem telefone, sem IP, sem identificador de
+sessão. Não dá para ligar uma busca a uma pessoa, nem cruzar com a tabela
+de clientes — é estatística da loja, não histórico de ninguém. Isso é
+escolha de projeto, não descuido: busca em farmácia entrega doença, e
+esse tipo de dado não deveria existir num banco que não precisa dele.
 
 ## Por que gravar pedido não tem senha
 

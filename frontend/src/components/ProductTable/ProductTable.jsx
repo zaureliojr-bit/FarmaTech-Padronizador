@@ -264,7 +264,7 @@ function CelulaTexto({ valor, onSalvar, formatarExibicao }) {
 // Editor de campos com vocabulário fechado (classe, categoria) - só
 // deixa escolher entre valores já cadastrados no catálogo importado,
 // não digitar um novo.
-function CelulaSelecao({ valor, opcoes, onSalvar, aviso }) {
+function CelulaSelecao({ valor, opcoes, onSalvar, aviso, nota }) {
 
     const [editando, setEditando] = useState(false);
 
@@ -325,6 +325,18 @@ function CelulaSelecao({ valor, opcoes, onSalvar, aviso }) {
 
                     <span className="badge-aviso" title={aviso}>
                         ⚠️
+                    </span>
+
+                )
+
+            }
+
+            {
+
+                nota && (
+
+                    <span className="badge-nota" title={nota}>
+                        ↪
                     </span>
 
                 )
@@ -451,6 +463,11 @@ function ProductTable({
                                             aviso={
                                                 produto.categoria && produto.familia === "outros"
                                                     ? `Categoria fora das famílias do site - vai cair em "Outros".`
+                                                    : null
+                                            }
+                                            nota={
+                                                produto.categoriaRoteada
+                                                    ? `Deduzida do nome do produto. Na planilha veio como "${produto.categoriaOriginal}", que não bate com nenhuma família do site. Trocar aqui vale mais que a dedução.`
                                                     : null
                                             }
                                         />

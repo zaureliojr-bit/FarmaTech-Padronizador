@@ -507,6 +507,20 @@ tr:hover .celula-descricao-toolbar,
 
 }
 
+/* categoria deduzida do nome do produto (roteamentoPorNome) - não é
+   erro, é informação: dá pra revisar produto a produto antes de publicar */
+.badge-nota{
+
+    font-size:12px;
+
+    line-height:1;
+
+    color:#2563eb;
+
+    cursor:help;
+
+}
+
 .celula-selecao{
 
     display:inline-flex;

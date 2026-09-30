@@ -275,8 +275,17 @@ export function lerPlanilhaCmed(dados) {
         if (direta) return direta;
 
         // A CMED escreve "- (*)" quando não informou a tarja. Nesses casos
-        // vale a tarja que a mesma substância tem nas outras apresentações,
-        // e no empate a mais restritiva.
+        // vale a tarja MAIS COMUM entre as outras apresentações da mesma
+        // substância; a mais restritiva só desempata.
+        //
+        // Já foi o contrário - a mais restritiva ganhava sempre - e o
+        // resultado era absurdo: dipirona tem 100 apresentações sem tarja
+        // e 3 vermelhas, e o xarope de dipirona (que a CMED deixou em
+        // branco) saía como "precisa de receita" no site. Idem AAS,
+        // acetilcisteína, clotrimazol - justamente os MIPs mais vendidos.
+        // Uma apresentação isolada com tarja não torna a substância
+        // inteira tarjada; a Portaria 344 acima é a única regra que vale
+        // pela substância, e essa continua valendo.
         const contagem = tarjasDaSubstancia.get(l.substancia);
 
         if (!contagem) return "";
@@ -287,8 +296,8 @@ export function lerPlanilhaCmed(dados) {
 
             if (!melhor) { melhor = codigo; return; }
 
-            const atual = [PESO_DA_TARJA[codigo], vezes];
-            const anterior = [PESO_DA_TARJA[melhor], contagem.get(melhor)];
+            const atual = [vezes, PESO_DA_TARJA[codigo]];
+            const anterior = [contagem.get(melhor), PESO_DA_TARJA[melhor]];
 
             if (atual[0] > anterior[0] ||
                 (atual[0] === anterior[0] && atual[1] > anterior[1])) {
