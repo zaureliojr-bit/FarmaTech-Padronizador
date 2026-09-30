@@ -16,7 +16,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@yao-pkg/pkg": "^6.23.0"
+    "pkg": "^5.8.1"
   },
   "pkg": {
     "targets": ["node18-win-x64"],
