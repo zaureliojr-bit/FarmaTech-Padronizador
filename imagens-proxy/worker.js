@@ -19,6 +19,12 @@
 // importar - preço/estoque/código continuam de fora de propósito, são
 // dados que têm que ficar por loja, nunca compartilhados.
 //
+// E recebe a planilha que o extrator do Firebird (firebird-extrator/)
+// gera no PC da loja - o script manda ela pra cá logo depois de gerar,
+// e o painel, ao abrir, pergunta se tem algo novo esperando (rotas
+// /extracao*) pra avisar com um botão, em vez de precisar arrastar o
+// arquivo manualmente toda vez.
+//
 // Bindings necessários (Configurações -> Bindings, no painel):
 //   R2 bucket        -> nome da variável: IMAGENS_BUCKET
 //   D1 database       -> nome da variável: DB (rode schema.sql nela antes)
@@ -225,6 +231,93 @@ async function tratarSalvarFamilia(request, env) {
 
 }
 
+/* ===================== EXTRAÇÃO DO FIREBIRD ===================== */
+//
+// O extrator (firebird-extrator/) roda no PC da loja, gera o .xlsx e
+// manda pra cá logo em seguida - o painel, ao abrir, pergunta se tem
+// algo novo esperando e avisa a loja com um botão, em vez de precisar
+// arrastar o arquivo manualmente toda vez.
+
+const CHAVE_ARQUIVO_EXTRACAO = "extracoes/pendente.xlsx";
+
+async function tratarReceberExtracao(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const url = new URL(request.url);
+    const nomeArquivo = (url.searchParams.get("nome") || "produtos_extraidos.xlsx").slice(0, 200);
+
+    const bytes = await request.arrayBuffer();
+
+    if (!bytes.byteLength) {
+        return json({ erro: "Arquivo vazio." }, 400);
+    }
+
+    await env.IMAGENS_BUCKET.put(CHAVE_ARQUIVO_EXTRACAO, bytes, {
+        httpMetadata: {
+            contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        }
+    });
+
+    await env.DB.prepare(
+        `INSERT INTO extracoes (nome_arquivo, tamanho, enviado_em)
+         VALUES (?1, ?2, ?3)`
+    ).bind(nomeArquivo, bytes.byteLength, Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarStatusExtracao(env) {
+
+    const pendente = await env.DB.prepare(
+        `SELECT id, nome_arquivo, tamanho, enviado_em FROM extracoes
+          WHERE importado_em IS NULL
+          ORDER BY id DESC LIMIT 1`
+    ).first();
+
+    if (!pendente) return json({ pendente: false });
+
+    return json({
+        pendente: true,
+        nomeArquivo: pendente.nome_arquivo,
+        tamanho: pendente.tamanho,
+        enviadoEm: pendente.enviado_em
+    });
+
+}
+
+async function tratarArquivoExtracao(env) {
+
+    const objeto = await env.IMAGENS_BUCKET.get(CHAVE_ARQUIVO_EXTRACAO);
+
+    if (!objeto) return json({ erro: "Nenhuma extração disponível." }, 404);
+
+    return new Response(objeto.body, {
+        headers: {
+            "Content-Type": objeto.httpMetadata?.contentType || "application/octet-stream",
+            ...CORS_HEADERS
+        }
+    });
+
+}
+
+async function tratarMarcarImportada(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.DB.prepare(
+        `UPDATE extracoes SET importado_em = ?1 WHERE importado_em IS NULL`
+    ).bind(Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
 async function tratarListarFamilias(env) {
 
     const { results } = await env.DB.prepare(
@@ -310,6 +403,22 @@ export default {
 
         if (request.method === "GET" && caminho === "/familias") {
             return tratarListarFamilias(env);
+        }
+
+        if (request.method === "POST" && caminho === "/extracao") {
+            return tratarReceberExtracao(request, env);
+        }
+
+        if (request.method === "GET" && caminho === "/extracao") {
+            return tratarStatusExtracao(env);
+        }
+
+        if (request.method === "GET" && caminho === "/extracao/arquivo") {
+            return tratarArquivoExtracao(env);
+        }
+
+        if (request.method === "POST" && caminho === "/extracao/importado") {
+            return tratarMarcarImportada(request, env);
         }
 
         if (request.method === "GET" && caminho.length > 1) {

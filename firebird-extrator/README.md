@@ -38,7 +38,8 @@ pasta `instalador/` (junto com `instalar.ps1` e `instalar.bat`).
 3. Responde as perguntas que aparecem: pasta de instalação (pode
    aceitar a padrão), caminho do arquivo `.FDB`, host/porta (aceita o
    padrão se o Firebird roda ali mesmo), usuário/senha do Firebird,
-   número da filial e horário pra rodar todo dia.
+   número da filial, o endereço/chave do painel (opcional - ver
+   "Avisar o painel do site" abaixo) e horário pra rodar todo dia.
 4. O instalador testa a extração na hora e já cadastra a tarefa
    agendada no Windows - não precisa abrir o Agendador de Tarefas na
    mão.
@@ -135,11 +136,30 @@ erro, sem precisar abrir o terminal.
 Pra testar sem esperar o horário agendado: clica com o botão direito
 na tarefa → **Executar**, ou dá duplo-clique no `rodar.bat` direto.
 
+## Avisar o painel do site (sem arrastar o arquivo manualmente)
+
+Depois de gerar o `.xlsx`, o script pode mandar ele direto pro mesmo
+worker que hospeda as imagens (rotas `/extracao*` do `imagens-proxy` -
+ver `imagens-proxy/README.md`). O painel do site, ao abrir, percebe
+que tem uma extração nova esperando e mostra um aviso com um botão
+**"Importar agora"** - um clique, sem precisar abrir o Explorador de
+Arquivos nem arrastar nada.
+
+Pra ativar, preenche no `.env` (ou responde na pergunta do instalador):
+
+- `UPLOAD_URL` - o mesmo endereço do worker de imagens (ex.:
+  `https://imagens-proxy.<seu-usuario>.workers.dev`).
+- `UPLOAD_KEY` - a mesma chave `IMAGENS_KEY` configurada nesse worker.
+
+Deixa os dois em branco se não quiser isso agora - o `.xlsx` continua
+sendo gerado localmente do mesmo jeito, só não avisa o painel sozinho.
+
+> Precisa que o worker `imagens-proxy` já esteja com a rota nova
+> implantada (é um deploy manual, não puxa do Git automaticamente -
+> ver `imagens-proxy/README.md`) e a tabela `extracoes` criada no D1.
+
 ## Próximos passos possíveis
 
 - Adicionar mais campos (substância, registro ANVISA, NCM, flag de
   controlado - a tabela `PRODUTOS` já tem tudo isso, só falta decidir
   se/como o padronizador vai usar).
-- Subir o arquivo automaticamente no padronizador (sem arrasta-e-solta
-  manual) - exigiria simular o navegador ou criar uma rota de upload
-  nova, mais complexo; não construído por enquanto.

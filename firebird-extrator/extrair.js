@@ -11,6 +11,7 @@
 
 require("dotenv").config();
 
+const fs = require("fs");
 const Firebird = require("node-firebird");
 const XLSX = require("xlsx");
 
@@ -82,6 +83,50 @@ function paraLinhaPlanilha(linha) {
 
 }
 
+// Manda o .xlsx pro mesmo worker que já hospeda as imagens (rotas
+// /extracao* do imagens-proxy) - o painel do site, ao abrir, vê que
+// tem uma extração nova esperando e avisa com um botão "Importar
+// agora", sem precisar arrastar o arquivo manualmente. Se UPLOAD_URL
+// não estiver configurado, só pula essa parte - o arquivo local
+// continua sendo gerado normalmente.
+async function enviarParaPainel(caminhoArquivo) {
+
+    const uploadUrl = (process.env.UPLOAD_URL || "").replace(/\/+$/, "");
+
+    if (!uploadUrl) {
+        console.log("UPLOAD_URL não configurado no .env - o arquivo só ficou salvo localmente (não avisei o painel).");
+        return;
+    }
+
+    const bytes = fs.readFileSync(caminhoArquivo);
+
+    try {
+
+        const resposta = await fetch(`${uploadUrl}/extracao?nome=${encodeURIComponent(caminhoArquivo)}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/octet-stream",
+                "X-Imagens-Key": process.env.UPLOAD_KEY || ""
+            },
+            body: bytes
+        });
+
+        if (!resposta.ok) {
+            const corpo = await resposta.text().catch(() => "");
+            console.error(`Não consegui avisar o painel (HTTP ${resposta.status}): ${corpo}`);
+            return;
+        }
+
+        console.log("Painel avisado - a extração já aparece lá esperando um clique em \"Importar agora\".");
+
+    } catch (erro) {
+
+        console.error("Não consegui avisar o painel:", erro.message);
+
+    }
+
+}
+
 Firebird.attach(OPCOES, (erro, db) => {
 
     if (erro) {
@@ -92,7 +137,7 @@ Firebird.attach(OPCOES, (erro, db) => {
 
     }
 
-    db.query(CONSULTA, (erroConsulta, linhas) => {
+    db.query(CONSULTA, async (erroConsulta, linhas) => {
 
         db.detach();
 
@@ -119,6 +164,8 @@ Firebird.attach(OPCOES, (erro, db) => {
 
         console.log(`Pronto! ${linhas.length} produtos exportados pra "${saida}" (filial ${FILIAL}).`);
         console.log("Já pode subir esse arquivo direto no FarmaTech Padronizador.");
+
+        await enviarParaPainel(saida);
 
     });
 

@@ -33,3 +33,16 @@ CREATE TABLE IF NOT EXISTS familias_categoria (
     familia_id TEXT NOT NULL,
     atualizado_em INTEGER NOT NULL
 );
+
+-- Planilha que o extrator do Firebird (firebird-extrator/) enviou e
+-- ainda não foi importada no painel. Sempre 1 linha por envio - o
+-- arquivo em si fica no R2 (mesmo bucket das imagens, chave fixa
+-- "extracoes/pendente.xlsx", sempre sobrescrita); aqui só o metadado,
+-- pra saber se tem algo novo esperando sem baixar o arquivo inteiro.
+CREATE TABLE IF NOT EXISTS extracoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome_arquivo TEXT NOT NULL,
+    tamanho INTEGER NOT NULL,
+    enviado_em INTEGER NOT NULL,
+    importado_em INTEGER
+);

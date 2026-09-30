@@ -70,6 +70,21 @@ while (-not ($filial -match '^\d+$')) {
     $filial = Read-Host "Numero da filial"
 }
 
+# --- 2.5. Avisar o painel do site (opcional) ---
+Escrever ""
+Escrever "--- Enviar a planilha pro painel do site (opcional) ---" "Cyan"
+Escrever "Deixa em branco se nao quiser isso agora - da pra configurar depois editando o .env." "DarkGray"
+
+$uploadUrl = Read-Host "Endereco do worker de imagens (ex: https://imagens-proxy.SEUNOME.workers.dev)"
+$uploadKey = ""
+if (-not [string]::IsNullOrWhiteSpace($uploadUrl)) {
+    $uploadUrl = $uploadUrl.TrimEnd("/")
+    $uploadKeySegura = Read-Host "Chave (X-Imagens-Key) desse worker" -AsSecureString
+    $uploadKey = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($uploadKeySegura)
+    )
+}
+
 # --- 3. Gravar o .env ---
 $conteudoEnv = @"
 FB_DATABASE=$caminhoBanco
@@ -79,6 +94,8 @@ FB_USER=$usuario
 FB_PASSWORD=$senhaTexto
 FB_FILIAL=$filial
 SAIDA_ARQUIVO=produtos_extraidos.xlsx
+UPLOAD_URL=$uploadUrl
+UPLOAD_KEY=$uploadKey
 "@
 
 Set-Content -Path (Join-Path $pastaDestino ".env") -Value $conteudoEnv -Encoding UTF8

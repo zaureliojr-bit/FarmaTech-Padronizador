@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import Header from "../components/Header/Header";
 import ImportBox from "../components/ImportBox/ImportBox";
+import NovaExtracaoBox from "../components/NovaExtracaoBox/NovaExtracaoBox";
 import ImportSummary from "../components/ImportSummary/ImportSummary";
 import CmedBox from "../components/CmedBox/CmedBox";
 import DistribuidorBox from "../components/DistribuidorBox/DistribuidorBox";
@@ -102,6 +103,11 @@ function Home() {
             <Header />
 
             <div className="page">
+
+            <NovaExtracaoBox
+                onImportar={setResultadoImportacao}
+                mostrarToast={mostrarToast}
+            />
 
             <ImportBox
                 onImportar={setResultadoImportacao}
