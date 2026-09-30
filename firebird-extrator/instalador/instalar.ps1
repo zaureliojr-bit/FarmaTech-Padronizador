@@ -123,11 +123,21 @@ Escrever ""
 $horario = Read-Host "Horario pra rodar todo dia, formato HH:MM (Enter pra '06:00')"
 if ([string]::IsNullOrWhiteSpace($horario)) { $horario = "06:00" }
 
-$nomeTarefa = "FarmaTechExtratorFirebird"
-$comando = "cmd.exe"
-$argumentos = "/c `"cd /d `"$pastaDestino`" && extrator.exe >> extracao.log 2>&1`""
+# Um .bat dedicado, em vez de "&&" dentro do /TR do schtasks - aninhar
+# aspas e "&&" ali quebra dependendo de como o Windows re-tokeniza a
+# linha (aconteceu na prática: "Argumento/opcao invalido - '&&'").
+# Apontar a tarefa direto pro .bat evita esse problema de vez.
+$caminhoRodarBat = Join-Path $pastaDestino "rodar.bat"
+$conteudoRodarBat = @"
+@echo off
+cd /d "%~dp0"
+extrator.exe >> extracao.log 2>&1
+"@
+Set-Content -Path $caminhoRodarBat -Value $conteudoRodarBat -Encoding ASCII
 
-schtasks /Create /F /SC DAILY /ST $horario /TN $nomeTarefa /TR "$comando $argumentos" /RL LIMITED | Out-Null
+$nomeTarefa = "FarmaTechExtratorFirebird"
+
+schtasks /Create /F /SC DAILY /ST $horario /TN $nomeTarefa /TR "`"$caminhoRodarBat`"" /RL LIMITED | Out-Null
 
 if ($LASTEXITCODE -eq 0) {
     Escrever "Tarefa agendada '$nomeTarefa' criada - roda todo dia as $horario." "Green"
