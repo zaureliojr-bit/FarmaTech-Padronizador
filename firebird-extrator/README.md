@@ -10,12 +10,55 @@ Firebird não é acessível pela internet, então isso nunca vira um
 Worker do Cloudflare, é só um script que você roda quando quiser
 atualizar a planilha.
 
-## 1. Instalar o Node.js
+## Instalar num PC de cliente (modo rápido, com instalador)
+
+Pra levar isso pra outra loja sem precisar instalar Node.js nem mexer
+em terminal na máquina do cliente, use o instalador da pasta
+`instalador/`. Ele já embute o Node dentro de um `.exe` e faz as
+perguntas de configuração (caminho do banco, usuário, senha, filial,
+horário) sozinho, gravando o `.env` e cadastrando a tarefa agendada
+automaticamente.
+
+**Passo único, feito uma vez (no seu PC, com internet livre):**
+
+```
+npm install
+npm run build:exe
+```
+
+Isso gera `dist/extrator.exe` - um `.exe` autônomo (não precisa de
+Node.js instalado em quem for rodar). Copia esse arquivo pra dentro da
+pasta `instalador/` (junto com `instalar.ps1` e `instalar.bat`).
+
+**Depois, pra cada PC de cliente:**
+
+1. Copia a pasta `instalador/` inteira (com o `extrator.exe` dentro)
+   pra máquina do cliente - pen drive, OneDrive, o que for mais fácil.
+2. Dá dois cliques em `instalar.bat`.
+3. Responde as perguntas que aparecem: pasta de instalação (pode
+   aceitar a padrão), caminho do arquivo `.FDB`, host/porta (aceita o
+   padrão se o Firebird roda ali mesmo), usuário/senha do Firebird,
+   número da filial e horário pra rodar todo dia.
+4. O instalador testa a extração na hora e já cadastra a tarefa
+   agendada no Windows - não precisa abrir o Agendador de Tarefas na
+   mão.
+
+Pronto - a partir daí o `.xlsx` se atualiza sozinho todo dia na pasta
+escolhida, com log em `extracao.log`. Pra reconfigurar algo depois
+(trocar senha, horário etc.), roda o `instalar.bat` de novo - ele
+sobrescreve o `.env` e a tarefa.
+
+> Se preferir não usar o instalador (por exemplo, no seu próprio PC de
+> testes), o modo manual abaixo continua funcionando normalmente.
+
+## Modo manual (sem instalador)
+
+### 1. Instalar o Node.js
 
 Se ainda não tiver: baixa em [nodejs.org](https://nodejs.org) (versão
 LTS) e instala normal.
 
-## 2. Instalar as dependências
+### 2. Instalar as dependências
 
 Num terminal, dentro desta pasta (`firebird-extrator/`):
 
@@ -23,7 +66,7 @@ Num terminal, dentro desta pasta (`firebird-extrator/`):
 npm install
 ```
 
-## 3. Configurar a conexão
+### 3. Configurar a conexão
 
 Copia `.env.example` pra um arquivo novo chamado `.env` (mesma pasta) e
 preenche:
@@ -42,7 +85,7 @@ preenche:
 O `.env` nunca vai pro Git (já está no `.gitignore` desta pasta) -
 fica só no seu PC.
 
-## 4. Rodar
+### 4. Rodar
 
 ```
 npm run extrair
@@ -54,7 +97,7 @@ padronizador - ele reconhece as colunas sozinho (Código, EAN,
 Descrição, Laboratório, Categoria, Classe, Preço Venda, Promoção,
 Preço Custo, Estoque).
 
-## O que a consulta traz
+### O que a consulta traz
 
 Só produtos com `STATUS = 'A'` (ativo) **e com estoque acima de zero**
 na sua filial - se isso não for o filtro certo no seu Farmax, ajusta a
@@ -64,7 +107,7 @@ Estoque e preço vêm das colunas por filial (`ESTOQUE_<n>`,
 `PRECO_VENDA_<n>`, `CUSTO_UNITARIO_<n>`) - `FB_FILIAL` no `.env`
 decide qual número usar.
 
-## 5. Rodar sozinho todo dia (Agendador de Tarefas do Windows)
+### 5. Rodar sozinho todo dia (Agendador de Tarefas do Windows)
 
 Isso deixa o `.xlsx` sempre atualizado no seu PC sem precisar abrir o
 terminal - você só arrasta o arquivo mais recente pro padronizador
@@ -99,5 +142,4 @@ na tarefa → **Executar**, ou dá duplo-clique no `rodar.bat` direto.
   se/como o padronizador vai usar).
 - Subir o arquivo automaticamente no padronizador (sem arrasta-e-solta
   manual) - exigiria simular o navegador ou criar uma rota de upload
-  nova, mais complexo; não construído por enquanto, a extração
-  agendada já cobre a parte que mais dava trabalho.
+  nova, mais complexo; não construído por enquanto.
