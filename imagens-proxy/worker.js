@@ -318,6 +318,82 @@ async function tratarMarcarImportada(request, env) {
 
 }
 
+/* ===================== LISTAS DE REFERÊNCIA (CMED/distribuidora) ===================== */
+//
+// Até aqui, a lista da CMED e a da distribuidora só viviam no
+// IndexedDB de quem usava o padronizador - um site em outro domínio
+// (ex.: o painel da loja) não enxerga esse IndexedDB (armazenamento de
+// navegador é isolado por origem). Guardando aqui, qualquer site
+// consegue buscar a última versão, sem depender de reimportar a
+// planilha manualmente em cada lugar que precisar dela.
+
+// Nomes aceitos - trava a chave num conjunto pequeno de propósito,
+// pra não virar um balde genérico de qualquer coisa que alguém queira
+// guardar (a rota tem a mesma IMAGENS_KEY das outras, então travar o
+// nome limita o estrago de uma chave vazada).
+const CHAVES_REFERENCIA_VALIDAS = new Set(["cmed", "distribuidor"]);
+
+function caminhoReferencia(chave) {
+
+    return `referencias/${chave}.json`;
+
+}
+
+async function tratarSalvarReferencia(chave, request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    if (!CHAVES_REFERENCIA_VALIDAS.has(chave)) {
+        return json({ erro: "Referência desconhecida." }, 400);
+    }
+
+    const bytes = await request.arrayBuffer();
+
+    if (!bytes.byteLength) {
+        return json({ erro: "Arquivo vazio." }, 400);
+    }
+
+    await env.IMAGENS_BUCKET.put(caminhoReferencia(chave), bytes, {
+        httpMetadata: { contentType: "application/json" }
+    });
+
+    await env.DB.prepare(
+        `INSERT INTO referencias (chave, tamanho, atualizado_em)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(chave) DO UPDATE SET
+            tamanho = excluded.tamanho,
+            atualizado_em = excluded.atualizado_em`
+    ).bind(chave, bytes.byteLength, Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarServirReferencia(chave, env) {
+
+    if (!CHAVES_REFERENCIA_VALIDAS.has(chave)) {
+        return json({ erro: "Referência desconhecida." }, 400);
+    }
+
+    const objeto = await env.IMAGENS_BUCKET.get(caminhoReferencia(chave));
+
+    if (!objeto) return json({ erro: "Referência ainda não enviada." }, 404);
+
+    return new Response(objeto.body, {
+        headers: {
+            "Content-Type": "application/json",
+            // 1h de cache - a lista só muda quando alguém sobe uma nova
+            // (mensalmente, no caso da CMED), não precisa buscar a cada
+            // carregamento de página.
+            "Cache-Control": "public, max-age=3600",
+            ...CORS_HEADERS
+        }
+    });
+
+}
+
 async function tratarListarFamilias(env) {
 
     const { results } = await env.DB.prepare(
@@ -419,6 +495,14 @@ export default {
 
         if (request.method === "POST" && caminho === "/extracao/importado") {
             return tratarMarcarImportada(request, env);
+        }
+
+        const referencia = caminho.match(/^\/referencias\/([a-z0-9-]+)$/);
+        if (referencia && request.method === "POST") {
+            return tratarSalvarReferencia(referencia[1], request, env);
+        }
+        if (referencia && request.method === "GET") {
+            return tratarServirReferencia(referencia[1], env);
         }
 
         if (request.method === "GET" && caminho.length > 1) {

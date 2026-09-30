@@ -8,6 +8,7 @@ import { importarListaDistribuidor, consultarEanDistribuidor } from "../services
 import { carregarIndiceDistribuidor, salvarIndiceDistribuidor } from "../services/distribuidorStorage";
 import { salvarCorrecao } from "../services/correcoesService";
 import { buscarFamiliasOverride, salvarFamiliaOverride } from "../services/familiasOverrideService";
+import { salvarReferencia } from "../services/referenciasService";
 
 // Só estes três campos são "correção" compartilhável entre lojas -
 // preço, promoção e estoque são do catálogo de cada loja e nunca podem
@@ -77,6 +78,12 @@ export function useProdutos() {
 
             const guardou = await salvarIndiceCmed(indice);
 
+            // Espelha no servidor (R2/D1) - até aqui só ficava no
+            // IndexedDB deste navegador, e outros sites (ex.: o painel
+            // da loja) precisam enxergar a mesma lista pra padronizar
+            // sozinhos. Roda em paralelo, não bloqueia a tela.
+            salvarReferencia("cmed", indice);
+
             return { sucesso: true, guardou, totalLinhas: indice.totalLinhas };
 
         } catch (erro) {
@@ -130,6 +137,9 @@ export function useProdutos() {
             setIndiceDistribuidor(indice);
 
             const guardou = await salvarIndiceDistribuidor(indice);
+
+            // Mesmo espelho do CMED, ver comentário lá em cima.
+            salvarReferencia("distribuidor", indice);
 
             return { sucesso: true, guardou, totalLinhas: indice.totalLinhas };
 

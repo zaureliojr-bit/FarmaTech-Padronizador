@@ -46,3 +46,16 @@ CREATE TABLE IF NOT EXISTS extracoes (
     enviado_em INTEGER NOT NULL,
     importado_em INTEGER
 );
+
+-- Listas de referência (CMED, distribuidora) que até aqui só viviam no
+-- IndexedDB de quem usava o padronizador - um site em outro domínio
+-- (ex.: o painel da loja) não enxerga esse IndexedDB (armazenamento de
+-- navegador é isolado por origem), então não tinha como rodar a mesma
+-- padronização sozinho. O arquivo em si (JSON, já processado pelo
+-- cmedService.js/distribuidorService.js) fica no R2, chave
+-- "referencias/<chave>.json"; aqui só o metadado.
+CREATE TABLE IF NOT EXISTS referencias (
+    chave TEXT PRIMARY KEY,
+    tamanho INTEGER NOT NULL,
+    atualizado_em INTEGER NOT NULL
+);
