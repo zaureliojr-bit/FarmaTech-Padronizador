@@ -397,6 +397,7 @@ function ProductTable({
     categorias,
     classes,
     atualizarProduto,
+    excluirProduto,
     mostrarToast
 }) {
 
@@ -452,6 +453,16 @@ function ProductTable({
             });
 
         }
+
+    }
+
+    function excluirProdutoDaLista(produto) {
+
+        if (!window.confirm(`Excluir "${produto.descricaoSite}" (código ${produto.codigo})? Ele não vai aparecer mais em nenhuma importação futura - pra desfazer, é preciso remover a exclusão no banco.`)) return;
+
+        excluirProduto(produto.codigo);
+
+        mostrarToast?.("Produto excluído - não volta a aparecer em reimportações.", "sucesso");
 
     }
 
@@ -689,6 +700,20 @@ function ProductTable({
                                             )
 
                                         }
+
+                                        <button
+
+                                            className="btn-imagem btn-excluir-imagem"
+
+                                            onClick={() => excluirProdutoDaLista(produto)}
+
+                                            title="Excluir produto (não sobe pro site, não volta em reimportações)"
+
+                                        >
+
+                                            🗑️ Excluir produto
+
+                                        </button>
 
                                     </td>
 

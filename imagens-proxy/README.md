@@ -48,6 +48,12 @@ herdarem ao importar (mesma lógica da imagem).
 >     enviado_em INTEGER NOT NULL,
 >     importado_em INTEGER
 > );
+>
+> CREATE TABLE IF NOT EXISTS produtos_excluidos (
+>     codigo TEXT PRIMARY KEY,
+>     motivo TEXT,
+>     excluido_em INTEGER NOT NULL
+> );
 > ```
 
 ### 3. Criar o worker

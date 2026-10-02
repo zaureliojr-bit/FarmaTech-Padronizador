@@ -394,6 +394,66 @@ async function tratarServirReferencia(chave, env) {
 
 }
 
+/* ===================== PRODUTOS EXCLUÍDOS (lixo do PDV) ===================== */
+//
+// Taxa de entrega, item de teste do sistema, cadastro duplicado -
+// essas linhas voltam em toda extração nova do PDV porque continuam
+// lá, cadastradas por engano. Marcar o código uma vez aqui faz o
+// padronizador (e a publicação automática pelo painel) ignorar
+// sozinho em toda importação futura, sem precisar excluir de novo.
+
+async function tratarExcluirProduto(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const { codigo, motivo } = await request.json().catch(() => ({}));
+
+    if (!codigo) {
+        return json({ erro: "'codigo' é obrigatório." }, 400);
+    }
+
+    await env.DB.prepare(
+        `INSERT INTO produtos_excluidos (codigo, motivo, excluido_em)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(codigo) DO UPDATE SET
+            motivo = excluded.motivo,
+            excluido_em = excluded.excluido_em`
+    ).bind(String(codigo), motivo || "", Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarRestaurarProduto(codigo, request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.DB.prepare(`DELETE FROM produtos_excluidos WHERE codigo = ?1`).bind(codigo).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarListarExcluidos(env) {
+
+    const { results } = await env.DB.prepare(
+        `SELECT codigo, motivo, excluido_em FROM produtos_excluidos`
+    ).all();
+
+    const mapa = {};
+
+    (results || []).forEach((linha) => {
+        mapa[linha.codigo] = { motivo: linha.motivo || "", excluidoEm: linha.excluido_em };
+    });
+
+    return json(mapa);
+
+}
+
 async function tratarListarFamilias(env) {
 
     const { results } = await env.DB.prepare(
@@ -503,6 +563,19 @@ export default {
         }
         if (referencia && request.method === "GET") {
             return tratarServirReferencia(referencia[1], env);
+        }
+
+        if (request.method === "POST" && caminho === "/excluidos") {
+            return tratarExcluirProduto(request, env);
+        }
+
+        if (request.method === "GET" && caminho === "/excluidos") {
+            return tratarListarExcluidos(env);
+        }
+
+        const excluido = caminho.match(/^\/excluidos\/(.+)$/);
+        if (excluido && request.method === "DELETE") {
+            return tratarRestaurarProduto(decodeURIComponent(excluido[1]), request, env);
         }
 
         if (request.method === "GET" && caminho.length > 1) {

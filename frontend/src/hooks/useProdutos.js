@@ -9,6 +9,7 @@ import { carregarIndiceDistribuidor, salvarIndiceDistribuidor } from "../service
 import { salvarCorrecao } from "../services/correcoesService";
 import { buscarFamiliasOverride, salvarFamiliaOverride } from "../services/familiasOverrideService";
 import { salvarReferencia } from "../services/referenciasService";
+import { excluirProdutoDefinitivamente } from "../services/produtosExcluidosService";
 
 // Só estes três campos são "correção" compartilhável entre lojas -
 // preço, promoção e estoque são do catálogo de cada loja e nunca podem
@@ -494,6 +495,26 @@ export function useProdutos() {
 
     }
 
+    // Remove da tela na hora e marca o código como excluído no banco
+    // compartilhado - taxa de entrega, item de teste, cadastro
+    // duplicado: lixo desse tipo volta em toda extração nova do PDV,
+    // então marcar uma vez evita precisar excluir de novo a cada
+    // reimportação (importador.js já filtra por essa marca). Se a
+    // chamada ao servidor falhar, o produto some desta tela mesmo
+    // assim - só volta a aparecer na próxima importação.
+    function excluirProduto(codigo) {
+
+        setResultadoImportacao((anterior) => ({
+            ...anterior,
+            produtos: anterior.produtos.filter((produto) => produto.codigo !== codigo)
+        }));
+
+        excluirProdutoDefinitivamente(codigo).catch((erro) => {
+            console.error("Não consegui marcar o produto como excluído no servidor.", erro);
+        });
+
+    }
+
     // Usado pelas caixas de busca em lote (imagem/descrição): aplicar
     // uma atualização por item resolvido dispara uma re-análise de TODO
     // o catálogo a cada chamada (analisarProduto roda de novo pra todo
@@ -592,6 +613,8 @@ export function useProdutos() {
         atualizarProduto,
 
         atualizarProdutosEmLote,
+
+        excluirProduto,
 
         corrigirFamiliaCategoria,
 

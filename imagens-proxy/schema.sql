@@ -59,3 +59,16 @@ CREATE TABLE IF NOT EXISTS referencias (
     tamanho INTEGER NOT NULL,
     atualizado_em INTEGER NOT NULL
 );
+
+-- Produtos que não são produto de verdade (taxa de entrega, item de
+-- teste do sistema, lixo cadastrado por engano) - sempre voltam em
+-- toda extração nova do PDV, então marcar uma vez aqui faz o
+-- padronizador (e a publicação automática) ignorar sozinho dali pra
+-- frente, sem precisar excluir de novo a cada reimportação. Chave é o
+-- código do produto (não o EAN - produto de teste geralmente nem tem
+-- EAN de verdade), específico desta loja.
+CREATE TABLE IF NOT EXISTS produtos_excluidos (
+    codigo TEXT PRIMARY KEY,
+    motivo TEXT,
+    excluido_em INTEGER NOT NULL
+);

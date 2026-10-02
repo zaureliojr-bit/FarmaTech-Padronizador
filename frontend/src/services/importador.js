@@ -3,6 +3,7 @@ import { encontrarCabecalho } from "../utils/detectarCabecalho";
 import { normalizarProduto } from "../utils/normalizarProduto";
 import { buscarImagensHospedadas } from "./imagemHostingService";
 import { buscarCorrecoes } from "./correcoesService";
+import { buscarProdutosExcluidos } from "./produtosExcluidosService";
 
 export async function importarPlanilha(arquivo) {
 
@@ -67,10 +68,20 @@ export async function importarPlanilha(arquivo) {
                     .map((produto) => produto.ean)
                     .filter(Boolean);
 
-                const [imagensHospedadas, correcoes] = await Promise.all([
+                const [imagensHospedadas, correcoes, excluidos] = await Promise.all([
                     buscarImagensHospedadas(eans),
-                    buscarCorrecoes(eans)
+                    buscarCorrecoes(eans),
+                    buscarProdutosExcluidos()
                 ]);
+
+                // Taxa de entrega, item de teste, cadastro duplicado -
+                // fora de toda importação a partir da exclusão marcada
+                // uma vez no padronizador (ver produtosExcluidosService.js).
+                // Por código, não EAN: lixo desse tipo geralmente nem
+                // tem EAN de verdade.
+                if (excluidos.size) {
+                    produtos = produtos.filter((produto) => !excluidos.has(String(produto.codigo)));
+                }
 
                 produtos = produtos.map((produto) => {
 

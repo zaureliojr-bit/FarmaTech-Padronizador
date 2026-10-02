@@ -65,6 +65,7 @@ function Home() {
         limparFiltros,
         atualizarProduto,
         atualizarProdutosEmLote,
+        excluirProduto,
         corrigirFamiliaCategoria,
 
         indiceCmed,
@@ -271,6 +272,7 @@ function Home() {
                 categorias={categorias}
                 classes={classes}
                 atualizarProduto={atualizarProduto}
+                excluirProduto={excluirProduto}
                 mostrarToast={mostrarToast}
             />
 
