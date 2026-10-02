@@ -225,7 +225,8 @@ export function useProdutos() {
     const relatorioCmed = resultadoCmed?.relatorio || null;
 
     // Cruza com a distribuidora (se a lista já estiver carregada) -
-    // só acrescenta descricaoDistribuidor, sem regra de negócio.
+    // acrescenta descricaoDistribuidor e, se a lista trouxer, uma URL
+    // de imagem pronta (imagemDistribuidor) - sem regra de negócio.
     const produtosComDistribuidor = useMemo(() => {
 
         if (!resultadoCmed) return [];
@@ -236,9 +237,13 @@ export function useProdutos() {
 
             const info = consultarEanDistribuidor(indiceDistribuidor, produto.ean);
 
-            if (!info?.descricao) return produto;
+            if (!info?.descricao && !info?.imagem) return produto;
 
-            return { ...produto, descricaoDistribuidor: info.descricao };
+            return {
+                ...produto,
+                ...(info.descricao && { descricaoDistribuidor: info.descricao }),
+                ...(info.imagem && { imagemDistribuidor: info.imagem })
+            };
 
         });
 

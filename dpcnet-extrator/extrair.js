@@ -110,10 +110,11 @@ async function main() {
             const ean = String(item.ean || "").trim();
             const descricao = String(item.descricao || "").trim();
             const codigo = item.id != null ? String(item.id) : "";
+            const imagem = String(item.src || "").trim();
 
             if (!ean || !descricao) return;
 
-            vistos.set(ean, { descricao, codigo });
+            vistos.set(ean, { descricao, codigo, imagem });
 
         });
 
@@ -134,7 +135,8 @@ async function main() {
     const planilha = [...vistos.entries()].map(([ean, info]) => ({
         "Código": info.codigo,
         "EAN": ean,
-        "Descrição": info.descricao
+        "Descrição": info.descricao,
+        "Imagem": info.imagem
     }));
 
     const livro = XLSX.utils.book_new();

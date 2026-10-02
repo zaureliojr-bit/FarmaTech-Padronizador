@@ -26,15 +26,17 @@ npm run extrair
 
 Gera `distribuidora_dpcnet.xlsx` (ou o nome em `SAIDA_ARQUIVO`, se
 definir essa variável de ambiente) com as colunas `Código`, `EAN`,
-`Descrição` - reconhecidas automaticamente pelo padronizador.
+`Descrição`, `Imagem` - reconhecidas automaticamente pelo padronizador
+(a coluna Imagem é usada como primeira fonte na busca de imagem em
+lote, antes de gastar cota de Cosmos/Serper).
 
 ## O que traz (e o que não traz)
 
-Só **EAN e descrição** - é o suficiente pro padronizador usar como
-fonte extra de descrição na busca automática. Não traz preço,
-laboratório nem categoria: o catálogo público não mostra preço sem
-login ("Ver Preço"), e o formato de marca/categoria não veio junto na
-resposta testada.
+**EAN, descrição e uma URL de imagem** - suficiente pro padronizador
+usar como fonte extra de descrição e imagem na busca automática. Não
+traz preço, laboratório nem categoria: o catálogo público não mostra
+preço sem login ("Ver Preço"), e o formato de marca/categoria não veio
+junto na resposta testada.
 
 ## Se parar de funcionar
 

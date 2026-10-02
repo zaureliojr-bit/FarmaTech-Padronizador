@@ -2,11 +2,12 @@ import { buscarProdutoPorEan } from "./cosmosService";
 import { buscarImagensPorTexto } from "./serperService";
 import { obterCache, salvarCache } from "./imagemCache";
 
-// Ordem das fontes: Cosmos busca pelo EAN (mais preciso, cota diária
-// pequena) primeiro; Serper busca por texto (marca + descrição, cota
-// maior mas em créditos únicos) quando a Cosmos não encontra ou falha;
-// manual é o último recurso, sem custo nenhum.
-const ORIGENS_CONFIAVEIS = ["cosmos", "serper"];
+// Ordem das fontes: distribuidora primeiro, se a lista trouxer uma URL
+// pronta (sem rede nenhuma, sem cota); Cosmos busca pelo EAN (mais
+// preciso, cota diária pequena) em seguida; Serper busca por texto
+// (marca + descrição, cota maior mas em créditos únicos) quando nenhuma
+// das duas acha ou falha; manual é o último recurso, sem custo nenhum.
+const ORIGENS_CONFIAVEIS = ["distribuidora", "cosmos", "serper"];
 
 export async function buscarImagens(produto) {
 
@@ -15,6 +16,16 @@ export async function buscarImagens(produto) {
     // Ignora cache antigo de modo manual (pode ter um link
     // desatualizado de antes de alguma mudança na lógica de busca).
     if (ORIGENS_CONFIAVEIS.includes(emCache?.origem)) return emCache;
+
+    if (produto.imagemDistribuidor) {
+
+        const resultado = { origem: "distribuidora", imagens: [produto.imagemDistribuidor] };
+
+        salvarCache(produto.ean, resultado);
+
+        return resultado;
+
+    }
 
     try {
 
