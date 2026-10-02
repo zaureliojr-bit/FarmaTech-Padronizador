@@ -192,3 +192,34 @@ CREATE TABLE IF NOT EXISTS encarte_paginas (
 );
 
 CREATE INDEX IF NOT EXISTS idx_paginas_encarte ON encarte_paginas (encarte_id, ordem);
+
+-- ===================================================================
+-- Tentativas de entrar no painel, por IP.
+--
+-- A PAINEL_KEY é uma senha curta digitada por gente, e gente escolhe
+-- senha curta. Sem limite de tentativas, oito dígitos caem em algumas
+-- dezenas de horas de força bruta — e quem entra muda preço, publica
+-- banner e importa catálogo.
+--
+-- Com o limite, a força bruta deixa de ser questão de tempo: cinco
+-- erros e o IP para por um tempo que dobra a cada nova rodada de erros.
+-- Vale para qualquer senha, inclusive as próximas.
+--
+-- Uma linha por IP, e ela some sozinha quando alguém acerta a senha
+-- daquele IP. Não é log de acesso: não guarda o que foi tentado, nem
+-- quando alguém entrou com sucesso.
+-- ===================================================================
+CREATE TABLE IF NOT EXISTS tentativas_painel (
+    ip             TEXT PRIMARY KEY,
+    erros          INTEGER NOT NULL DEFAULT 0,
+    ultimo         INTEGER NOT NULL,          -- epoch ms do último erro
+    bloqueado_ate  INTEGER NOT NULL DEFAULT 0 -- epoch ms; 0 = liberado
+);
+
+-- Em `ultimo`, e não em `bloqueado_ate`: toda consulta do worker busca
+-- pelo ip, que já é a chave primária. O único uso de índice aqui é a
+-- limpeza das linhas velhas, que filtra por `ultimo` — um ataque vindo
+-- de mil IPs deixa mil linhas, e sem a limpeza elas ficariam para
+-- sempre, porque uma linha só se apaga quando alguém daquele mesmo IP
+-- acerta a senha.
+CREATE INDEX IF NOT EXISTS idx_tentativas_ultimo ON tentativas_painel (ultimo);

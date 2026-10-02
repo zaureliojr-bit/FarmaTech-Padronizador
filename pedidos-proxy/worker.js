@@ -21,6 +21,7 @@ const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Painel-Key",
+    "Access-Control-Expose-Headers": "Retry-After",
     "Access-Control-Max-Age": "86400"
 };
 
@@ -29,11 +30,11 @@ const MAX_TEXTO = 200;          // nome, endereço, descrição de item
 const MAX_DIAS_RELATORIO = 366;
 const MAX_TERMO = 60;           // ninguém busca remédio com mais que isso
 
-function json(dados, status = 200) {
+function json(dados, status = 200, extras = {}) {
 
     return new Response(JSON.stringify(dados), {
         status,
-        headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+        headers: { "Content-Type": "application/json", ...CORS_HEADERS, ...extras }
     });
 
 }
@@ -61,9 +62,154 @@ function soDigitos(valor) {
 
 }
 
-function autorizado(request, env) {
+function senhaConfere(request, env) {
 
     return !!env.PAINEL_KEY && request.headers.get("X-Painel-Key") === env.PAINEL_KEY;
+
+}
+
+/* ===================== LIMITE DE TENTATIVAS =====================
+
+   A PAINEL_KEY é uma senha curta digitada por gente, e gente escolhe
+   senha curta. Oito dígitos são cem milhões de combinações: sem limite,
+   uma máquina varre isso em algumas dezenas de horas — e quem entra
+   muda preço, publica banner e importa catálogo.
+
+   Com o limite, deixa de ser questão de tempo. Cinco erros e o IP para;
+   cada rodada seguinte de erros dobra a espera. Vale para qualquer
+   senha, inclusive as próximas.
+
+   O bloqueio é verificado ANTES de comparar a senha, de propósito. Se
+   fosse depois, o atacante bloqueado continuaria tendo suas tentativas
+   avaliadas e um acerto no meio do bloqueio entraria.
+*/
+
+const ERROS_ATE_BLOQUEAR = 5;
+const BLOQUEIO_BASE_MS = 60 * 1000;         // 1 minuto no primeiro bloqueio
+const BLOQUEIO_MAXIMO_MS = 60 * 60 * 1000;  // e nunca mais que uma hora
+const ESQUECER_ERROS_MS = 30 * 60 * 1000;   // meia hora sem errar zera a conta
+const LINHA_VELHA_MS = 24 * 60 * 60 * 1000; // linha sem uso há um dia é lixo
+
+function ipDeQuemChama(request) {
+
+    // Na Cloudflare o CF-Connecting-IP é posto pela borda e não pode ser
+    // forjado pelo cliente. Os outros são para quando este worker rodar
+    // atrás de outra coisa em teste.
+    return request.headers.get("CF-Connecting-IP")
+        || request.headers.get("X-Forwarded-For")?.split(",")[0].trim()
+        || "";
+
+}
+
+async function lerTentativas(env, ip) {
+
+    if (!ip) return null;
+
+    return await env.DB.prepare(
+        `SELECT erros, ultimo, bloqueado_ate FROM tentativas_painel WHERE ip = ?1`
+    ).bind(ip).first().catch(() => null);
+
+}
+
+/* Quanto falta do bloqueio, em ms. Zero quer dizer "pode tentar". */
+function quantoFaltaDoBloqueio(linha) {
+
+    if (!linha) return 0;
+
+    const agora = Date.now();
+
+    return linha.bloqueado_ate > agora ? linha.bloqueado_ate - agora : 0;
+
+}
+
+async function registrarErro(env, ip, linha) {
+
+    if (!ip) return;
+
+    const agora = Date.now();
+
+    /* Meia hora sem errar e a conta zera. Sem isso, quem usa o painel
+       todo dia acumularia um erro de digitação por semana e um dia seria
+       bloqueado por nada. */
+    const recentes = linha && (agora - linha.ultimo) < ESQUECER_ERROS_MS ? linha.erros : 0;
+    const erros = recentes + 1;
+
+    let bloqueadoAte = 0;
+
+    if (erros >= ERROS_ATE_BLOQUEAR) {
+        const rodada = erros - ERROS_ATE_BLOQUEAR;
+        bloqueadoAte = agora + Math.min(BLOQUEIO_BASE_MS * Math.pow(2, rodada), BLOQUEIO_MAXIMO_MS);
+    }
+
+    await env.DB.prepare(
+        `INSERT INTO tentativas_painel (ip, erros, ultimo, bloqueado_ate)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(ip) DO UPDATE SET
+            erros = excluded.erros, ultimo = excluded.ultimo,
+            bloqueado_ate = excluded.bloqueado_ate`
+    ).bind(ip, erros, agora, bloqueadoAte).run().catch(() => {});
+
+}
+
+/* Varre as linhas velhas de vez em quando.
+   Uma linha só se apaga quando alguém DAQUELE ip acerta a senha, e quem
+   ataca nunca acerta — então sem isto a tabela só cresce.
+
+   Chamada nas recusas, e não no acerto, por dois motivos: o painel bate
+   em rota protegida a cada 30 segundos e não precisa pagar por isso; e
+   durante um ataque as recusas é que são muitas, que é exatamente
+   quando há o que varrer. */
+async function varrerDeVezEmQuando(env) {
+
+    if (Math.random() >= 0.05) return;   // uma em vinte recusas
+
+    await env.DB.prepare(`DELETE FROM tentativas_painel WHERE ultimo < ?1`)
+        .bind(Date.now() - LINHA_VELHA_MS).run().catch(() => {});
+
+}
+
+async function limparTentativas(env, ip) {
+
+    if (!ip) return;
+
+    await env.DB.prepare(`DELETE FROM tentativas_painel WHERE ip = ?1`)
+        .bind(ip).run().catch(() => {});
+
+}
+
+/* O portão. Devolve null quando pode passar, ou a resposta de recusa. */
+async function barrarSeNaoPuder(request, env) {
+
+    const ip = ipDeQuemChama(request);
+
+    const linha = await lerTentativas(env, ip);
+
+    const faltam = quantoFaltaDoBloqueio(linha);
+
+    if (faltam > 0) {
+        await varrerDeVezEmQuando(env);
+        const segundos = Math.ceil(faltam / 1000);
+        return json({
+            erro: `Tentativas demais. Tente de novo em ${Math.ceil(segundos / 60)} minuto(s).`
+        }, 429, { "Retry-After": String(segundos) });
+    }
+
+    if (!senhaConfere(request, env)) {
+        await registrarErro(env, ip, linha);
+        await varrerDeVezEmQuando(env);
+        return json({ erro: "Não autorizado." }, 401);
+    }
+
+    /* Acertou: a conta daquele IP zera. Quem erra duas vezes e acerta na
+       terceira não fica com dois erros guardados para somar na próxima
+       vez que se atrapalhar.
+
+       Só apaga se houver linha: o painel bate em rota protegida a cada 30
+       segundos e, sem esta guarda, seria um DELETE por chamada — escrita
+       no D1 à toa, o dia inteiro, para apagar nada. */
+    if (linha) await limparTentativas(env, ip);
+
+    return null;
 
 }
 
@@ -1047,9 +1193,8 @@ export default {
             }
 
             // daqui para baixo é a loja olhando os próprios dados
-            if (!autorizado(request, env)) {
-                return json({ erro: "Não autorizado." }, 401);
-            }
+            const recusa = await barrarSeNaoPuder(request, env);
+            if (recusa) return recusa;
 
             if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env);
             if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env);
