@@ -58,10 +58,12 @@ if ([string]::IsNullOrWhiteSpace($porta)) { $porta = "3050" }
 $usuario = Read-Host "Usuario do Firebird (Enter pra 'SYSDBA')"
 if ([string]::IsNullOrWhiteSpace($usuario)) { $usuario = "SYSDBA" }
 
-$senhaSegura = Read-Host "Senha do Firebird (Enter pra 'masterkey')" -AsSecureString
-$senhaTexto = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($senhaSegura)
-)
+# Sem -AsSecureString de propósito: o valor vai direto pro .env em
+# texto puro de qualquer forma (não tem o que esconder depois), e a
+# conversão SecureString -> texto (Marshal/BSTR) estava deixando um
+# caractere escondido no final do valor, quebrando o cabeçalho HTTP
+# quando a chave era usada (erro real, visto na prática).
+$senhaTexto = Read-Host "Senha do Firebird (Enter pra 'masterkey')"
 if ([string]::IsNullOrWhiteSpace($senhaTexto)) { $senhaTexto = "masterkey" }
 
 $filial = Read-Host "Numero da filial (ver tabela FILIAIS no banco)"
@@ -79,10 +81,9 @@ $uploadUrl = Read-Host "Endereco do worker de imagens (ex: https://imagens-proxy
 $uploadKey = ""
 if (-not [string]::IsNullOrWhiteSpace($uploadUrl)) {
     $uploadUrl = $uploadUrl.TrimEnd("/")
-    $uploadKeySegura = Read-Host "Chave (X-Imagens-Key) desse worker" -AsSecureString
-    $uploadKey = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($uploadKeySegura)
-    )
+    # Mesmo motivo do campo de senha acima: sem -AsSecureString, pra
+    # não deixar caractere escondido no valor.
+    $uploadKey = Read-Host "Chave (X-Imagens-Key) desse worker"
 }
 
 # --- 3. Gravar o .env ---

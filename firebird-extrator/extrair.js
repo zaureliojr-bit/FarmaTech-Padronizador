@@ -91,12 +91,17 @@ function paraLinhaPlanilha(linha) {
 // continua sendo gerado normalmente.
 async function enviarParaPainel(caminhoArquivo) {
 
-    const uploadUrl = (process.env.UPLOAD_URL || "").replace(/\/+$/, "");
+    const uploadUrl = (process.env.UPLOAD_URL || "").trim().replace(/\/+$/, "");
 
     if (!uploadUrl) {
         console.log("UPLOAD_URL não configurado no .env - o arquivo só ficou salvo localmente (não avisei o painel).");
         return;
     }
+
+    // .trim() - um espaço ou caractere invisível sobrando no valor
+    // (ex.: de copiar/colar) quebra o cabeçalho HTTP com um erro que
+    // não deixa óbvio a causa ("Invalid character in header content").
+    const uploadKey = (process.env.UPLOAD_KEY || "").trim();
 
     const bytes = fs.readFileSync(caminhoArquivo);
 
@@ -106,7 +111,7 @@ async function enviarParaPainel(caminhoArquivo) {
             method: "POST",
             headers: {
                 "Content-Type": "application/octet-stream",
-                "X-Imagens-Key": process.env.UPLOAD_KEY || ""
+                "X-Imagens-Key": uploadKey
             },
             body: bytes
         });
