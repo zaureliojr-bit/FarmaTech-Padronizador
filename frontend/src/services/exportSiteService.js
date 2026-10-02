@@ -63,6 +63,12 @@ function montarProdutoSite(produto, imagensHospedadas) {
     if (produto.substancia) base.substancia = produto.substancia;
     if (produto.registroAnvisa) base.registroAnvisa = produto.registroAnvisa;
 
+    // A classe terapêutica já vinha da CMED e morria aqui: o padronizador
+    // lia a coluna, guardava no produto e não exportava. É o que a ficha
+    // técnica do site mostra como "Classe" — "Analgésicos e antitérmicos"
+    // dito por extenso diz mais ao cliente do que a substância sozinha.
+    if (produto.classeTerapeutica) base.classeTerapeutica = produto.classeTerapeutica;
+
     return base;
 
 }
