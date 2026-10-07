@@ -137,12 +137,14 @@ Firebird.attach(OPCOES, (erro, db) => {
     if (erro) {
 
         console.error("Não consegui conectar no Firebird:", erro.message);
-        console.error("Confere: Firebird 2.5 rodando, caminho do arquivo, usuário/senha no .env.");
+        console.error("Confere: Firebird rodando, caminho do arquivo, usuário/senha no .env.");
         process.exit(1);
 
     }
 
-    db.query(CONSULTA, async (erroConsulta, linhas) => {
+    // node-firebird 2.x exige o array de parâmetros (mesmo vazio) -
+    // sem ele, versões antigas aceitavam só consulta+callback.
+    db.query(CONSULTA, [], async (erroConsulta, linhas) => {
 
         db.detach();
 

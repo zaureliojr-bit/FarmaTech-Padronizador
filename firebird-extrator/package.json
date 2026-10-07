@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "dotenv": "^16.4.5",
-    "node-firebird": "^1.1.9",
+    "node-firebird": "^2.18.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
