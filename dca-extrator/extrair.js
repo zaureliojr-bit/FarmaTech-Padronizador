@@ -1,30 +1,49 @@
 // Varre o catálogo público da DCA Distribuidor via sitemap.xml (lista
-// de páginas que o próprio site publica pra buscadores - achada
-// olhando https://www.dcadistribuidor.com.br/sitemap.xml) e gera uma
+// de páginas que o próprio site publica pra buscadores) e gera uma
 // planilha pronta pra subir como "Lista da distribuidora" no
 // padronizador.
 //
 // Isso é engenharia reversa da estrutura pública do site da DCA, não
-// uma API oficial - pode parar de funcionar se eles mudarem o HTML ou
-// o sitemap, sem aviso nenhum. Roda de vez em quando (não precisa de
-// agendamento diário como o extrator do Firebird), com pausa entre os
-// pedidos pra não sobrecarregar o site deles.
+// uma API oficial - pode parar de funcionar se eles mudarem o HTML,
+// o sitemap, ou a proteção contra acesso automatizado, sem aviso
+// nenhum. Roda de vez em quando, com pausa entre os pedidos pra não
+// sobrecarregar o site deles.
 //
-// Diferente da DPCNET (uma chamada só trazia várias páginas de
-// produtos de uma vez), aqui cada produto só tem EAN na própria
-// página dele - por isso o script faz um pedido por produto. Catálogo
-// grande = demora mais (é o preço de não ter uma API de busca em
-// lote). Uso: npm install && npm run extrair
+// Diferente da DPCNET (uma chamada só trazia vários produtos de uma
+// vez) e diferente de uma versão mais simples deste mesmo script: o
+// site da DCA bloqueia pedidos HTTP "crus" (sem navegador de verdade)
+// - um fetch() simples é redirecionado pra home mesmo com cookie e
+// cabeçalhos de navegador. Por isso aqui a extração usa um navegador
+// automatizado (Playwright/Chromium) pra abrir cada página de produto
+// de verdade, o que é bem mais lento.
+//
+// Uso:
+//   1. npm install (já baixa o Chromium automaticamente, ~300MB)
+//   2. npm run extrair
+//
+// Variáveis de ambiente opcionais:
+//   LIMITE=30      - processa só os N primeiros produtos (pra testar
+//                     antes de rodar o catálogo inteiro, que pode
+//                     levar várias horas)
+//   HEADLESS=false - abre o navegador visível (útil pra ver o que tá
+//                     acontecendo quando algo não funciona). Padrão
+//                     é rodar escondido (mais rápido).
 
+const fs = require("fs");
+const { chromium } = require("playwright");
 const XLSX = require("xlsx");
 
 const SITEMAP_INDICE = "https://www.dcadistribuidor.com.br/sitemap.xml";
 
-const PAUSA_ENTRE_PEDIDOS_MS = 250;
+const PAUSA_ENTRE_PAGINAS_MS = 400;
 
 const SAIDA_ARQUIVO = process.env.SAIDA_ARQUIVO || "distribuidora_dca.xlsx";
 
-const CABECALHOS = {
+const LIMITE = Number(process.env.LIMITE) || 0; // 0 = sem limite, roda tudo
+
+const HEADLESS = process.env.HEADLESS !== "false";
+
+const CABECALHOS_SITEMAP = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 };
 
@@ -34,7 +53,7 @@ function pausa(ms) {
 
 async function buscarTexto(url) {
 
-    const resposta = await fetch(url, { headers: CABECALHOS });
+    const resposta = await fetch(url, { headers: CABECALHOS_SITEMAP });
 
     if (!resposta.ok) {
         throw new Error(`HTTP ${resposta.status} em ${url}`);
@@ -88,18 +107,43 @@ async function listarProdutosDoSitemap(urlSitemap) {
 
 }
 
-async function extrairDadosDoProduto(urlProduto) {
+// Extrai o texto depois dos dois-pontos (ex.: "Código: 100" -> "100").
+function depoisDosDoisPontos(texto) {
 
-    const html = await buscarTexto(urlProduto);
+    if (!texto) return "";
 
-    const nome = (html.match(/<h1 class="product__name">([\s\S]*?)<\/h1>/) || [])[1];
-    const codigo = (html.match(/class="product__features--codigo">Código:\s*([^<]+)</) || [])[1];
-    const ean = (html.match(/class="product__features--ean">Código de Barras do Produto:\s*([^<]+)</) || [])[1];
+    const partes = texto.split(":");
+
+    return partes.length > 1 ? partes.slice(1).join(":").trim() : texto.trim();
+
+}
+
+async function extrairDadosDoProduto(page, urlProduto) {
+
+    await page.goto(urlProduto, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+    // O site faz uma "dança" de redirecionamento/cookie antes de
+    // mostrar a página real - espera o conteúdo de verdade aparecer
+    // em vez de confiar que o primeiro carregamento já é o definitivo.
+    const apareceu = await page
+        .locator("h1.product__name")
+        .first()
+        .waitFor({ state: "attached", timeout: 15000 })
+        .then(() => true)
+        .catch(() => false);
+
+    if (!apareceu) {
+        return { nome: "", codigo: "", ean: "" };
+    }
+
+    const nome = await page.locator("h1.product__name").first().textContent().catch(() => "");
+    const codigoTexto = await page.locator(".product__features--codigo").first().textContent().catch(() => "");
+    const eanTexto = await page.locator(".product__features--ean").first().textContent().catch(() => "");
 
     return {
-        nome: nome ? nome.trim() : "",
-        codigo: codigo ? codigo.trim() : "",
-        ean: ean ? ean.trim() : ""
+        nome: (nome || "").trim(),
+        codigo: depoisDosDoisPontos(codigoTexto),
+        ean: depoisDosDoisPontos(eanTexto)
     };
 
 }
@@ -116,7 +160,7 @@ async function main() {
 
     console.log(`${sitemaps.length} sitemap(s) de produtos encontrados.`);
 
-    const produtosBrutos = [];
+    let produtosBrutos = [];
 
     for (const urlSitemap of sitemaps) {
 
@@ -126,7 +170,7 @@ async function main() {
 
         produtosBrutos.push(...lista);
 
-        await pausa(PAUSA_ENTRE_PEDIDOS_MS);
+        await pausa(PAUSA_ENTRE_PAGINAS_MS);
 
     }
 
@@ -135,7 +179,15 @@ async function main() {
         process.exit(1);
     }
 
-    console.log(`\nTotal de ${produtosBrutos.length} produtos nos sitemaps - buscando EAN/descrição de cada um agora (demora, tem pausa entre os pedidos pra não sobrecarregar o site deles).\n`);
+    if (LIMITE > 0) {
+        produtosBrutos = produtosBrutos.slice(0, LIMITE);
+        console.log(`\nLIMITE=${LIMITE} ativo - processando só os ${produtosBrutos.length} primeiros produtos (modo teste).`);
+    }
+
+    console.log(`\nTotal de ${produtosBrutos.length} produtos a processar - abrindo navegador (${HEADLESS ? "escondido" : "visível"})...\n`);
+
+    const navegador = await chromium.launch({ headless: HEADLESS });
+    const pagina = await navegador.newPage();
 
     const vistos = new Map(); // ean -> { descricao, codigo, imagem }
     let processados = 0;
@@ -146,7 +198,7 @@ async function main() {
 
         try {
 
-            const dados = await extrairDadosDoProduto(produto.link);
+            const dados = await extrairDadosDoProduto(pagina, produto.link);
 
             if (dados.ean && dados.nome) {
                 vistos.set(dados.ean, {
@@ -154,22 +206,26 @@ async function main() {
                     codigo: dados.codigo,
                     imagem: produto.imagem
                 });
+            } else {
+                console.warn(`  (sem EAN) ${produto.link}`);
             }
 
         } catch (erro) {
             console.warn(`  (ignorado) erro em ${produto.link}: ${erro.message}`);
         }
 
-        if (processados % 50 === 0 || processados === produtosBrutos.length) {
+        if (processados % 10 === 0 || processados === produtosBrutos.length) {
             console.log(`  ${processados}/${produtosBrutos.length} processados (${vistos.size} com EAN válido)...`);
         }
 
-        await pausa(PAUSA_ENTRE_PEDIDOS_MS);
+        await pausa(PAUSA_ENTRE_PAGINAS_MS);
 
     }
 
+    await navegador.close();
+
     if (!vistos.size) {
-        console.warn("Nenhum produto com EAN válido encontrado - confere se o HTML da página de produto ainda tem essa estrutura (abre uma página de produto, Ctrl+U, procura por \"ean\").");
+        console.warn("\nNenhum produto com EAN válido encontrado - mesmo com navegador de verdade. A proteção do site pode ser mais forte ainda (captcha, por exemplo). Roda de novo com HEADLESS=false pra ver visualmente o que a página mostra.");
         process.exit(0);
     }
 
@@ -188,7 +244,12 @@ async function main() {
     XLSX.writeFile(livro, SAIDA_ARQUIVO);
 
     console.log(`\nPronto! ${vistos.size} produtos únicos exportados pra "${SAIDA_ARQUIVO}".`);
-    console.log("Já pode subir esse arquivo na caixa \"Lista da distribuidora\" do padronizador.");
+
+    if (LIMITE > 0) {
+        console.log(`Isso foi só o teste com LIMITE=${LIMITE}. Pra rodar o catálogo inteiro, roda de novo sem a variável LIMITE (ex.: "npm run extrair" direto).`);
+    } else {
+        console.log("Já pode subir esse arquivo na caixa \"Lista da distribuidora\" do padronizador.");
+    }
 
 }
 

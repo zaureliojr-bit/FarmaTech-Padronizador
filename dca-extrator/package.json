@@ -6,9 +6,11 @@
   "type": "commonjs",
   "main": "extrair.js",
   "scripts": {
-    "extrair": "node extrair.js"
+    "extrair": "node extrair.js",
+    "postinstall": "playwright install chromium"
   },
   "dependencies": {
+    "playwright": "^1.47.0",
     "xlsx": "^0.18.5"
   }
 }

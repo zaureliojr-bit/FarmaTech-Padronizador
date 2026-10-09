@@ -17,20 +17,44 @@ Roda num ritmo razoável de propósito (pausa entre pedidos) pra não
 sobrecarregar o site deles. Não aumenta a frequência nem roda em
 paralelo múltiplas vezes.
 
-## Por que demora mais que o extrator da DPCNET
+## Por que demora bem mais que o extrator da DPCNET
 
 A DPCNET tinha uma chamada só que já trazia vários produtos de uma vez
 (até 100 por pedido). A DCA não expõe isso: cada produto só mostra o
 EAN na própria página dele, então o script primeiro lê os sitemaps
 (`sitemap-produtos-N.xml`) pra montar a lista de páginas, e depois
-visita **uma por uma** pra pegar EAN/descrição. Catálogo grande =
-rodar demora bem mais (pode levar vários minutos) - é normal, deixa
-rodando.
+visita **uma por uma** pra pegar EAN/descrição.
+
+Pior: o site da DCA bloqueia pedidos HTTP "crus" (redireciona pra
+home mesmo mandando cookie e cabeçalhos de navegador) - só funciona
+abrindo cada página com um **navegador automatizado de verdade**
+(Playwright/Chromium), bem mais lento que um simples `fetch()`.
+Catálogo com milhares de produtos pode levar **várias horas** - é
+normal, deixa rodando em segundo plano.
 
 ## Uso
 
 ```
 npm install
+```
+
+Isso já baixa o Chromium automaticamente (uns 300MB, só na primeira
+vez).
+
+**Testa primeiro numa amostra pequena**, antes de rodar o catálogo
+inteiro (que pode levar horas):
+
+```
+set LIMITE=30
+npm run extrair
+```
+
+(No PowerShell, troca `set LIMITE=30` por `$env:LIMITE=30`.) Isso
+processa só os 30 primeiros produtos. Se dentro do arquivo gerado
+tiver produto com EAN preenchido, funcionou - aí roda de novo sem o
+`LIMITE` pra fazer o catálogo inteiro:
+
+```
 npm run extrair
 ```
 
@@ -39,6 +63,15 @@ definir essa variável de ambiente) com as colunas `Código`, `EAN`,
 `Descrição`, `Imagem` - reconhecidas automaticamente pelo padronizador
 (a coluna Imagem é usada como primeira fonte na busca de imagem em
 lote, antes de gastar cota de Cosmos/Serper).
+
+Se quiser ver o navegador abrindo as páginas na tela (útil pra
+diagnosticar se algo não funcionar), roda com `HEADLESS=false`:
+
+```
+set HEADLESS=false
+set LIMITE=5
+npm run extrair
+```
 
 ## O que traz (e o que não traz)
 
