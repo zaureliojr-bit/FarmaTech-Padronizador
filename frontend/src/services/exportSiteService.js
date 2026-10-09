@@ -38,6 +38,12 @@ function montarProdutoSite(produto, imagensHospedadas) {
         imagem: resolverImagemSite(produto, imagensHospedadas)
     };
 
+    // Sem estoque na própria planilha = o site oferece "Encomendar"
+    // (WhatsApp) em vez de mostrar "Esgotado" sem alternativa - mesmo
+    // critério que o worker (publish-proxy) já usa pra quem some de
+    // uma planilha futura (ver mesclarMarcandoAusentesSemEstoque).
+    if (base.estoque <= 0) base.encomenda = true;
+
     // Vindos da CMED e da Portaria 344/1998. tarja é só informativo (mostra
     // "venda sob prescrição" no card, não bloqueia nada - tem antibiótico e
     // anticoncepcional que são tarja vermelha e vendem livre). Quem manda
