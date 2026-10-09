@@ -189,6 +189,16 @@ async function main() {
     const navegador = await chromium.launch({ headless: HEADLESS });
     const pagina = await navegador.newPage();
 
+    // Visitar uma página de produto direto (sem passar pela home
+    // antes) é redirecionado pra home - parece que o site só libera
+    // a sessão depois de "entrar" pela página inicial. Faz essa
+    // visita uma vez só, aqui, antes do loop - o cookie de sessão
+    // fica guardado no navegador (contexto) e vale pras visitas
+    // seguintes.
+    console.log("Visitando a home primeiro (estabelece a sessão)...");
+    await pagina.goto("https://www.dcadistribuidor.com.br/", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await pausa(1500);
+
     const vistos = new Map(); // ean -> { descricao, codigo, imagem }
     let processados = 0;
 
