@@ -223,3 +223,27 @@ CREATE TABLE IF NOT EXISTS tentativas_painel (
 -- sempre, porque uma linha só se apaga quando alguém daquele mesmo IP
 -- acerta a senha.
 CREATE INDEX IF NOT EXISTS idx_tentativas_ultimo ON tentativas_painel (ultimo);
+
+-- ===================================================================
+-- Teto de uso das rotas abertas (/pedidos e /busca), por IP.
+--
+-- Essas duas rotas não têm senha de propósito: quem chama é o site, e o
+-- cliente não faz login para comprar. Só que sem teto qualquer um enfia
+-- mil pedidos falsos na fila — o alarme do painel toca a noite toda e o
+-- relatório de vendas vira lixo.
+--
+-- O teto é folgado por necessidade: no Brasil muita gente navega atrás
+-- do mesmo IP de operadora, e um limite apertado barraria cliente de
+-- verdade. Vinte pedidos por hora do mesmo IP já é muito acima do que
+-- uma farmácia de bairro vê.
+--
+-- Uma linha por IP e rota, com a hora em que a janela começou. Linha de
+-- janela vencida é lixo e a varredura do worker leva.
+-- ===================================================================
+CREATE TABLE IF NOT EXISTS limite_publico (
+    chave     TEXT PRIMARY KEY,        -- "ip|rota"
+    contagem  INTEGER NOT NULL DEFAULT 0,
+    janela    INTEGER NOT NULL         -- epoch ms do início da janela
+);
+
+CREATE INDEX IF NOT EXISTS idx_limite_janela ON limite_publico (janela);

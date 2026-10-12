@@ -177,6 +177,94 @@ async function limparTentativas(env, ip) {
 
 }
 
+/* ================= LIMITE DAS ROTAS PÚBLICAS =================
+
+   /pedidos e /busca são abertas de propósito: quem chama é o site, sem
+   senha nenhuma. Só que "aberta" sem limite quer dizer que qualquer um
+   enfia mil pedidos falsos na fila da loja — o alarme do painel toca a
+   noite toda, o relatório vira lixo e o balcão não sabe mais o que é
+   venda de verdade.
+
+   O limite aqui é FOLGADO, e tem que ser. No Brasil muita gente navega
+   atrás do mesmo IP de operadora, então um teto apertado barraria
+   cliente de verdade. Vinte pedidos por hora do mesmo IP é muito acima
+   do normal para uma farmácia de bairro, e ainda assim corta o abuso.
+
+   Recusar um pedido NÃO perde a venda: o site manda o pedido para cá
+   com "dispara e esquece" e abre o WhatsApp de qualquer jeito, que é o
+   canal que fecha a compra. O que se perde é a linha no painel — ruim,
+   mas não é a venda.
+
+   Janela fixa de uma hora, e não janela deslizante: é uma leitura e uma
+   escrita por chamada, contra as várias que uma deslizante exigiria. E
+   quem estourou não gera escrita nenhuma, então um ataque custa menos
+   banco que custa hoje, não mais.
+*/
+
+const JANELA_PUBLICA_MS = 60 * 60 * 1000;
+const LIMITE_PEDIDOS_HORA = 20;    // cliente de verdade faz 1 ou 2
+const LIMITE_BUSCAS_HORA = 120;    // a busca é deduplicada por visita no site
+
+/* Devolve 0 quando pode passar, ou os segundos que faltam da janela. */
+async function faltaParaLiberar(env, request, rotulo, teto) {
+
+    const ip = ipDeQuemChama(request);
+
+    // sem IP não há como contar, e barrar todo mundo seria pior
+    if (!ip) return 0;
+
+    const chave = ip + "|" + rotulo;
+    const agora = Date.now();
+
+    const linha = await env.DB.prepare(
+        `SELECT contagem, janela FROM limite_publico WHERE chave = ?1`
+    ).bind(chave).first().catch(() => null);
+
+    const naJanela = linha && (agora - linha.janela) < JANELA_PUBLICA_MS;
+    const contagem = naJanela ? linha.contagem : 0;
+    const inicio = naJanela ? linha.janela : agora;
+
+    if (contagem >= teto) {
+        /* Estourou: devolve sem gravar. A janela não se estende, então a
+           liberação acontece uma hora depois do PRIMEIRO acesso, e não
+           uma hora depois da última tentativa — insistir não castiga. */
+        return Math.max(1, Math.ceil((inicio + JANELA_PUBLICA_MS - agora) / 1000));
+    }
+
+    await env.DB.prepare(
+        `INSERT INTO limite_publico (chave, contagem, janela) VALUES (?1, ?2, ?3)
+         ON CONFLICT(chave) DO UPDATE SET
+            contagem = excluded.contagem, janela = excluded.janela`
+    ).bind(chave, contagem + 1, inicio).run().catch(() => {});
+
+    return 0;
+
+}
+
+/* Mesma ideia da varredura das tentativas: janela vencida é linha morta,
+   e sem limpeza a tabela guardaria um IP de visitante para sempre. */
+async function varrerLimitePublico(env) {
+
+    if (Math.random() >= 0.02) return;
+
+    await env.DB.prepare(`DELETE FROM limite_publico WHERE janela < ?1`)
+        .bind(Date.now() - 2 * JANELA_PUBLICA_MS).run().catch(() => {});
+
+}
+
+/* Devolve null quando pode passar, ou a resposta de recusa. */
+async function barrarRotaPublica(env, request, rotulo, teto, recado) {
+
+    await varrerLimitePublico(env);
+
+    const faltam = await faltaParaLiberar(env, request, rotulo, teto);
+
+    if (!faltam) return null;
+
+    return json({ erro: recado }, 429, { "Retry-After": String(faltam) });
+
+}
+
 /* O portão. Devolve null quando pode passar, ou a resposta de recusa. */
 async function barrarSeNaoPuder(request, env) {
 
@@ -1157,13 +1245,25 @@ export default {
 
         try {
 
-            // gravar pedido: aberto, porque quem chama é o site público
+            // gravar pedido: aberto, porque quem chama é o site público —
+            // mas com teto por IP, senão qualquer um enche a fila da loja
             if (request.method === "POST" && rota === "/pedidos") {
+                const cheio = await barrarRotaPublica(
+                    env, request, "pedidos", LIMITE_PEDIDOS_HORA,
+                    "Muitos pedidos deste acesso em pouco tempo. " +
+                    "Se foi você mesmo, fale com a gente pelo WhatsApp."
+                );
+                if (cheio) return cheio;
                 return await tratarNovoPedido(request, env);
             }
 
             // idem: quem grava é o site público
             if (request.method === "POST" && rota === "/busca") {
+                const cheio = await barrarRotaPublica(
+                    env, request, "busca", LIMITE_BUSCAS_HORA,
+                    "Muitas buscas deste acesso em pouco tempo."
+                );
+                if (cheio) return cheio;
                 return await tratarNovaBusca(request, env);
             }
 
