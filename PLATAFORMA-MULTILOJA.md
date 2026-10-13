@@ -8,21 +8,53 @@ Escrito a partir do levantamento do `pedidos-proxy` atual (23 handlers,
 
 ---
 
+## 0. Nenhum computador fica ligado
+
+Antes de qualquer coisa, porque é a primeira pergunta que aparece: a
+plataforma **não precisa de um PC ligado 24 horas**, e nem a loja de
+hoje precisa. Tudo o que já roda é sem servidor nosso:
+
+| Peça | Onde roda |
+|---|---|
+| Site e painel | Cloudflare Pages |
+| Pedidos, banners, promoções, encarte | Worker `pedidos-proxy` |
+| Acervo de imagens | Worker `imagens-proxy` + R2 |
+| Publicação do catálogo | Worker `publish-proxy` |
+| Banco | D1 |
+| Arquivos (encarte, banner, imagem) | R2 |
+
+A Cloudflare executa isso na borda dela e cobra por uso, não por tempo
+ligado. Worker parado custa zero — não há "servidor ocioso". Dez lojas
+não são dez máquinas: são dez linhas de dado.
+
+**A única peça que toca máquina local é a extração do PDV**, e ela não é
+servidor. O FarmaxPDV roda num Firebird no computador da farmácia, e o
+dado tem de sair de lá: hoje alguém exporta um `.xlsx` e envia. Depois
+disso, a padronização roda **no navegador** de quem abre o painel, e a
+publicação é worker. Ou seja: precisa de um computador *no momento da
+exportação*, que é o computador que já está ligado no balcão de
+qualquer jeito.
+
+Para N lojas, o problema não é servidor — é **quem aperta exportar em
+cada uma**. Isso é a seção 7.
+
+---
+
 ## 1. O que decide o prazo
 
 A parte que todo mundo imagina ser o trabalho — acrescentar `loja_id` nas
-consultas — é a mais mecânica. O que decide o prazo são três coisas que
-não aparecem num diagrama:
+consultas — é a mais mecânica, e com um banco por loja ela desaparece
+(seção 2.5). O que decide o prazo:
 
 | | Por quê |
 |---|---|
-| **Três chaves primárias erradas** | `promocoes`, `clientes` e `pedidos` têm chave global. Duas lojas colidem. O SQLite não altera chave primária: é recriar tabela e migrar dado. |
-| **Renderização no servidor** | Hoje somos estáticos. Sem servidor não há como a mesma rota responder com o preço de outra loja. |
+| **Renderização no servidor** | Hoje somos estáticos. Sem servidor não há como a mesma rota responder com o preço de outra loja. É a mesma peça que conserta a prévia do WhatsApp. |
 | **Senha por loja** | Hoje é uma `PAINEL_KEY` global. Numa plataforma, isso significa que o dono da loja B vê o faturamento da loja A. |
+| **Isolamento dos dados** | Ou três chaves primárias recriadas e 23 handlers auditados (banco compartilhado), ou um binding por loja (banco por loja). A escolha está na 2.5. |
+| **A extração de cada loja** | Não é código: é operação. Dez farmácias exportando do PDV sem ninguém lembrar é o que trava na prática. |
 
-As três são pré-requisito. Nenhuma é opcional, e nenhuma é cara — mas
-pular qualquer uma dá um sistema que *parece* funcionar com uma loja e
-vaza dado com duas.
+Nenhuma é opcional. Pular qualquer uma dá um sistema que *parece*
+funcionar com uma loja e falha com duas.
 
 ---
 
@@ -97,7 +129,79 @@ Esse `lojas_horario` é o que vira `OpeningHoursSpecification` no JSON-LD
 
 ---
 
+## 2.5. Duas formas de isolar — e a melhor não é a óbvia
+
+> Esta seção foi acrescentada depois do resto do documento, ao conferir os
+> limites do D1 na documentação. Ela muda a recomendação das seções 3 e 5.
+
+A pergunta "um banco para todas as lojas, ou um banco por loja?" parecia
+decidida pelo custo: 50.000 bancos no plano pago, mas um Worker não
+escolhe banco em tempo de execução, então um banco por loja pareceria
+exigir um Worker por loja.
+
+**Não exige.** A documentação do D1 diz:
+
+> Maximum bindings per Workers script — **Approximately 5,000**.
+> A binding is defined as a binding to a resource, such as a D1
+> database, KV namespace, environmental variable, or secret.
+
+Os bindings são declarados no `wrangler.toml` (estático), mas a escolha
+em tempo de execução é dinâmica, porque `env` é um objeto:
+
+```js
+/* Um banco por loja, escolhido pelo slug de quem autenticou. O banco
+   da loja A não está ao alcance do código que atende a loja B — não por
+   disciplina de WHERE, mas porque a conexão é outra. */
+function bancoDaLoja(env, slug) {
+    const chave = "DB_" + slug.replace(/-/g, "_").toUpperCase();
+    const db = env[chave];
+    if (!db) throw new Error("loja sem banco: " + slug);
+    return db;
+}
+```
+
+Comparando os dois modelos honestamente:
+
+| | Banco compartilhado | Um banco por loja |
+|---|---|---|
+| Acrescentar loja | `INSERT` numa tabela | editar `wrangler.toml` + republicar **um** worker |
+| Migração das 3 chaves primárias | **obrigatória** (seção 3) | **não precisa** — o schema de hoje serve |
+| `loja_id` em 8 tabelas, 23 handlers | obrigatório | não precisa |
+| Risco de esquecer um `WHERE` | existe para sempre | **não existe** |
+| "Meus dados estão separados?" | "sim, por coluna" | **"sim, banco separado"** |
+| Relatório somando todas as lojas | uma consulta | uma consulta por loja |
+| Teto | nenhum na prática | ~5.000 lojas |
+
+**Recomendo um banco por loja**, e mudei de opinião por três motivos:
+
+1. **Some a fase mais perigosa.** As três chaves primárias compostas e
+   a auditoria dos 23 handlers deixam de existir. Era o trabalho que, se
+   saísse errado, vazaria dado entre clientes.
+2. **A resposta para a rede fica forte.** "Sua farmácia tem banco
+   próprio" é verificável e não depende de confiar no nosso código.
+3. **O schema de hoje já serve.** Sem migração de dado em produção: a
+   loja atual continua no banco que já tem, e a próxima ganha um novo.
+
+O custo é republicar o worker ao cadastrar loja — e isso é **um** deploy
+de worker, não um site novo por farmácia, que é o que dói no Caminho A
+original.
+
+O que **continua** valendo das outras seções, nos dois modelos: a tabela
+`lojas` (seção 2) num banco de catálogo compartilhado, a senha por loja
+com hash (seção 4), o prefixo de loja no R2 (seção 6) e a renderização
+no servidor (seção 8).
+
+A tabela `lojas` fica compartilhada de propósito: ela é o índice que diz
+quais lojas existem e qual o slug de cada uma. Só os dados de operação —
+pedidos, clientes, promoções, encartes — é que vão para o banco de cada
+uma.
+
+---
+
 ## 3. O problema que não é coluna: as chaves primárias
+
+> Vale **só** se escolher banco compartilhado. Com um banco por loja,
+> esta seção inteira deixa de ser necessária — veja a 2.5.
 
 Acrescentar `loja_id` resolve as consultas. **Não** resolve as colisões.
 Olhando o schema de hoje:
@@ -226,6 +330,12 @@ com clientes, isso deixa de ser luxo.
 
 ## 5. Onde o `loja_id` entra
 
+> O que vale nos **dois** modelos: de onde a loja vem em cada rota, e a
+> regra de que rota de painel não aceita loja por parâmetro. O que vale
+> só no banco compartilhado: o `WHERE loja_id = ?` nas consultas. Com um
+> banco por loja, o mesmo inventário diz qual **banco** escolher, em vez
+> de qual coluna filtrar — e a regra de onde a loja vem é idêntica.
+
 São 23 handlers. O inventário medido, agrupado pelo que cada um precisa:
 
 ### Rotas públicas — a loja vem da URL
@@ -342,6 +452,45 @@ Passa a vir de `lojas.catalogo_url`. Cada farmácia publica o seu
 `produtos.json` pelo `publish-proxy`, e o que muda é o repositório ou o
 caminho do arquivo.
 
+### O caminho que a extração faz hoje
+
+Levantado no worker publicado e no bundle do importador:
+
+1. Alguém exporta o PDV para `produtos_extraidos.xlsx`
+2. O arquivo sobe para o `imagens-proxy` e fica pendente
+   (`GET /extracao` → `{"pendente":true,…}`)
+3. O painel, aberto no navegador, vê o pendente e baixa
+   (`GET /extracao/arquivo`)
+4. **A padronização roda no navegador**: CMED, distribuidora, famílias,
+   imagens por EAN
+5. Publica pelo `publish-proxy`, que escreve o `produtos.json` no GitHub
+6. Marca como importado (`POST /extracao/importado`)
+
+Isso é importante para a plataforma por dois motivos.
+
+**O primeiro é o gargalo real.** O passo 1 precisa de um computador na
+farmácia, e o passo 4 precisa de alguém com o painel aberto. Com uma
+loja, funciona. Com dez, "ninguém exportou essa semana" é o que vai
+quebrar — não o código. A fila de `/extracao` é por conta hoje: com
+várias lojas ela tem de virar fila **por loja**, senão a extração de uma
+é importada no catálogo de outra. É mudança pequena e de consequência
+grande.
+
+**O segundo é que a padronização no navegador não escala para N lojas.**
+Um catálogo de 6.855 produtos no navegador já é pesado; dez lojas
+dependendo de alguém abrir dez painéis não é operação. O destino natural
+é a padronização virar worker com Cron Trigger — que a Cloudflare tem, e
+que também não precisa de máquina nossa. Não é para a fase 1, mas é para
+onde isso aponta.
+
+> **Dívida encontrada no levantamento:** as rotas `/extracao`,
+> `/extracao/arquivo` e `/extracao/importado` existem no
+> `imagens-proxy` **publicado** e não existem no `imagens-proxy/worker.js`
+> deste repositório. O worker em produção está na frente do código
+> versionado. Antes de construir multiloja em cima dele, trazer esse
+> código para o git — hoje, se aquele worker for perdido ou precisar de
+> correção, não há de onde republicar.
+
 **Aqui está a nossa vantagem, e ela é grande.** O `imagens-proxy` indexa
 imagem **por EAN** (`imagens.ean TEXT PRIMARY KEY`), e a tabela
 `correcoes` guarda descrição e classe também por EAN. O EAN é universal:
@@ -402,11 +551,14 @@ página canônica por produto para a busca e as variantes por loja fora do
 
 Quem compra isso faz diligência. Vale ter a resposta pronta:
 
-- **"Meus dados ficam separados dos das outras farmácias?"** Com o
-  Caminho B, mesmo banco e isolamento por `loja_id`. É resposta honesta,
-  mas é mais fraca que a do Caminho A, onde cada farmácia tem banco
-  próprio. Se a rede for exigente nisso, vale oferecer banco dedicado
-  para ela e plataforma compartilhada para as lojas pequenas.
+- **"Meus dados ficam separados dos das outras farmácias?"** Com um
+  banco por loja (seção 2.5), a resposta é "sim, sua farmácia tem banco
+  próprio" — verificável, e não depende de confiar no nosso código. É o
+  motivo mais forte para escolher esse modelo, e vale mais numa venda
+  para rede do que qualquer economia de implementação.
+- **"E se eu quiser sair?"** Com banco por loja, exportar os dados dela
+  e entregar é um comando. Vale dizer antes de ser perguntado: tira o
+  medo de ficar preso, que é o que trava decisão de rede.
 - **"Quem vê o meu faturamento?"** Hoje: quem tem a senha. Com senha por
   loja e hash, só ela — e você, como operador. Diga isso explicitamente;
   é o tipo de coisa que, descoberta depois, quebra a confiança.
@@ -488,10 +640,14 @@ HTML. Ainda com uma loja cadastrada. Nada muda para o cliente; muda que
 a segunda loja passa a ser um `INSERT`.
 
 ### Fase 3 — isolamento
-As três chaves primárias compostas, `loja_id` nas 8 tabelas, senha por
-loja com hash, prefixo de loja no R2. **Com teste de duas lojas desde a
-primeira linha.** É a fase que não pode ter pressa, porque é a que vaza
-dado se sair errada.
+Senha por loja com hash, prefixo de loja no R2, fila de extração por
+loja, e o banco da loja escolhido pelo slug de quem autenticou. **Com
+teste de duas lojas desde a primeira linha** — consulta que devolve
+dado da loja errada não dá erro, então é o único teste que pega.
+
+Escolhendo banco por loja, esta fase encolhe muito: não há chave
+primária para recriar nem 23 handlers para auditar. Era a fase mais
+longa e mais perigosa do desenho original.
 
 ### Fase 4 — segunda loja de verdade
 Cadastrar uma loja da rede, de preferência uma, em piloto. A segunda
