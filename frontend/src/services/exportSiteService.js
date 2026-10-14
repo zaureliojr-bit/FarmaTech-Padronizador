@@ -1,4 +1,5 @@
 import { buscarImagensHospedadas } from "./imagemHostingService";
+import { PORTEIRO_URL, cabecalhoPainel, esquecerSenhaPainel } from "./credencialPainel";
 
 // A imagem fica hospedada no R2 (ver imagens-proxy/), servida por um
 // link estável da própria farmácia - não depende do site de origem
@@ -96,11 +97,19 @@ export async function gerarProdutosSite(produtos) {
 // vier - só faz sentido junto de uma reimportação do catálogo inteiro.
 export async function publicarNoSite(produtos, modo = "mesclar") {
 
-    const workerUrl = import.meta.env.VITE_PUBLISH_WORKER_URL;
-    const chave = import.meta.env.VITE_PUBLISH_KEY;
+    /* Publicar passa pelo porteiro (pedidos-proxy), e não mais direto no
+       publish-proxy. A VITE_PUBLISH_KEY que ficava aqui era embutida no
+       pacote pelo Vite e podia ser lida por qualquer um — e com ela se
+       reescreve o produtos.json inteiro do site, preço por preço. Agora
+       vai a senha do painel, e a chave fica no servidor. */
+    if (!PORTEIRO_URL) {
+        throw new Error("Publicação não configurada: falta VITE_PEDIDOS_PROXY_URL no .env.");
+    }
 
-    if (!workerUrl) {
-        throw new Error("Publicação não configurada: falta VITE_PUBLISH_WORKER_URL no .env (veja publish-proxy/README.md).");
+    const credencial = cabecalhoPainel();
+
+    if (!credencial) {
+        throw new Error("Preciso da senha do painel para publicar no site.");
     }
 
     const listaSite = await gerarProdutosSite(produtos);
@@ -109,18 +118,23 @@ export async function publicarNoSite(produtos, modo = "mesclar") {
         throw new Error("Nenhum produto válido para publicar (falta EAN ou descrição).");
     }
 
-    const resposta = await fetch(workerUrl, {
+    const resposta = await fetch(`${PORTEIRO_URL}/catalogo/publicar`, {
 
         method: "POST",
 
         headers: {
             "Content-Type": "application/json",
-            "X-Publish-Key": chave || ""
+            ...credencial
         },
 
         body: JSON.stringify({ produtos: listaSite, modo })
 
     });
+
+    if (resposta.status === 401) {
+        esquecerSenhaPainel();
+        throw new Error("Senha do painel incorreta.");
+    }
 
     const dados = await resposta.json().catch(() => ({}));
 

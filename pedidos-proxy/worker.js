@@ -301,6 +301,104 @@ async function barrarSeNaoPuder(request, env) {
 
 }
 
+/* ============ PORTEIRO DO CATÁLOGO (imagens e publicação) ============
+
+   O padronizador precisa escrever em dois outros workers: o
+   imagens-proxy (salvar imagem e correção) e o publish-proxy
+   (sobrescrever o produtos.json do site). Cada um tem a sua chave.
+
+   Até aqui essas duas chaves iam para o navegador, porque o frontend as
+   recebia em VITE_IMAGENS_KEY e VITE_PUBLISH_KEY — e o Vite embute toda
+   variável VITE_ no pacote em tempo de build. Resultado: as duas
+   ficavam legíveis em texto no JavaScript que qualquer um baixa. Quem
+   lesse podia trocar a imagem de qualquer produto e, com a de
+   publicação, reescrever o catálogo inteiro do site, preço por preço.
+
+   Trocar as chaves não resolvia: no build seguinte elas voltavam para o
+   pacote. O que resolve é o navegador nunca mais vê-las.
+
+   Então as chaves passam a morar AQUI, como secret deste worker, e o
+   navegador fala com estas rotas usando a senha do painel — a mesma que
+   ele já usa para ver a fila de pedidos, já com limite de tentativas.
+   Este worker é que carimba a chave de verdade e repassa.
+
+   Só a ESCRITA passa por aqui. Ler imagem continua indo direto ao
+   imagens-proxy: imagem é pública por natureza, são milhares por visita
+   e fazer cada uma dar a volta por este worker seria lento e caro sem
+   proteger nada.
+*/
+
+// publicar o catálogo inteiro são uns 3 MB de JSON; 25 cobre com folga
+const MAX_ENCAMINHAR_BYTES = 25 * 1024 * 1024;
+
+/* Repassa a chamada ao worker de destino, trocando a senha do painel
+   (que o navegador tem) pela chave daquele worker (que ele não tem). */
+async function encaminhar(request, env, { destino, caminho, cabecalho, chave, metodo }) {
+
+    if (!destino || !chave) {
+        /* 501 e não 500: não é defeito, é configuração que falta. A
+           mensagem diz qual, senão vira caça ao tesouro no painel. */
+        return json({
+            erro: "Este worker ainda não foi configurado para falar com o " +
+                  "catálogo. Faltam as variáveis no painel do Cloudflare."
+        }, 501);
+    }
+
+    const url = destino.replace(/\/+$/, "") + caminho;
+
+    const opcoes = {
+        method: metodo || request.method,
+        headers: { [cabecalho]: chave }
+    };
+
+    if (opcoes.method !== "GET" && opcoes.method !== "HEAD") {
+        const corpo = await request.arrayBuffer();
+
+        if (corpo.byteLength > MAX_ENCAMINHAR_BYTES) {
+            return json({ erro: "Conteúdo grande demais." }, 413);
+        }
+
+        opcoes.body = corpo;
+        opcoes.headers["Content-Type"] =
+            request.headers.get("content-type") || "application/json";
+    }
+
+    let resposta;
+
+    try {
+        resposta = await fetch(url, opcoes);
+    } catch (erro) {
+        console.error("encaminhar:", erro);
+        return json({ erro: "Não consegui falar com o serviço de catálogo." }, 502);
+    }
+
+    /* Devolve o corpo em fluxo, sem ler na memória: a extração do PDV
+       passa dos 2 MB e lê-la inteira aqui só para repassar seria
+       desperdício. O status vem do destino, para o padronizador
+       continuar vendo o erro real em vez de um 500 genérico. */
+    return new Response(resposta.body, {
+        status: resposta.status,
+        headers: {
+            "Content-Type": resposta.headers.get("content-type") || "application/json",
+            "Cache-Control": "no-store",
+            ...CORS_HEADERS
+        }
+    });
+
+}
+
+const imagens = (env) => ({
+    destino: env.IMAGENS_PROXY_URL,
+    cabecalho: "X-Imagens-Key",
+    chave: env.IMAGENS_KEY
+});
+
+const publicacao = (env) => ({
+    destino: env.PUBLISH_WORKER_URL,
+    cabecalho: "X-Publish-Key",
+    chave: env.PUBLISH_KEY
+});
+
 /* ========================= GRAVAR ========================= */
 
 /* Registra o que foi digitado na busca do site.
@@ -1317,6 +1415,41 @@ export default {
             if (request.method === "GET"  && rota === "/promocoes/todas")   return await tratarPromocoesDaLoja(request, env);
             if (request.method === "POST" && rota === "/promocoes")         return await tratarSalvarPromocoes(request, env);
             if (request.method === "POST" && rota === "/promocoes/excluir") return await tratarExcluirPromocoes(request, env);
+
+            /* Catálogo: a senha do painel já foi conferida acima, então
+               daqui para baixo quem chama provou quem é. Este worker
+               carimba a chave do destino, que o navegador não tem. */
+            if (request.method === "POST" && rota === "/catalogo/imagem") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/" });
+            }
+
+            if (request.method === "POST" && rota === "/catalogo/correcao") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/correcoes" });
+            }
+
+            if (request.method === "POST" && rota === "/catalogo/publicar") {
+                return await encaminhar(request, env, { ...publicacao(env), caminho: "/" });
+            }
+
+            // a extração do PDV, que traz preço de custo e por isso não
+            // pode mais ser baixada sem credencial
+            if (request.method === "GET" && rota === "/catalogo/extracao") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/extracao" });
+            }
+
+            if (request.method === "GET" && rota === "/catalogo/extracao/arquivo") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/extracao/arquivo" });
+            }
+
+            if (request.method === "POST" && rota === "/catalogo/extracao/importado") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/extracao/importado" });
+            }
+
+            if (request.method === "POST" && rota === "/catalogo/extracao/descartar") {
+                return await encaminhar(request, env, {
+                    ...imagens(env), caminho: "/extracao", metodo: "DELETE"
+                });
+            }
 
             const umPedido = rota.match(/^\/pedidos\/(.+)$/);
             if (request.method === "GET" && umPedido) {
