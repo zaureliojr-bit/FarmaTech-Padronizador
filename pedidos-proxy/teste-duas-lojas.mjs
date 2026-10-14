@@ -608,5 +608,43 @@ console.log("\n12. a senha de uma farmácia não abre a plataforma");
     conferir("sem DONO_KEY configurada, ninguém é dono", r5.status === 403, String(r5.status));
 }
 
+/* ---- 13. o preflight do navegador ----------------------------------- */
+console.log("\n13. CORS: todo cabeçalho que o worker lê tem de ser permitido");
+{
+    /* De onde saiu esta seção: o painel passou a mandar a filial em
+       X-Painel-Loja, o cabeçalho não estava na lista do
+       Access-Control-Allow-Headers, e TUDO depois do login parou. O erro
+       na tela era "Failed to fetch", que não diz uma palavra sobre CORS.
+
+       Nenhum dos testes pegou. O de navegador intercepta as requisições,
+       e interceptação não faz preflight. Este aqui chama o handler
+       direto, sem navegador nenhum. A única defesa que sobra é comparar
+       as duas listas lendo o próprio arquivo — é o que esta seção faz, e
+       ela continua valendo para o próximo cabeçalho que alguém criar. */
+    const codigo = readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+
+    const lidos = [...new Set(
+        [...codigo.matchAll(/headers\.get\("(X-[A-Za-z-]+)"\)/g)].map((m) => m[1])
+    )];
+
+    const resposta = await worker.fetch(
+        new Request("https://exemplo.workers.dev/fila", { method: "OPTIONS" }), env);
+
+    const permitidos = (resposta.headers.get("access-control-allow-headers") || "")
+        .split(",").map((s) => s.trim().toLowerCase());
+
+    /* X-Forwarded-For não entra: quem o põe é a borda, não o navegador. */
+    const doNavegador = lidos.filter((h) => h.toLowerCase() !== "x-forwarded-for");
+
+    const faltando = doNavegador.filter((h) => !permitidos.includes(h.toLowerCase()));
+
+    conferir(`os ${doNavegador.length} cabeçalhos que o worker lê estão na lista do CORS`,
+        faltando.length === 0,
+        "faltam: " + faltando.join(", "));
+
+    conferir("e o OPTIONS responde sem exigir senha",
+        resposta.status === 200 || resposta.status === 204, String(resposta.status));
+}
+
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
 process.exit(falhas === 0 ? 0 : 1);

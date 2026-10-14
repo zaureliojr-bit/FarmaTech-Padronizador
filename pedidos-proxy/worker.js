@@ -20,7 +20,19 @@
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Painel-Key",
+    /* TODO cabeçalho que o worker LÊ precisa estar aqui. O navegador
+       manda um OPTIONS antes da requisição de verdade, e um cabeçalho
+       fora desta lista faz o preflight falhar — a chamada nem sai, e o
+       erro que aparece é "Failed to fetch", que não diz uma palavra
+       sobre CORS.
+
+       Foi o que aconteceu com o X-Painel-Loja: o painel passou a mandar
+       a filial em toda chamada, e tudo depois do login parou. Os testes
+       não pegaram porque o de navegador intercepta as requisições (e
+       interceptação não faz preflight) e o de worker chama o handler
+       direto. O teste-duas-lojas.mjs agora confere esta lista contra os
+       cabeçalhos que o worker lê, lendo o próprio arquivo. */
+    "Access-Control-Allow-Headers": "Content-Type, X-Painel-Key, X-Painel-Loja",
     "Access-Control-Expose-Headers": "Retry-After",
     "Access-Control-Max-Age": "86400"
 };
