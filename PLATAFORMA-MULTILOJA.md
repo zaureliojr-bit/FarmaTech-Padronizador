@@ -704,7 +704,34 @@ Tabela `lojas` + `lojas_horario`, e o site passa a ler dela em vez do
 HTML. Ainda com uma loja cadastrada. Nada muda para o cliente; muda que
 a segunda loja passa a ser um `INSERT`.
 
-### Fase 3 — isolamento
+### Fase 3 — ESCRITA, FALTA PUBLICAR (menos a fila de extração)
+
+Feito e testado:
+
+- **senha por loja**, SHA-256 com sal próprio, em `lojas_acesso`. A senha
+  nunca passa pelo console do D1: entra pela rota `POST /loja/senha`, que
+  calcula hash e sal. A `PAINEL_KEY` cadastra a primeira senha de cada
+  loja e deixa de valer para quem já tem a sua — é isso que a impede de
+  virar chave-mestra da rede.
+- **um banco de D1 por farmácia**, escolhido pela linha dela. Os 16
+  handlers de painel recebem a loja e o banco como argumento
+  obrigatório, visível na assinatura.
+- **prefixo no R2 por loja**, para exportar e apagar por farmácia. O que
+  isolou a leitura foi o banco separado, não o prefixo: banner e encarte
+  são imagens de vitrine, públicas por definição.
+- **tolerância na identificação, nunca na autenticação**: cadastro de
+  lojas vazio ou fora do ar não tranca ninguém fora do painel, mas a
+  senha continua obrigatória.
+- `teste-duas-lojas.mjs`: duas farmácias, dois bancos SQLite de verdade,
+  46 asserções, cada resposta conferida pelo que ela NÃO pode conter.
+
+**Falta a fila de extração por loja**, e é de propósito. Ela mora no
+imagens-proxy, exige um ALTER na tabela `extracoes` em produção e mexe no
+`.env` do extrator que roda no PC da loja. Nada disso dá para exercitar
+antes de existir uma segunda farmácia importando catálogo — ou seja, é
+trabalho da Fase 4, e fazer agora só criaria um estado meio publicado.
+
+### Fase 3 (como foi escrita) — isolamento
 Senha por loja com hash, prefixo de loja no R2, fila de extração por
 loja, e o banco da loja escolhido pelo slug de quem autenticou. **Com
 teste de duas lojas desde a primeira linha** — consulta que devolve

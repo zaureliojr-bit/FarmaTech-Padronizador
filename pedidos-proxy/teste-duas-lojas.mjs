@@ -123,7 +123,8 @@ compartilhado.exec(`
 /* A loja B aponta para o próprio banco. A loja A não tem linha aqui — e
    é isso que a mantém no banco de sempre, com a senha de sempre. */
 compartilhado.exec(`
-    INSERT INTO lojas_acesso (slug, banco) VALUES ('farma-centro', 'DB_FARMA_CENTRO')
+    INSERT INTO lojas_acesso (slug, banco, prefixo_r2)
+    VALUES ('farma-centro', 'DB_FARMA_CENTRO', 'farma-centro')
 `);
 
 /* Dado de cada uma, diferente de propósito: o teste confere pelo que a
@@ -151,9 +152,35 @@ bancoB.exec(`INSERT INTO promocoes (codigo, preco, ativo, criado_em) VALUES ('BB
 compartilhado.exec(`INSERT INTO banners (imagem, alt, ativo, ordem, criado_em) VALUES ('https://x/a.png', 'Banner da Mais Barato', 1, 1, ${AGORA})`);
 bancoB.exec(`INSERT INTO banners (imagem, alt, ativo, ordem, criado_em) VALUES ('https://x/b.png', 'Banner da Farma Centro', 1, 1, ${AGORA})`);
 
+/* Balde R2 de mentira: guarda em memória e registra tudo que apagou,
+   que é o que o teste do prefixo precisa conferir. */
+function fingirBalde() {
+    const conteudo = new Map();
+    const apagados = [];
+    return {
+        conteudo,
+        apagados,
+        async put(chave, bytes, opcoes) {
+            conteudo.set(chave, { bytes, tipo: opcoes?.httpMetadata?.contentType });
+        },
+        async get(chave) {
+            const achado = conteudo.get(chave);
+            if (!achado) return null;
+            return { body: achado.bytes, httpMetadata: { contentType: achado.tipo } };
+        },
+        async delete(chave) {
+            apagados.push(chave);
+            conteudo.delete(chave);
+        }
+    };
+}
+
+const balde = fingirBalde();
+
 const env = {
     DB: fingirD1(compartilhado),
     DB_FARMA_CENTRO: fingirD1(bancoB),
+    BANNERS_BUCKET: balde,
     PAINEL_KEY: SENHA_WORKER
 };
 
@@ -392,6 +419,77 @@ console.log("\n9. sem cadastro de lojas, ninguém fica trancado para fora");
        para quem não pediu loja nenhuma. */
     const nomeando = await pedirVazio("/fila", SENHA_WORKER, "farma-centro");
     conferir("nomear loja inexistente continua barrado", nomeando.status === 401, String(nomeando.status));
+}
+
+/* ---- 10. os arquivos no R2 ------------------------------------------ */
+console.log("\n10. os arquivos de cada farmácia, no balde que é um só");
+{
+    const enviar = (loja, senha, tipo, bytes) => worker.fetch(new Request(
+        "https://exemplo.workers.dev/arquivos?pasta=banner",
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": tipo,
+                "X-Painel-Key": senha,
+                "CF-Connecting-IP": "8.8.8." + Math.floor(Math.random() * 200 + 10),
+                ...(loja ? { "X-Painel-Loja": loja } : {})
+            },
+            body: bytes
+        }
+    ), env);
+
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13]);
+
+    limparTentativas();
+    const envioA = await (await enviar(null, SENHA_WORKER, "image/png", png)).json();
+    conferir("a loja de sempre grava sem prefixo, onde os arquivos dela já estão",
+        /^banner\//.test(envioA.chave || ""), envioA.chave);
+
+    limparTentativas();
+    const envioB = await (await enviar("farma-centro", SENHA_B, "image/png", png)).json();
+    conferir("a farmácia nova grava debaixo do prefixo dela",
+        /^farma-centro\/banner\//.test(envioB.chave || ""), envioB.chave);
+
+    conferir("as duas chaves são distintas no mesmo balde",
+        envioA.chave !== envioB.chave && balde.conteudo.has(envioA.chave) && balde.conteudo.has(envioB.chave));
+
+    /* Servir: os dois formatos de endereço precisam responder, porque o
+       sem prefixo já está publicado na home e dentro de encarte. */
+    const servir = (caminho) => worker.fetch(new Request("https://exemplo.workers.dev" + caminho), env);
+
+    const semPrefixo = await servir("/arquivos/" + envioA.chave);
+    conferir("endereço de sempre continua servindo", semPrefixo.status === 200, String(semPrefixo.status));
+
+    const comPrefixo = await servir("/arquivos/" + envioB.chave);
+    conferir("endereço com prefixo também", comPrefixo.status === 200, String(comPrefixo.status));
+
+    const inventado = await servir("/arquivos/farma-centro/banner/nao-existe.png");
+    conferir("arquivo que não existe dá 404", inventado.status === 404, String(inventado.status));
+
+    /* Apagar: a parede. A primeira, e a que realmente isola, é o banco
+       separado — a chave vem da tabela da própria loja. Esta é a
+       segunda, porque apagar errado não tem desfazer. */
+    bancoB.exec(`
+        INSERT INTO banners (id, imagem, alt, ativo, ordem, criado_em, r2_chave)
+        VALUES (90, 'https://x/b.png', 'da outra loja', 1, 1, ${AGORA}, '${envioA.chave}')
+    `);
+
+    limparTentativas();
+    const apagar = await worker.fetch(new Request("https://exemplo.workers.dev/banners/excluir", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Painel-Key": SENHA_B,
+            "X-Painel-Loja": "farma-centro",
+            "CF-Connecting-IP": "8.8.9.1"
+        },
+        body: JSON.stringify({ id: 90 })
+    }), env);
+
+    conferir("o pedido de apagar é aceito", apagar.status === 200, String(apagar.status));
+    conferir("mas o arquivo da OUTRA loja não foi apagado",
+        balde.conteudo.has(envioA.chave) && !balde.apagados.includes(envioA.chave),
+        balde.apagados.join(","));
 }
 
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);

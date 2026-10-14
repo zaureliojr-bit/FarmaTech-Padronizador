@@ -114,6 +114,51 @@ function bancoDaLoja(env, loja) {
 
 }
 
+/* O prefixo dos arquivos daquela farmácia no R2.
+
+   O balde é um só e a chave é texto plano — R2 não tem pasta. Sem
+   prefixo, os arquivos de todas as lojas ficam no mesmo monte, e
+   "exportar os arquivos desta farmácia" ou "apagar tudo da que saiu da
+   plataforma" vira varredura do banco em vez de um comando.
+
+   Vazio para a loja que já existia: os arquivos dela estão em
+   banner/... e encarte/... e endereço publicado não se quebra. */
+function prefixoDaLoja(loja) {
+
+    const bruto = String((loja && loja.prefixo_r2) || "")
+        .toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 60);
+
+    return bruto ? bruto + "/" : "";
+
+}
+
+/* A chave pertence ao espaço desta farmácia?
+
+   Segunda parede na hora de apagar. A primeira — e a que realmente
+   isola — é o banco separado: a chave que o handler vai apagar foi lida
+   da tabela `banners` ou `encarte_paginas` DA PRÓPRIA loja, então não há
+   como chegar nela a chave de outra. Esta confere mesmo assim, porque o
+   estrago de um apagar errado é permanente e a conferência custa uma
+   comparação de texto.
+
+   Não vale para LEITURA, e isso é de propósito: banner e encarte são
+   imagens da vitrine, públicas por definição — qualquer um as vê abrindo
+   a loja. Exigir prova de dono para servi-las quebraria todo endereço já
+   publicado sem proteger nada. */
+function chaveEhDaLoja(loja, chave) {
+
+    const texto = String(chave || "");
+    const prefixo = prefixoDaLoja(loja);
+
+    if (prefixo) return texto.startsWith(prefixo);
+
+    /* Sem prefixo é a loja de sempre: a chave tem de ser uma das pastas
+       conhecidas, direto na raiz do balde. Com isso ela não alcança o
+       que está debaixo do prefixo de ninguém. */
+    return PASTAS.some((pasta) => texto.startsWith(pasta + "/"));
+
+}
+
 /* SHA-256 de (sal + senha), em hexa.
 
    O Workers tem Web Crypto nativo, então não entra dependência. Não é
@@ -179,11 +224,13 @@ async function lojaDeQuemPede(request, env) {
     const pedido = String(request.headers.get("X-Painel-Loja") || "")
         .toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 60);
 
+    const colunas = `l.slug, l.nome, a.hash, a.sal, a.banco, a.prefixo_r2`;
+
     const sql = pedido
-        ? `SELECT l.slug, l.nome, a.hash, a.sal, a.banco
+        ? `SELECT ${colunas}
              FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
             WHERE l.slug = ?1 AND l.ativo = 1`
-        : `SELECT l.slug, l.nome, a.hash, a.sal, a.banco
+        : `SELECT ${colunas}
              FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
             WHERE l.ativo = 1 ORDER BY l.criado_em LIMIT 1`;
 
@@ -218,7 +265,7 @@ async function lojaDeQuemPede(request, env) {
        existe leva 401. */
     if (pedido) return null;
 
-    return { slug: "", nome: "", hash: null, sal: null, banco: null };
+    return { slug: "", nome: "", hash: null, sal: null, banco: null, prefixo_r2: null };
 
 }
 
@@ -1144,7 +1191,7 @@ async function tratarExcluirBanner(request, env, loja, db) {
         `SELECT r2_chave FROM banners WHERE id = ?1`
     ).bind(alvo).first();
 
-    if (linha?.r2_chave && env.BANNERS_BUCKET) {
+    if (linha?.r2_chave && env.BANNERS_BUCKET && chaveEhDaLoja(loja, linha.r2_chave)) {
         await env.BANNERS_BUCKET.delete(linha.r2_chave).catch(() => {});
     }
 
@@ -1206,12 +1253,15 @@ async function tratarEnviarArquivo(request, env, loja, db, pasta) {
         "image/gif": "gif", "image/avif": "avif", "application/pdf": "pdf"
     }[tipo];
 
-    const chave = `${pasta}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${extensao}`;
+    const chave = `${prefixoDaLoja(loja)}${pasta}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${extensao}`;
 
     await env.BANNERS_BUCKET.put(chave, bytes, { httpMetadata: { contentType: tipo } });
 
     const base = new URL(request.url).origin;
 
+    /* O endereço carrega a chave inteira, prefixo e tudo. Assim a rota
+       que serve não precisa adivinhar de qual loja é o arquivo — e os
+       endereços já publicados, sem prefixo, continuam valendo. */
     return json({ sucesso: true, chave, url: `${base}/arquivos/${chave}` });
 
 }
@@ -1219,11 +1269,11 @@ async function tratarEnviarArquivo(request, env, loja, db, pasta) {
 /* Serve qualquer arquivo das pastas conhecidas. O /banners/arquivo/...
    continua atendendo os banners já cadastrados, que guardaram o endereço
    antigo — endereço publicado não se quebra. */
-async function tratarServirArquivo(request, env, db, pasta, nome) {
+async function tratarServirArquivo(request, env, db, prefixo, pasta, nome) {
 
     if (!env.BANNERS_BUCKET || !PASTAS.includes(pasta)) return json({ erro: "Não encontrado." }, 404);
 
-    const objeto = await env.BANNERS_BUCKET.get(`${pasta}/${nome}`);
+    const objeto = await env.BANNERS_BUCKET.get(`${prefixo ? prefixo + "/" : ""}${pasta}/${nome}`);
     if (!objeto) return json({ erro: "Não encontrado." }, 404);
 
     return new Response(objeto.body, {
@@ -1259,13 +1309,23 @@ async function tratarEnviarImagemDeBanner(request, env, loja, db) {
     const extensao = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
                        "image/gif": "gif", "image/avif": "avif" }[tipo.split(";")[0].trim()];
 
-    const chave = `banner/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${extensao}`;
+    const prefixo = prefixoDaLoja(loja);
+    const chave = `${prefixo}banner/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${extensao}`;
 
     await env.BANNERS_BUCKET.put(chave, bytes, { httpMetadata: { contentType: tipo } });
 
     const base = new URL(request.url).origin;
 
-    return json({ sucesso: true, chave, url: `${base}/banners/arquivo/${chave.split("/")[1]}` });
+    /* O endereço antigo é /banners/arquivo/<arquivo>, sem a pasta. Com
+       prefixo ele passa a levar o prefixo também, e a rota aceita os
+       dois formatos — o que já está publicado não pode quebrar. */
+    const depoisDaPasta = chave.slice(`${prefixo}banner/`.length);
+
+    return json({
+        sucesso: true,
+        chave,
+        url: `${base}/banners/arquivo/${prefixo}${depoisDaPasta}`
+    });
 
 }
 
@@ -1274,11 +1334,11 @@ async function tratarEnviarImagemDeBanner(request, env, loja, db) {
    O cache longo é seguro porque o nome do arquivo tem a hora e um
    sorteio dentro: trocar o banner gera nome novo, então nunca é preciso
    invalidar cache — o endereço antigo simplesmente deixa de ser usado. */
-async function tratarArquivoDeBanner(request, env, db, nome) {
+async function tratarArquivoDeBanner(request, env, db, prefixo, nome) {
 
     if (!env.BANNERS_BUCKET) return json({ erro: "Não encontrado." }, 404);
 
-    const objeto = await env.BANNERS_BUCKET.get(`banner/${nome}`);
+    const objeto = await env.BANNERS_BUCKET.get(`${prefixo ? prefixo + "/" : ""}banner/${nome}`);
     if (!objeto) return json({ erro: "Não encontrado." }, 404);
 
     return new Response(objeto.body, {
@@ -1722,7 +1782,10 @@ async function tratarExcluirEncarte(request, env, loja, db) {
             db.prepare(`SELECT pdf_chave FROM encartes WHERE id = ?1`).bind(alvo).first()
         ]);
 
-        const chaves = [...(pags.results || []).map(p => p.r2_chave), enc?.pdf_chave].filter(Boolean);
+        const chaves = [...(pags.results || []).map(p => p.r2_chave), enc?.pdf_chave]
+            .filter(Boolean)
+            .filter((c) => chaveEhDaLoja(loja, c));
+
         await Promise.all(chaves.map(c => env.BANNERS_BUCKET.delete(c).catch(() => {})));
     }
 
@@ -1819,18 +1882,29 @@ export default {
                 return await tratarEncartePublico(request, env, alvo.db);
             }
 
-            const arquivo = rota.match(/^\/arquivos\/([a-z]+)\/([A-Za-z0-9._-]+)$/);
+            /* Dois formatos, e os dois têm de valer:
+
+                 /arquivos/banner/x.png                 o de sempre
+                 /arquivos/<prefixo>/banner/x.png       com prefixo de loja
+
+               O de sempre continua porque endereço de banner já está
+               publicado na home e dentro de encarte — quebrar seria
+               apagar a arte da loja de um dia para o outro.
+
+               A ordem do regex resolve a ambiguidade sozinha: só há
+               prefixo quando sobram três segmentos. */
+            const arquivo = rota.match(/^\/arquivos\/(?:([a-z0-9-]+)\/)?([a-z]+)\/([A-Za-z0-9._-]+)$/);
             if (request.method === "GET" && arquivo) {
                 const alvo = await lojaPublicaDaURL(request, env);
                 if (alvo.recusa) return alvo.recusa;
-                return await tratarServirArquivo(request, env, alvo.db, arquivo[1], arquivo[2]);
+                return await tratarServirArquivo(request, env, alvo.db, arquivo[1] || "", arquivo[2], arquivo[3]);
             }
 
-            const arquivoBanner = rota.match(/^\/banners\/arquivo\/([A-Za-z0-9._-]+)$/);
+            const arquivoBanner = rota.match(/^\/banners\/arquivo\/(?:([a-z0-9-]+)\/)?([A-Za-z0-9._-]+)$/);
             if (request.method === "GET" && arquivoBanner) {
                 const alvo = await lojaPublicaDaURL(request, env);
                 if (alvo.recusa) return alvo.recusa;
-                return await tratarArquivoDeBanner(request, env, alvo.db, arquivoBanner[1]);
+                return await tratarArquivoDeBanner(request, env, alvo.db, arquivoBanner[1] || "", arquivoBanner[2]);
             }
 
             /* Daqui para baixo é a loja olhando os PRÓPRIOS dados.

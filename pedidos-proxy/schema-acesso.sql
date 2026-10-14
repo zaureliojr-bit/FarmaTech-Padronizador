@@ -35,6 +35,23 @@
    O nome do binding é escrito à mão, e não derivado do slug: derivar
    faria uma loja renomeada apontar silenciosamente para outro banco.
 
+   OS ARQUIVOS NO R2
+
+   O balde é um só, e a chave é texto plano — R2 não tem pasta. Sem
+   prefixo, os arquivos das farmácias ficam todos no mesmo monte, e aí
+   "exportar os arquivos desta loja" ou "apagar tudo da loja que saiu da
+   plataforma" vira varredura do banco, não um comando.
+
+   `prefixo_r2` resolve isso: a farmácia nova grava em
+   <prefixo>/banner/... e a que já existe continua em banner/..., onde os
+   arquivos dela já estão. Endereço publicado não se quebra.
+
+   Importante não confundir com proteção de leitura: banner e encarte são
+   imagens da vitrine, públicas por definição — qualquer um as vê abrindo
+   a loja. O prefixo serve para organizar, exportar e apagar por loja, e
+   como segunda parede na hora de apagar. A parede de verdade contra ler
+   o que é da outra é o banco separado.
+
    LOJA SEM LINHA AQUI
 
    É a loja que já existia. Ela entra com a PAINEL_KEY de sempre e usa o
@@ -61,5 +78,6 @@ CREATE TABLE IF NOT EXISTS lojas_acesso (
     hash       TEXT,
     sal        TEXT,
     banco      TEXT,
+    prefixo_r2 TEXT,
     trocada_em TEXT
 );
