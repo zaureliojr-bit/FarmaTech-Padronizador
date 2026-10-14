@@ -22,3 +22,53 @@ CREATE TABLE IF NOT EXISTS correcoes (
     categoria TEXT,
     atualizado_em INTEGER NOT NULL
 );
+
+-- A que família do site (perfumaria, higiene, etc.) cada categoria
+-- bruta do PDV pertence, quando ela não bate com o dicionário fixo do
+-- padronizador (familias.js) - evita ter que mexer em código toda vez
+-- que aparece uma categoria nova numa planilha. Chave é a categoria já
+-- normalizada (maiúscula, espaços colapsados), igual o padronizador faz.
+CREATE TABLE IF NOT EXISTS familias_categoria (
+    categoria TEXT PRIMARY KEY,
+    familia_id TEXT NOT NULL,
+    atualizado_em INTEGER NOT NULL
+);
+
+-- Planilha que o extrator do Firebird (firebird-extrator/) enviou e
+-- ainda não foi importada no painel. Sempre 1 linha por envio - o
+-- arquivo em si fica no R2 (mesmo bucket das imagens, chave fixa
+-- "extracoes/pendente.xlsx", sempre sobrescrita); aqui só o metadado,
+-- pra saber se tem algo novo esperando sem baixar o arquivo inteiro.
+CREATE TABLE IF NOT EXISTS extracoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome_arquivo TEXT NOT NULL,
+    tamanho INTEGER NOT NULL,
+    enviado_em INTEGER NOT NULL,
+    importado_em INTEGER
+);
+
+-- Listas de referência (CMED, distribuidora) que até aqui só viviam no
+-- IndexedDB de quem usava o padronizador - um site em outro domínio
+-- (ex.: o painel da loja) não enxerga esse IndexedDB (armazenamento de
+-- navegador é isolado por origem), então não tinha como rodar a mesma
+-- padronização sozinho. O arquivo em si (JSON, já processado pelo
+-- cmedService.js/distribuidorService.js) fica no R2, chave
+-- "referencias/<chave>.json"; aqui só o metadado.
+CREATE TABLE IF NOT EXISTS referencias (
+    chave TEXT PRIMARY KEY,
+    tamanho INTEGER NOT NULL,
+    atualizado_em INTEGER NOT NULL
+);
+
+-- Produtos que não são produto de verdade (taxa de entrega, item de
+-- teste do sistema, lixo cadastrado por engano) - sempre voltam em
+-- toda extração nova do PDV, então marcar uma vez aqui faz o
+-- padronizador (e a publicação automática) ignorar sozinho dali pra
+-- frente, sem precisar excluir de novo a cada reimportação. Chave é o
+-- código do produto (não o EAN - produto de teste geralmente nem tem
+-- EAN de verdade), específico desta loja.
+CREATE TABLE IF NOT EXISTS produtos_excluidos (
+    codigo TEXT PRIMARY KEY,
+    motivo TEXT,
+    excluido_em INTEGER NOT NULL
+);

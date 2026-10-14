@@ -1,4 +1,5 @@
 import { buscarImagensHospedadas } from "./imagemHostingService";
+import { PORTEIRO_URL, cabecalhoPainel, esquecerSenhaPainel } from "./credencialPainel";
 
 // A imagem fica hospedada no R2 (ver imagens-proxy/), servida por um
 // link estável da própria farmácia - não depende do site de origem
@@ -38,14 +39,24 @@ function montarProdutoSite(produto, imagensHospedadas) {
         imagem: resolverImagemSite(produto, imagensHospedadas)
     };
 
+    // Sem estoque na própria planilha = o site oferece "Encomendar"
+    // (WhatsApp) em vez de mostrar "Esgotado" sem alternativa - mesmo
+    // critério que o worker (publish-proxy) já usa pra quem some de
+    // uma planilha futura (ver mesclarMarcandoAusentesSemEstoque).
+    if (base.estoque <= 0) base.encomenda = true;
+
     // Vindos da CMED e da Portaria 344/1998. tarja é só informativo (mostra
     // "venda sob prescrição" no card, não bloqueia nada - tem antibiótico e
     // anticoncepcional que são tarja vermelha e vendem livre). Quem manda
-    // no carrinho é bloqueioPresencial/receitaRemota:
+    // no carrinho/checkout é:
     //   bloqueioPresencial - listas A/B, retenção sempre presencial, não
     //   entra no carrinho.
-    //   receitaRemota - listas C, entra no carrinho normal, mas o
-    //   checkout cobra confirmação do envio da receita antes de despachar.
+    //   confirmarReceita - antibiótico OU controlado de receita remota
+    //   (listas C): entra no carrinho normal, mas o checkout deve cobrar
+    //   confirmação do envio da receita antes de despachar. É ESTE campo
+    //   que o site precisa checar pra disparar a conferência por
+    //   WhatsApp - não a tarja/exigeReceita sozinha, que também é
+    //   verdadeira pra anticoncepcional e outros que vendem livre.
     // Só saem quando têm conteúdo, porque a maior parte do catálogo não é
     // medicamento e nunca vai ter nenhum destes campos.
     //
@@ -62,6 +73,12 @@ function montarProdutoSite(produto, imagensHospedadas) {
     if (produto.tipoReceita) base.tipoReceita = produto.tipoReceita;
     if (produto.substancia) base.substancia = produto.substancia;
     if (produto.registroAnvisa) base.registroAnvisa = produto.registroAnvisa;
+
+    // A classe terapêutica já vinha da CMED e morria aqui: o padronizador
+    // lia a coluna, guardava no produto e não exportava. É o que a ficha
+    // técnica do site mostra como "Classe" — "Analgésicos e antitérmicos"
+    // dito por extenso diz mais ao cliente do que a substância sozinha.
+    if (produto.classeTerapeutica) base.classeTerapeutica = produto.classeTerapeutica;
 
     return base;
 
@@ -84,17 +101,29 @@ export async function gerarProdutosSite(produtos) {
 }
 
 // modo "mesclar" (padrão): atualiza/acrescenta pelo EAN, mantém no ar
-// quem não veio nesta planilha - seguro pra publicar uma planilha
-// parcial (só o que mudou) sem apagar o resto do catálogo. modo
-// "substituir": publica exatamente esta lista, apagando o que não
-// vier - só faz sentido junto de uma reimportação do catálogo inteiro.
+// quem não veio nesta planilha do jeito que estava - seguro pra
+// publicar uma planilha parcial (só o que mudou) sem apagar o resto do
+// catálogo. modo "encomenda": igual o mesclar, mas quem já estava
+// publicado e não veio agora fica com estoque zerado e marcado pra
+// oferecer encomenda no site - pensado pra planilha só dos itens que
+// têm estoque agora. modo "substituir": publica exatamente esta lista,
+// apagando o que não vier - só faz sentido junto de uma reimportação
+// do catálogo inteiro.
 export async function publicarNoSite(produtos, modo = "mesclar") {
 
-    const workerUrl = import.meta.env.VITE_PUBLISH_WORKER_URL;
-    const chave = import.meta.env.VITE_PUBLISH_KEY;
+    /* Publicar passa pelo porteiro (pedidos-proxy), e não mais direto no
+       publish-proxy. A VITE_PUBLISH_KEY que ficava aqui era embutida no
+       pacote pelo Vite e podia ser lida por qualquer um — e com ela se
+       reescreve o produtos.json inteiro do site, preço por preço. Agora
+       vai a senha do painel, e a chave fica no servidor. */
+    if (!PORTEIRO_URL) {
+        throw new Error("Publicação não configurada: falta VITE_PEDIDOS_PROXY_URL no .env.");
+    }
 
-    if (!workerUrl) {
-        throw new Error("Publicação não configurada: falta VITE_PUBLISH_WORKER_URL no .env (veja publish-proxy/README.md).");
+    const credencial = cabecalhoPainel();
+
+    if (!credencial) {
+        throw new Error("Preciso da senha do painel para publicar no site.");
     }
 
     const listaSite = await gerarProdutosSite(produtos);
@@ -103,18 +132,23 @@ export async function publicarNoSite(produtos, modo = "mesclar") {
         throw new Error("Nenhum produto válido para publicar (falta EAN ou descrição).");
     }
 
-    const resposta = await fetch(workerUrl, {
+    const resposta = await fetch(`${PORTEIRO_URL}/catalogo/publicar`, {
 
         method: "POST",
 
         headers: {
             "Content-Type": "application/json",
-            "X-Publish-Key": chave || ""
+            ...credencial
         },
 
         body: JSON.stringify({ produtos: listaSite, modo })
 
     });
+
+    if (resposta.status === 401) {
+        esquecerSenhaPainel();
+        throw new Error("Senha do painel incorreta.");
+    }
 
     const dados = await resposta.json().catch(() => ({}));
 

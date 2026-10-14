@@ -4,6 +4,8 @@ import "./ProductTable.css";
 
 import ImageModal from "../ImageModal/ImageModal";
 import { useImagem } from "../../hooks/useImagem";
+import { excluirImagemHospedada } from "../../services/imagemHostingService";
+import { buscarDescricaoProduto } from "../../services/descricaoService";
 
 function classeQualidade(score) {
 
@@ -14,10 +16,11 @@ function classeQualidade(score) {
 
 }
 
-function CelulaDescricao({ produto, atualizarProduto }) {
+function CelulaDescricao({ produto, atualizarProduto, mostrarToast }) {
 
     const [editando, setEditando] = useState(false);
     const [valor, setValor] = useState(produto.descricaoSite);
+    const [buscandoDescricao, setBuscandoDescricao] = useState(false);
 
     const editadaManualmente = !!produto.descricaoManual;
 
@@ -25,6 +28,49 @@ function CelulaDescricao({ produto, atualizarProduto }) {
 
         setValor(produto.descricaoSite);
         setEditando(true);
+
+    }
+
+    // Cascata (Cosmos -> Open Beauty/Food Facts -> CMED) fica em
+    // descricaoService.js, compartilhada com a busca em lote. Não
+    // sobrescreve sozinha: só abre a edição já preenchida com a
+    // sugestão, pra revisar/ajustar antes de salvar, igual uma edição
+    // manual normal.
+    async function buscarDescricao() {
+
+        if (!produto.ean) {
+            mostrarToast?.("Produto sem EAN - não dá pra buscar descrição.", "erro");
+            return;
+        }
+
+        setBuscandoDescricao(true);
+
+        try {
+
+            const sugestao = await buscarDescricaoProduto(produto);
+
+            if (!sugestao) {
+                mostrarToast?.("Não achei descrição em nenhuma fonte (Cosmos, Open Beauty/Food Facts, CMED) pra este EAN.", "erro");
+                return;
+            }
+
+            if (sugestao.toLowerCase() === produto.descricaoSite.trim().toLowerCase()) {
+                mostrarToast?.("A descrição encontrada é igual à atual.", "aviso");
+                return;
+            }
+
+            setValor(sugestao);
+            setEditando(true);
+
+        } catch (erro) {
+
+            mostrarToast?.(erro.message || "Erro ao buscar descrição.", "erro");
+
+        } finally {
+
+            setBuscandoDescricao(false);
+
+        }
 
     }
 
@@ -168,6 +214,15 @@ function CelulaDescricao({ produto, atualizarProduto }) {
                     title="Editar descrição"
                 >
                     ✏️
+                </button>
+
+                <button
+                    className="btn-editar-descricao"
+                    onClick={buscarDescricao}
+                    disabled={buscandoDescricao}
+                    title="Buscar descrição pelo EAN (Cosmos, Open Beauty/Food Facts, ou CMED se for medicamento)"
+                >
+                    {buscandoDescricao ? "⏳" : "🔍"}
                 </button>
 
                 {
@@ -354,6 +409,7 @@ function ProductTable({
     categorias,
     classes,
     atualizarProduto,
+    excluirProduto,
     mostrarToast
 }) {
 
@@ -379,6 +435,48 @@ function ProductTable({
         adicionarImagemManual
 
     } = useImagem();
+
+    const [excluindo, setExcluindo] = useState(new Set());
+
+    async function excluirImagem(produto) {
+
+        if (!window.confirm(`Excluir a imagem de "${produto.descricaoSite}"? Isso não pode ser desfeito.`)) return;
+
+        setExcluindo((atual) => new Set(atual).add(produto.ean));
+
+        try {
+
+            await excluirImagemHospedada(produto.ean);
+
+            atualizarProduto({ ean: produto.ean, imagem: "", statusImagem: "sem" });
+
+            mostrarToast?.("Imagem excluída.", "sucesso");
+
+        } catch (erro) {
+
+            mostrarToast?.(erro.message || "Erro ao excluir imagem.", "erro");
+
+        } finally {
+
+            setExcluindo((atual) => {
+                const novo = new Set(atual);
+                novo.delete(produto.ean);
+                return novo;
+            });
+
+        }
+
+    }
+
+    function excluirProdutoDaLista(produto) {
+
+        if (!window.confirm(`Excluir "${produto.descricaoSite}" (código ${produto.codigo})? Ele não vai aparecer mais em nenhuma importação futura - pra desfazer, é preciso remover a exclusão no banco.`)) return;
+
+        excluirProduto(produto.codigo);
+
+        mostrarToast?.("Produto excluído - não volta a aparecer em reimportações.", "sucesso");
+
+    }
 
     return (
 
@@ -440,6 +538,7 @@ function ProductTable({
                                         <CelulaDescricao
                                             produto={produto}
                                             atualizarProduto={atualizarProduto}
+                                            mostrarToast={mostrarToast}
                                         />
 
                                     </td>
@@ -592,6 +691,44 @@ function ProductTable({
                                                     : "🔍 Buscar"
 
                                             }
+
+                                        </button>
+
+                                        {
+
+                                            produto.statusImagem === "salva" && (
+
+                                                <button
+
+                                                    className="btn-imagem btn-excluir-imagem"
+
+                                                    onClick={() => excluirImagem(produto)}
+
+                                                    disabled={excluindo.has(produto.ean)}
+
+                                                    title="Excluir imagem"
+
+                                                >
+
+                                                    {excluindo.has(produto.ean) ? "Excluindo..." : "🗑️ Excluir"}
+
+                                                </button>
+
+                                            )
+
+                                        }
+
+                                        <button
+
+                                            className="btn-imagem btn-excluir-imagem"
+
+                                            onClick={() => excluirProdutoDaLista(produto)}
+
+                                            title="Excluir produto (não sobe pro site, não volta em reimportações)"
+
+                                        >
+
+                                            🗑️ Excluir produto
 
                                         </button>
 

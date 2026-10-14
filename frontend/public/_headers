@@ -1,0 +1,9 @@
+# Convenção do Cloudflare (Pages/Workers com assets estáticos) - headers
+# extras por caminho, aplicados nos arquivos servidos de dist/.
+#
+# O painel da loja (outro domínio) carrega este arquivo via import()
+# dinâmico - sem o cabeçalho de CORS abaixo, o navegador bloqueia esse
+# carregamento entre domínios (erro "Failed to fetch dynamically
+# imported module"), mesmo o arquivo existindo e respondendo normal.
+/importador-automatico.js
+  Access-Control-Allow-Origin: *

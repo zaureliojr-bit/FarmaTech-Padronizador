@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { analisarProduto } from "../intelligence/core";
+import { definirOverridesCategoria } from "../intelligence/dictionary/familias";
 import { importarListaCmed } from "../services/cmedService";
 import { carregarIndiceCmed, salvarIndiceCmed } from "../services/cmedStorage";
 import { padronizarComCmed } from "../services/padronizarCmed";
+import { importarListaDistribuidor, consultarEanDistribuidor } from "../services/distribuidorService";
+import { carregarIndiceDistribuidor, salvarIndiceDistribuidor } from "../services/distribuidorStorage";
 import { salvarCorrecao } from "../services/correcoesService";
+import { buscarFamiliasOverride, salvarFamiliaOverride } from "../services/familiasOverrideService";
+import { salvarReferencia } from "../services/referenciasService";
+import { excluirProdutoDefinitivamente } from "../services/produtosExcluidosService";
 
 // Só estes três campos são "correção" compartilhável entre lojas -
 // preço, promoção e estoque são do catálogo de cada loja e nunca podem
@@ -73,6 +79,12 @@ export function useProdutos() {
 
             const guardou = await salvarIndiceCmed(indice);
 
+            // Espelha no servidor (R2/D1) - até aqui só ficava no
+            // IndexedDB deste navegador, e outros sites (ex.: o painel
+            // da loja) precisam enxergar a mesma lista pra padronizar
+            // sozinhos. Roda em paralelo, não bloqueia a tela.
+            salvarReferencia("cmed", indice);
+
             return { sucesso: true, guardou, totalLinhas: indice.totalLinhas };
 
         } catch (erro) {
@@ -86,6 +98,105 @@ export function useProdutos() {
             setCarregandoCmed(false);
 
         }
+
+    }
+
+    // =====================================================
+    // Distribuidora (fonte extra de descrição/laboratório/categoria)
+    // =====================================================
+    // Mesmo padrão da CMED: fica guardada no navegador, aplicada
+    // automaticamente em toda planilha importada dali pra frente. Não
+    // mexe em preço/estoque nem em regra de negócio nenhuma - só
+    // acrescenta descricaoDistribuidor, usada como primeira fonte na
+    // cascata de busca de descrição (ver descricaoService.js).
+
+    const [indiceDistribuidor, setIndiceDistribuidor] = useState(null);
+    const [carregandoDistribuidor, setCarregandoDistribuidor] = useState(false);
+    const [erroDistribuidor, setErroDistribuidor] = useState("");
+
+    useEffect(() => {
+
+        let ativo = true;
+
+        carregarIndiceDistribuidor().then((indice) => {
+            if (ativo && indice) setIndiceDistribuidor(indice);
+        });
+
+        return () => { ativo = false; };
+
+    }, []);
+
+    async function carregarListaDistribuidor(arquivo) {
+
+        setErroDistribuidor("");
+        setCarregandoDistribuidor(true);
+
+        try {
+
+            const indice = await importarListaDistribuidor(arquivo);
+
+            setIndiceDistribuidor(indice);
+
+            const guardou = await salvarIndiceDistribuidor(indice);
+
+            // Mesmo espelho do CMED, ver comentário lá em cima.
+            salvarReferencia("distribuidor", indice);
+
+            return { sucesso: true, guardou, totalLinhas: indice.totalLinhas };
+
+        } catch (erro) {
+
+            setErroDistribuidor(erro.message || "Não consegui ler esta planilha da distribuidora.");
+
+            return { sucesso: false };
+
+        } finally {
+
+            setCarregandoDistribuidor(false);
+
+        }
+
+    }
+
+    // =====================================================
+    // Correções de categoria -> família (banco compartilhado)
+    // =====================================================
+    // Carregadas uma vez ao abrir o padronizador - definirOverridesCategoria
+    // guarda num Map do próprio módulo familias.js, e "overridesVersao"
+    // força o useMemo dos produtos a recalcular a família de cada um
+    // depois que a busca termina (ela é assíncrona, então na primeira
+    // renderização o Map ainda está vazio).
+
+    const [overridesVersao, setOverridesVersao] = useState(0);
+
+    useEffect(() => {
+
+        let ativo = true;
+
+        buscarFamiliasOverride().then((mapa) => {
+
+            if (!ativo) return;
+
+            definirOverridesCategoria(mapa);
+            setOverridesVersao((v) => v + 1);
+
+        });
+
+        return () => { ativo = false; };
+
+    }, []);
+
+    // Usado pela caixa de categorias não reconhecidas - salva a escolha
+    // no banco compartilhado e já reaplica na tela na hora, sem precisar
+    // reimportar a planilha pra ver o produto mudar de família.
+    async function corrigirFamiliaCategoria(categoria, familiaId) {
+
+        await salvarFamiliaOverride(categoria, familiaId);
+
+        const atual = await buscarFamiliasOverride();
+
+        definirOverridesCategoria(atual);
+        setOverridesVersao((v) => v + 1);
 
     }
 
@@ -113,13 +224,42 @@ export function useProdutos() {
 
     const relatorioCmed = resultadoCmed?.relatorio || null;
 
-    const produtos = useMemo(() => {
+    // Cruza com a distribuidora (se a lista já estiver carregada) -
+    // acrescenta descricaoDistribuidor e, se a lista trouxer, uma URL
+    // de imagem pronta (imagemDistribuidor) - sem regra de negócio.
+    const produtosComDistribuidor = useMemo(() => {
 
         if (!resultadoCmed) return [];
 
-        return resultadoCmed.produtos.map(analisarProduto);
+        if (!indiceDistribuidor) return resultadoCmed.produtos;
 
-    }, [resultadoCmed]);
+        return resultadoCmed.produtos.map((produto) => {
+
+            const info = consultarEanDistribuidor(indiceDistribuidor, produto.ean);
+
+            if (!info?.descricao && !info?.imagem) return produto;
+
+            return {
+                ...produto,
+                ...(info.descricao && { descricaoDistribuidor: info.descricao }),
+                ...(info.imagem && { imagemDistribuidor: info.imagem })
+            };
+
+        });
+
+    }, [resultadoCmed, indiceDistribuidor]);
+
+    const produtos = useMemo(() => {
+
+        if (!produtosComDistribuidor.length) return [];
+
+        return produtosComDistribuidor.map(analisarProduto);
+
+        // overridesVersao não é usado no corpo, mas precisa recalcular
+        // a família de cada produto assim que os overrides carregam (ou
+        // mudam) - análise já rodou com o Map de overrides ainda vazio.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [produtosComDistribuidor, overridesVersao]);
 
     // =====================================================
     // Filtros
@@ -360,6 +500,69 @@ export function useProdutos() {
 
     }
 
+    // Remove da tela na hora e marca o código como excluído no banco
+    // compartilhado - taxa de entrega, item de teste, cadastro
+    // duplicado: lixo desse tipo volta em toda extração nova do PDV,
+    // então marcar uma vez evita precisar excluir de novo a cada
+    // reimportação (importador.js já filtra por essa marca). Se a
+    // chamada ao servidor falhar, o produto some desta tela mesmo
+    // assim - só volta a aparecer na próxima importação.
+    function excluirProduto(codigo) {
+
+        setResultadoImportacao((anterior) => ({
+            ...anterior,
+            produtos: anterior.produtos.filter((produto) => produto.codigo !== codigo)
+        }));
+
+        excluirProdutoDefinitivamente(codigo).catch((erro) => {
+            console.error("Não consegui marcar o produto como excluído no servidor.", erro);
+        });
+
+    }
+
+    // Usado pelas caixas de busca em lote (imagem/descrição): aplicar
+    // uma atualização por item resolvido dispara uma re-análise de TODO
+    // o catálogo a cada chamada (analisarProduto roda de novo pra todo
+    // mundo) - com vários itens resolvendo rápido (ex: descrição achada
+    // na distribuidora, sem rede nenhuma), isso enfileira re-análises
+    // demais e trava a aba. Aplicando o lote inteiro de uma vez só, a
+    // re-análise roda uma vez só pro grupo inteiro.
+    function atualizarProdutosEmLote(atualizacoes) {
+
+        if (!atualizacoes?.length) return;
+
+        const porEan = new Map(atualizacoes.map((item) => [item.ean, item]));
+
+        setResultadoImportacao((anterior) => ({
+
+            ...anterior,
+
+            produtos: anterior.produtos.map((produto) => {
+
+                const atualizacao = porEan.get(produto.ean);
+
+                return atualizacao ? { ...produto, ...atualizacao } : produto;
+
+            })
+
+        }));
+
+        atualizacoes.forEach((produtoAtualizado) => {
+
+            const correcao = {};
+
+            CAMPOS_DE_CORRECAO.forEach((campo) => {
+                if (campo in produtoAtualizado) correcao[campo] = produtoAtualizado[campo];
+            });
+
+            if (Object.keys(correcao).length) {
+                salvarCorrecao(produtoAtualizado.ean, correcao);
+            }
+
+        });
+
+    }
+
     return {
 
         resultadoImportacao,
@@ -414,6 +617,12 @@ export function useProdutos() {
 
         atualizarProduto,
 
+        atualizarProdutosEmLote,
+
+        excluirProduto,
+
+        corrigirFamiliaCategoria,
+
         indiceCmed,
 
         relatorioCmed,
@@ -430,7 +639,15 @@ export function useProdutos() {
 
         corrigirLaboratorioCmed,
 
-        setCorrigirLaboratorioCmed
+        setCorrigirLaboratorioCmed,
+
+        indiceDistribuidor,
+
+        carregandoDistribuidor,
+
+        erroDistribuidor,
+
+        carregarListaDistribuidor
 
     };
 

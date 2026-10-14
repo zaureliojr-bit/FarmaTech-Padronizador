@@ -1,4 +1,7 @@
+import { useState } from "react";
+
 import "./CategoriasNaoReconhecidasBox.css";
+import { FAMILIAS } from "../../intelligence/dictionary/familias";
 
 // Duas listas sobre o mesmo problema: categorias da planilha que não
 // batem com nenhuma família do site.
@@ -7,10 +10,13 @@ import "./CategoriasNaoReconhecidasBox.css";
 // virou SHAMPOO, ESMALTES, LINHA INFANTIL...) - está aqui pra ser
 // conferida antes de publicar, não pra ser consertada.
 //
-// A de baixo é o que continua caindo em "Outros" no site: ou a
-// categoria precisa entrar no dictionary/familias.js, ou o produto está
-// arquivado no lugar errado no FarmaxPDV.
-function CategoriasNaoReconhecidasBox({ produtos }) {
+// A de baixo é o que continua caindo em "Outros" no site. Para essas, a
+// correção é feita aqui mesmo: escolher a família vale na hora e fica
+// guardada pras próximas importações, sem precisar de deploy.
+function CategoriasNaoReconhecidasBox({ produtos, corrigirFamilia, mostrarToast }) {
+
+    const [selecoes, setSelecoes] = useState({});
+    const [salvando, setSalvando] = useState(new Set());
 
     const roteados = new Map();
     const semFamilia = new Map();
@@ -40,6 +46,39 @@ function CategoriasNaoReconhecidasBox({ produtos }) {
 
     const totalProdutos = lista.reduce((soma, [, qtd]) => soma + qtd, 0);
     const totalRoteado = listaRoteada.reduce((soma, [, qtd]) => soma + qtd, 0);
+
+    async function salvar(categoria) {
+
+        const familiaId = selecoes[categoria];
+
+        if (!familiaId) {
+            mostrarToast?.("Escolha uma família antes de salvar.", "erro");
+            return;
+        }
+
+        setSalvando((atual) => new Set(atual).add(categoria));
+
+        try {
+
+            await corrigirFamilia(categoria, familiaId);
+
+            mostrarToast?.(`"${categoria}" associada à família escolhida.`, "sucesso");
+
+        } catch (erro) {
+
+            mostrarToast?.(erro.message || "Erro ao salvar a correção de família.", "erro");
+
+        } finally {
+
+            setSalvando((atual) => {
+                const novo = new Set(atual);
+                novo.delete(categoria);
+                return novo;
+            });
+
+        }
+
+    }
 
     return (
 
@@ -74,11 +113,13 @@ function CategoriasNaoReconhecidasBox({ produtos }) {
 
                         <ul className="categorias-outros-lista">
 
-                            {listaRoteada.map(([rota, qtd]) => (
+                            {listaRoteada.map(([chave, qtd]) => (
 
-                                <li key={rota}>
-                                    <strong>{rota}</strong>
-                                    <span>{qtd.toLocaleString("pt-BR")} produto(s)</span>
+                                <li key={chave}>
+                                    <div className="categorias-outros-item-info">
+                                        <strong>{chave}</strong>
+                                        <span>{qtd.toLocaleString("pt-BR")} produto(s)</span>
+                                    </div>
                                 </li>
 
                             ))}
@@ -111,6 +152,8 @@ function CategoriasNaoReconhecidasBox({ produtos }) {
                             Essas categorias da planilha não batem com nenhuma família
                             conhecida do site e o nome do produto também não resolveu -
                             os produtos aparecem em "Outros" em vez da seção certa.
+                            Escolha a família certa pra cada uma; fica valendo na hora
+                            e também pras próximas importações.
                         </p>
 
                         <ul className="categorias-outros-lista">
@@ -118,8 +161,46 @@ function CategoriasNaoReconhecidasBox({ produtos }) {
                             {lista.map(([categoria, qtd]) => (
 
                                 <li key={categoria}>
-                                    <strong>{categoria}</strong>
-                                    <span>{qtd.toLocaleString("pt-BR")} produto(s)</span>
+
+                                    <div className="categorias-outros-item-info">
+                                        <strong>{categoria}</strong>
+                                        <span>{qtd.toLocaleString("pt-BR")} produto(s)</span>
+                                    </div>
+
+                                    {
+
+                                        corrigirFamilia && (
+
+                                            <div className="categorias-outros-item-acao">
+
+                                                <select
+                                                    value={selecoes[categoria] || ""}
+                                                    onChange={(e) => setSelecoes((atual) => ({ ...atual, [categoria]: e.target.value }))}
+                                                >
+                                                    <option value="">Escolher família...</option>
+
+                                                    {FAMILIAS.map((familia) => (
+                                                        <option key={familia.id} value={familia.id}>
+                                                            {familia.nome}
+                                                        </option>
+                                                    ))}
+
+                                                </select>
+
+                                                <button
+                                                    className="btn-mini btn-mini-salvar"
+                                                    onClick={() => salvar(categoria)}
+                                                    disabled={salvando.has(categoria)}
+                                                >
+                                                    {salvando.has(categoria) ? "Salvando..." : "Salvar"}
+                                                </button>
+
+                                            </div>
+
+                                        )
+
+                                    }
+
                                 </li>
 
                             ))}

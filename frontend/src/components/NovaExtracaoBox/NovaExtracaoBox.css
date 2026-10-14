@@ -1,0 +1,29 @@
+.nova-extracao-box{
+
+    margin:24px 0;
+    padding:16px 20px;
+
+    display:flex;
+
+    align-items:center;
+
+    justify-content:space-between;
+
+    gap:16px;
+
+    flex-wrap:wrap;
+
+    background:var(--card);
+    border:1px solid var(--primary);
+
+    border-radius:var(--radius);
+
+}
+
+.nova-extracao-box span{
+
+    font-size:14px;
+
+    color:var(--text);
+
+}

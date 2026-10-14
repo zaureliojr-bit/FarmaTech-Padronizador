@@ -7,7 +7,16 @@
 // que não bate com a rota exata do worker (cai no fallback de servir
 // imagem por engano, e some tudo com "Imagem não encontrada.").
 const PROXY_URL = (import.meta.env.VITE_IMAGENS_PROXY_URL || "").replace(/\/+$/, "");
-const PROXY_KEY = import.meta.env.VITE_IMAGENS_KEY;
+
+// LER imagem continua indo direto ao imagens-proxy: imagem é pública
+// por natureza e são milhares por tela, então dar a volta pelo porteiro
+// seria lento e caro sem proteger nada.
+//
+// GRAVAR passa pelo porteiro. Antes, salvar exigia a VITE_IMAGENS_KEY,
+// que o Vite embutia no pacote - a chave ficava legível para qualquer
+// um que baixasse o JavaScript. Agora vai a senha do painel, e quem
+// carimba a chave de verdade é o pedidos-proxy, no servidor.
+import { PORTEIRO_URL, cabecalhoPainel, esquecerSenhaPainel } from "./credencialPainel";
 
 // O D1 recusa consulta com mais de 100 parâmetros amarrados (limite da
 // plataforma, não do worker) - IN (?1,...,?500) simplesmente falha e a
@@ -78,27 +87,80 @@ export function ehImagemHospedada(url) {
  */
 export async function salvarImagemHospedada(ean, urlOrigem, origem) {
 
-    if (!PROXY_URL) {
-        throw new Error("Hospedagem de imagens não configurada (falta VITE_IMAGENS_PROXY_URL no .env).");
+    if (!PORTEIRO_URL) {
+        throw new Error("Publicação não configurada (falta VITE_PEDIDOS_PROXY_URL no .env).");
     }
 
-    const resposta = await fetch(PROXY_URL, {
+    const credencial = cabecalhoPainel();
+
+    if (!credencial) {
+        throw new Error("Preciso da senha do painel para salvar a imagem.");
+    }
+
+    const resposta = await fetch(`${PORTEIRO_URL}/catalogo/imagem`, {
 
         method: "POST",
 
         headers: {
             "Content-Type": "application/json",
-            "X-Imagens-Key": PROXY_KEY || ""
+            ...credencial
         },
 
         body: JSON.stringify({ ean: String(ean), url: urlOrigem, origem })
 
     });
 
+    /* Senha errada ou expirada: esquece a guardada, senão a próxima
+       tentativa repete o erro sem nunca perguntar de novo. */
+    if (resposta.status === 401) {
+        esquecerSenhaPainel();
+        throw new Error("Senha do painel incorreta.");
+    }
+
+    if (resposta.status === 429) {
+        const espera = await resposta.json().catch(() => ({}));
+        throw new Error(espera.erro || "Tentativas demais. Espere alguns minutos.");
+    }
+
     const dados = await resposta.json().catch(() => ({}));
 
     if (!resposta.ok) {
         throw new Error(dados.erro || `Falha ao salvar imagem (HTTP ${resposta.status})`);
+    }
+
+    return dados;
+
+}
+
+/**
+ * Apaga a imagem hospedada de um produto (R2 + D1) - volta pro estado
+ * "sem imagem", sem apagar o produto nem nenhum outro dado dele.
+ */
+export async function excluirImagemHospedada(ean) {
+
+    if (!PORTEIRO_URL) {
+        throw new Error("Exclusão de imagem não configurada (falta VITE_PEDIDOS_PROXY_URL no .env).");
+    }
+
+    const credencial = cabecalhoPainel();
+
+    if (!credencial) {
+        throw new Error("Preciso da senha do painel para excluir a imagem.");
+    }
+
+    const resposta = await fetch(
+        `${PORTEIRO_URL}/catalogo/imagem/${encodeURIComponent(String(ean))}`, {
+
+        method: "DELETE",
+
+        headers: credencial
+
+    });
+
+    const dados = await resposta.json().catch(() => ({}));
+
+    if (!resposta.ok) {
+        throw new Error(dados.erro || `Falha ao excluir imagem (HTTP ${resposta.status})`);
     }
 
     return dados;

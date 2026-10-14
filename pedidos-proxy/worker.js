@@ -19,8 +19,9 @@
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Painel-Key",
+    "Access-Control-Expose-Headers": "Retry-After",
     "Access-Control-Max-Age": "86400"
 };
 
@@ -29,11 +30,11 @@ const MAX_TEXTO = 200;          // nome, endereço, descrição de item
 const MAX_DIAS_RELATORIO = 366;
 const MAX_TERMO = 60;           // ninguém busca remédio com mais que isso
 
-function json(dados, status = 200) {
+function json(dados, status = 200, extras = {}) {
 
     return new Response(JSON.stringify(dados), {
         status,
-        headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+        headers: { "Content-Type": "application/json", ...CORS_HEADERS, ...extras }
     });
 
 }
@@ -61,11 +62,342 @@ function soDigitos(valor) {
 
 }
 
-function autorizado(request, env) {
+function senhaConfere(request, env) {
 
     return !!env.PAINEL_KEY && request.headers.get("X-Painel-Key") === env.PAINEL_KEY;
 
 }
+
+/* ===================== LIMITE DE TENTATIVAS =====================
+
+   A PAINEL_KEY é uma senha curta digitada por gente, e gente escolhe
+   senha curta. Oito dígitos são cem milhões de combinações: sem limite,
+   uma máquina varre isso em algumas dezenas de horas — e quem entra
+   muda preço, publica banner e importa catálogo.
+
+   Com o limite, deixa de ser questão de tempo. Cinco erros e o IP para;
+   cada rodada seguinte de erros dobra a espera. Vale para qualquer
+   senha, inclusive as próximas.
+
+   O bloqueio é verificado ANTES de comparar a senha, de propósito. Se
+   fosse depois, o atacante bloqueado continuaria tendo suas tentativas
+   avaliadas e um acerto no meio do bloqueio entraria.
+*/
+
+const ERROS_ATE_BLOQUEAR = 5;
+const BLOQUEIO_BASE_MS = 60 * 1000;         // 1 minuto no primeiro bloqueio
+const BLOQUEIO_MAXIMO_MS = 60 * 60 * 1000;  // e nunca mais que uma hora
+const ESQUECER_ERROS_MS = 30 * 60 * 1000;   // meia hora sem errar zera a conta
+const LINHA_VELHA_MS = 24 * 60 * 60 * 1000; // linha sem uso há um dia é lixo
+
+function ipDeQuemChama(request) {
+
+    // Na Cloudflare o CF-Connecting-IP é posto pela borda e não pode ser
+    // forjado pelo cliente. Os outros são para quando este worker rodar
+    // atrás de outra coisa em teste.
+    return request.headers.get("CF-Connecting-IP")
+        || request.headers.get("X-Forwarded-For")?.split(",")[0].trim()
+        || "";
+
+}
+
+async function lerTentativas(env, ip) {
+
+    if (!ip) return null;
+
+    return await env.DB.prepare(
+        `SELECT erros, ultimo, bloqueado_ate FROM tentativas_painel WHERE ip = ?1`
+    ).bind(ip).first().catch(() => null);
+
+}
+
+/* Quanto falta do bloqueio, em ms. Zero quer dizer "pode tentar". */
+function quantoFaltaDoBloqueio(linha) {
+
+    if (!linha) return 0;
+
+    const agora = Date.now();
+
+    return linha.bloqueado_ate > agora ? linha.bloqueado_ate - agora : 0;
+
+}
+
+async function registrarErro(env, ip, linha) {
+
+    if (!ip) return;
+
+    const agora = Date.now();
+
+    /* Meia hora sem errar e a conta zera. Sem isso, quem usa o painel
+       todo dia acumularia um erro de digitação por semana e um dia seria
+       bloqueado por nada. */
+    const recentes = linha && (agora - linha.ultimo) < ESQUECER_ERROS_MS ? linha.erros : 0;
+    const erros = recentes + 1;
+
+    let bloqueadoAte = 0;
+
+    if (erros >= ERROS_ATE_BLOQUEAR) {
+        const rodada = erros - ERROS_ATE_BLOQUEAR;
+        bloqueadoAte = agora + Math.min(BLOQUEIO_BASE_MS * Math.pow(2, rodada), BLOQUEIO_MAXIMO_MS);
+    }
+
+    await env.DB.prepare(
+        `INSERT INTO tentativas_painel (ip, erros, ultimo, bloqueado_ate)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(ip) DO UPDATE SET
+            erros = excluded.erros, ultimo = excluded.ultimo,
+            bloqueado_ate = excluded.bloqueado_ate`
+    ).bind(ip, erros, agora, bloqueadoAte).run().catch(() => {});
+
+}
+
+/* Varre as linhas velhas de vez em quando.
+   Uma linha só se apaga quando alguém DAQUELE ip acerta a senha, e quem
+   ataca nunca acerta — então sem isto a tabela só cresce.
+
+   Chamada nas recusas, e não no acerto, por dois motivos: o painel bate
+   em rota protegida a cada 30 segundos e não precisa pagar por isso; e
+   durante um ataque as recusas é que são muitas, que é exatamente
+   quando há o que varrer. */
+async function varrerDeVezEmQuando(env) {
+
+    if (Math.random() >= 0.05) return;   // uma em vinte recusas
+
+    await env.DB.prepare(`DELETE FROM tentativas_painel WHERE ultimo < ?1`)
+        .bind(Date.now() - LINHA_VELHA_MS).run().catch(() => {});
+
+}
+
+async function limparTentativas(env, ip) {
+
+    if (!ip) return;
+
+    await env.DB.prepare(`DELETE FROM tentativas_painel WHERE ip = ?1`)
+        .bind(ip).run().catch(() => {});
+
+}
+
+/* ================= LIMITE DAS ROTAS PÚBLICAS =================
+
+   /pedidos e /busca são abertas de propósito: quem chama é o site, sem
+   senha nenhuma. Só que "aberta" sem limite quer dizer que qualquer um
+   enfia mil pedidos falsos na fila da loja — o alarme do painel toca a
+   noite toda, o relatório vira lixo e o balcão não sabe mais o que é
+   venda de verdade.
+
+   O limite aqui é FOLGADO, e tem que ser. No Brasil muita gente navega
+   atrás do mesmo IP de operadora, então um teto apertado barraria
+   cliente de verdade. Vinte pedidos por hora do mesmo IP é muito acima
+   do normal para uma farmácia de bairro, e ainda assim corta o abuso.
+
+   Recusar um pedido NÃO perde a venda: o site manda o pedido para cá
+   com "dispara e esquece" e abre o WhatsApp de qualquer jeito, que é o
+   canal que fecha a compra. O que se perde é a linha no painel — ruim,
+   mas não é a venda.
+
+   Janela fixa de uma hora, e não janela deslizante: é uma leitura e uma
+   escrita por chamada, contra as várias que uma deslizante exigiria. E
+   quem estourou não gera escrita nenhuma, então um ataque custa menos
+   banco que custa hoje, não mais.
+*/
+
+const JANELA_PUBLICA_MS = 60 * 60 * 1000;
+const LIMITE_PEDIDOS_HORA = 20;    // cliente de verdade faz 1 ou 2
+const LIMITE_BUSCAS_HORA = 120;    // a busca é deduplicada por visita no site
+
+/* Devolve 0 quando pode passar, ou os segundos que faltam da janela. */
+async function faltaParaLiberar(env, request, rotulo, teto) {
+
+    const ip = ipDeQuemChama(request);
+
+    // sem IP não há como contar, e barrar todo mundo seria pior
+    if (!ip) return 0;
+
+    const chave = ip + "|" + rotulo;
+    const agora = Date.now();
+
+    const linha = await env.DB.prepare(
+        `SELECT contagem, janela FROM limite_publico WHERE chave = ?1`
+    ).bind(chave).first().catch(() => null);
+
+    const naJanela = linha && (agora - linha.janela) < JANELA_PUBLICA_MS;
+    const contagem = naJanela ? linha.contagem : 0;
+    const inicio = naJanela ? linha.janela : agora;
+
+    if (contagem >= teto) {
+        /* Estourou: devolve sem gravar. A janela não se estende, então a
+           liberação acontece uma hora depois do PRIMEIRO acesso, e não
+           uma hora depois da última tentativa — insistir não castiga. */
+        return Math.max(1, Math.ceil((inicio + JANELA_PUBLICA_MS - agora) / 1000));
+    }
+
+    await env.DB.prepare(
+        `INSERT INTO limite_publico (chave, contagem, janela) VALUES (?1, ?2, ?3)
+         ON CONFLICT(chave) DO UPDATE SET
+            contagem = excluded.contagem, janela = excluded.janela`
+    ).bind(chave, contagem + 1, inicio).run().catch(() => {});
+
+    return 0;
+
+}
+
+/* Mesma ideia da varredura das tentativas: janela vencida é linha morta,
+   e sem limpeza a tabela guardaria um IP de visitante para sempre. */
+async function varrerLimitePublico(env) {
+
+    if (Math.random() >= 0.02) return;
+
+    await env.DB.prepare(`DELETE FROM limite_publico WHERE janela < ?1`)
+        .bind(Date.now() - 2 * JANELA_PUBLICA_MS).run().catch(() => {});
+
+}
+
+/* Devolve null quando pode passar, ou a resposta de recusa. */
+async function barrarRotaPublica(env, request, rotulo, teto, recado) {
+
+    await varrerLimitePublico(env);
+
+    const faltam = await faltaParaLiberar(env, request, rotulo, teto);
+
+    if (!faltam) return null;
+
+    return json({ erro: recado }, 429, { "Retry-After": String(faltam) });
+
+}
+
+/* O portão. Devolve null quando pode passar, ou a resposta de recusa. */
+async function barrarSeNaoPuder(request, env) {
+
+    const ip = ipDeQuemChama(request);
+
+    const linha = await lerTentativas(env, ip);
+
+    const faltam = quantoFaltaDoBloqueio(linha);
+
+    if (faltam > 0) {
+        await varrerDeVezEmQuando(env);
+        const segundos = Math.ceil(faltam / 1000);
+        return json({
+            erro: `Tentativas demais. Tente de novo em ${Math.ceil(segundos / 60)} minuto(s).`
+        }, 429, { "Retry-After": String(segundos) });
+    }
+
+    if (!senhaConfere(request, env)) {
+        await registrarErro(env, ip, linha);
+        await varrerDeVezEmQuando(env);
+        return json({ erro: "Não autorizado." }, 401);
+    }
+
+    /* Acertou: a conta daquele IP zera. Quem erra duas vezes e acerta na
+       terceira não fica com dois erros guardados para somar na próxima
+       vez que se atrapalhar.
+
+       Só apaga se houver linha: o painel bate em rota protegida a cada 30
+       segundos e, sem esta guarda, seria um DELETE por chamada — escrita
+       no D1 à toa, o dia inteiro, para apagar nada. */
+    if (linha) await limparTentativas(env, ip);
+
+    return null;
+
+}
+
+/* ============ PORTEIRO DO CATÁLOGO (imagens e publicação) ============
+
+   O padronizador precisa escrever em dois outros workers: o
+   imagens-proxy (salvar imagem e correção) e o publish-proxy
+   (sobrescrever o produtos.json do site). Cada um tem a sua chave.
+
+   Até aqui essas duas chaves iam para o navegador, porque o frontend as
+   recebia em VITE_IMAGENS_KEY e VITE_PUBLISH_KEY — e o Vite embute toda
+   variável VITE_ no pacote em tempo de build. Resultado: as duas
+   ficavam legíveis em texto no JavaScript que qualquer um baixa. Quem
+   lesse podia trocar a imagem de qualquer produto e, com a de
+   publicação, reescrever o catálogo inteiro do site, preço por preço.
+
+   Trocar as chaves não resolvia: no build seguinte elas voltavam para o
+   pacote. O que resolve é o navegador nunca mais vê-las.
+
+   Então as chaves passam a morar AQUI, como secret deste worker, e o
+   navegador fala com estas rotas usando a senha do painel — a mesma que
+   ele já usa para ver a fila de pedidos, já com limite de tentativas.
+   Este worker é que carimba a chave de verdade e repassa.
+
+   Só a ESCRITA passa por aqui. Ler imagem continua indo direto ao
+   imagens-proxy: imagem é pública por natureza, são milhares por visita
+   e fazer cada uma dar a volta por este worker seria lento e caro sem
+   proteger nada.
+*/
+
+// publicar o catálogo inteiro são uns 3 MB de JSON; 25 cobre com folga
+const MAX_ENCAMINHAR_BYTES = 25 * 1024 * 1024;
+
+/* Repassa a chamada ao worker de destino, trocando a senha do painel
+   (que o navegador tem) pela chave daquele worker (que ele não tem). */
+async function encaminhar(request, env, { destino, caminho, cabecalho, chave, metodo }) {
+
+    if (!destino || !chave) {
+        /* 501 e não 500: não é defeito, é configuração que falta. A
+           mensagem diz qual, senão vira caça ao tesouro no painel. */
+        return json({
+            erro: "Este worker ainda não foi configurado para falar com o " +
+                  "catálogo. Faltam as variáveis no painel do Cloudflare."
+        }, 501);
+    }
+
+    const url = destino.replace(/\/+$/, "") + caminho;
+
+    const opcoes = {
+        method: metodo || request.method,
+        headers: { [cabecalho]: chave }
+    };
+
+    if (opcoes.method !== "GET" && opcoes.method !== "HEAD") {
+        const corpo = await request.arrayBuffer();
+
+        if (corpo.byteLength > MAX_ENCAMINHAR_BYTES) {
+            return json({ erro: "Conteúdo grande demais." }, 413);
+        }
+
+        opcoes.body = corpo;
+        opcoes.headers["Content-Type"] =
+            request.headers.get("content-type") || "application/json";
+    }
+
+    let resposta;
+
+    try {
+        resposta = await fetch(url, opcoes);
+    } catch (erro) {
+        console.error("encaminhar:", erro);
+        return json({ erro: "Não consegui falar com o serviço de catálogo." }, 502);
+    }
+
+    /* Devolve o corpo em fluxo, sem ler na memória: a extração do PDV
+       passa dos 2 MB e lê-la inteira aqui só para repassar seria
+       desperdício. O status vem do destino, para o padronizador
+       continuar vendo o erro real em vez de um 500 genérico. */
+    return new Response(resposta.body, {
+        status: resposta.status,
+        headers: {
+            "Content-Type": resposta.headers.get("content-type") || "application/json",
+            "Cache-Control": "no-store",
+            ...CORS_HEADERS
+        }
+    });
+
+}
+
+const imagens = (env) => ({
+    destino: env.IMAGENS_PROXY_URL,
+    cabecalho: "X-Imagens-Key",
+    chave: env.IMAGENS_KEY
+});
+
+const publicacao = (env) => ({
+    destino: env.PUBLISH_WORKER_URL,
+    cabecalho: "X-Publish-Key",
+    chave: env.PUBLISH_KEY
+});
 
 /* ========================= GRAVAR ========================= */
 
@@ -1011,13 +1343,25 @@ export default {
 
         try {
 
-            // gravar pedido: aberto, porque quem chama é o site público
+            // gravar pedido: aberto, porque quem chama é o site público —
+            // mas com teto por IP, senão qualquer um enche a fila da loja
             if (request.method === "POST" && rota === "/pedidos") {
+                const cheio = await barrarRotaPublica(
+                    env, request, "pedidos", LIMITE_PEDIDOS_HORA,
+                    "Muitos pedidos deste acesso em pouco tempo. " +
+                    "Se foi você mesmo, fale com a gente pelo WhatsApp."
+                );
+                if (cheio) return cheio;
                 return await tratarNovoPedido(request, env);
             }
 
             // idem: quem grava é o site público
             if (request.method === "POST" && rota === "/busca") {
+                const cheio = await barrarRotaPublica(
+                    env, request, "busca", LIMITE_BUSCAS_HORA,
+                    "Muitas buscas deste acesso em pouco tempo."
+                );
+                if (cheio) return cheio;
                 return await tratarNovaBusca(request, env);
             }
 
@@ -1047,9 +1391,8 @@ export default {
             }
 
             // daqui para baixo é a loja olhando os próprios dados
-            if (!autorizado(request, env)) {
-                return json({ erro: "Não autorizado." }, 401);
-            }
+            const recusa = await barrarSeNaoPuder(request, env);
+            if (recusa) return recusa;
 
             if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env);
             if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env);
@@ -1072,6 +1415,73 @@ export default {
             if (request.method === "GET"  && rota === "/promocoes/todas")   return await tratarPromocoesDaLoja(request, env);
             if (request.method === "POST" && rota === "/promocoes")         return await tratarSalvarPromocoes(request, env);
             if (request.method === "POST" && rota === "/promocoes/excluir") return await tratarExcluirPromocoes(request, env);
+
+            /* Catálogo: a senha do painel já foi conferida acima, então
+               daqui para baixo quem chama provou quem é. Este worker
+               carimba a chave do destino, que o navegador não tem. */
+            if (request.method === "POST" && rota === "/catalogo/imagem") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/" });
+            }
+
+            if (request.method === "POST" && rota === "/catalogo/correcao") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/correcoes" });
+            }
+
+            if (request.method === "POST" && rota === "/catalogo/publicar") {
+                return await encaminhar(request, env, { ...publicacao(env), caminho: "/" });
+            }
+
+            // a extração do PDV, que traz preço de custo e por isso não
+            // pode mais ser baixada sem credencial
+            if (request.method === "GET" && rota === "/catalogo/extracao") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/extracao" });
+            }
+
+            if (request.method === "GET" && rota === "/catalogo/extracao/arquivo") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/extracao/arquivo" });
+            }
+
+            if (request.method === "POST" && rota === "/catalogo/extracao/importado") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/extracao/importado" });
+            }
+
+            if (request.method === "POST" && rota === "/catalogo/extracao/descartar") {
+                return await encaminhar(request, env, {
+                    ...imagens(env), caminho: "/extracao", metodo: "DELETE"
+                });
+            }
+
+            // família de uma categoria, listas de referência (CMED e
+            // distribuidora) e produtos excluídos — tudo escrita no
+            // imagens-proxy, que antes o navegador fazia com a chave
+            if (request.method === "POST" && rota === "/catalogo/familia") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/familias" });
+            }
+
+            const referencia = rota.match(/^\/catalogo\/referencia\/([a-z0-9-]+)$/);
+            if (request.method === "POST" && referencia) {
+                return await encaminhar(request, env, {
+                    ...imagens(env), caminho: `/referencias/${referencia[1]}`
+                });
+            }
+
+            if (request.method === "POST" && rota === "/catalogo/excluido") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/excluidos" });
+            }
+
+            const excluido = rota.match(/^\/catalogo\/excluido\/(.+)$/);
+            if (request.method === "DELETE" && excluido) {
+                return await encaminhar(request, env, {
+                    ...imagens(env), caminho: `/excluidos/${excluido[1]}`, metodo: "DELETE"
+                });
+            }
+
+            const imagemEan = rota.match(/^\/catalogo\/imagem\/([0-9]+)$/);
+            if (request.method === "DELETE" && imagemEan) {
+                return await encaminhar(request, env, {
+                    ...imagens(env), caminho: `/${imagemEan[1]}`, metodo: "DELETE"
+                });
+            }
 
             const umPedido = rota.match(/^\/pedidos\/(.+)$/);
             if (request.method === "GET" && umPedido) {

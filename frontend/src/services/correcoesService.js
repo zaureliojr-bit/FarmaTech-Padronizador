@@ -6,7 +6,11 @@
 // Mesma normalização do imagemHostingService.js - sem isso, uma URL com
 // barra final vira "//correcoes" e quebra o roteamento do worker.
 const PROXY_URL = (import.meta.env.VITE_IMAGENS_PROXY_URL || "").replace(/\/+$/, "");
-const PROXY_KEY = import.meta.env.VITE_IMAGENS_KEY;
+
+// Ler correção continua direto no imagens-proxy (é leitura pública).
+// Gravar passa pelo porteiro, com a senha do painel - a VITE_IMAGENS_KEY
+// que ficava aqui ia embutida no pacote e era legível por qualquer um.
+import { PORTEIRO_URL, cabecalhoPainel } from "./credencialPainel";
 
 // Mesmo limite de 100 parâmetros por consulta do D1 - ver imagemHostingService.js.
 const EANS_POR_PAGINA = 100;
@@ -68,17 +72,26 @@ export async function buscarCorrecoes(eans) {
  */
 export async function salvarCorrecao(ean, correcao) {
 
-    if (!PROXY_URL || !ean) return;
+    if (!PORTEIRO_URL || !ean) return;
+
+    /* pedir: false de propósito. Salvar correção acontece de passagem,
+       enquanto a pessoa arruma a tabela — abrir um prompt de senha no
+       meio disso interromperia o trabalho por algo que nem é o foco.
+       Sem senha, a correção simplesmente não sobe, e a próxima ação que
+       realmente precisa dela (salvar imagem, publicar) é que pergunta. */
+    const credencial = cabecalhoPainel({ pedir: false });
+
+    if (!credencial) return;
 
     try {
 
-        await fetch(`${PROXY_URL}/correcoes`, {
+        await fetch(`${PORTEIRO_URL}/catalogo/correcao`, {
 
             method: "POST",
 
             headers: {
                 "Content-Type": "application/json",
-                "X-Imagens-Key": PROXY_KEY || ""
+                ...credencial
             },
 
             body: JSON.stringify({ ean: String(ean), ...correcao })

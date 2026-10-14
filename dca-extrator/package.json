@@ -1,0 +1,16 @@
+{
+  "name": "dca-extrator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Extrai o catálogo da DCA Distribuidor (EAN + descrição) pra usar como Lista da distribuidora no FarmaTech Padronizador.",
+  "type": "commonjs",
+  "main": "extrair.js",
+  "scripts": {
+    "extrair": "node extrair.js",
+    "postinstall": "playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.47.0",
+    "xlsx": "^0.18.5"
+  }
+}

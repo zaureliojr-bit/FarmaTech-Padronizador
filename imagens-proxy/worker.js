@@ -19,6 +19,12 @@
 // importar - preço/estoque/código continuam de fora de propósito, são
 // dados que têm que ficar por loja, nunca compartilhados.
 //
+// E recebe a planilha que o extrator do Firebird (firebird-extrator/)
+// gera no PC da loja - o script manda ela pra cá logo depois de gerar,
+// e o painel, ao abrir, pergunta se tem algo novo esperando (rotas
+// /extracao*) pra avisar com um botão, em vez de precisar arrastar o
+// arquivo manualmente toda vez.
+//
 // Bindings necessários (Configurações -> Bindings, no painel):
 //   R2 bucket        -> nome da variável: IMAGENS_BUCKET
 //   D1 database       -> nome da variável: DB (rode schema.sql nela antes)
@@ -27,7 +33,7 @@
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Imagens-Key"
 };
 
@@ -113,6 +119,20 @@ async function tratarServirImagem(ean, env) {
 
 }
 
+async function tratarExcluir(ean, request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.IMAGENS_BUCKET.delete(ean);
+
+    await env.DB.prepare(`DELETE FROM imagens WHERE ean = ?1`).bind(ean).run();
+
+    return json({ sucesso: true });
+
+}
+
 async function tratarLote(request, env) {
 
     const url = new URL(request.url);
@@ -182,6 +202,329 @@ async function tratarSalvarCorrecao(request, env) {
 
 }
 
+async function tratarSalvarFamilia(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const { categoria, familiaId } = await request.json().catch(() => ({}));
+
+    if (!categoria || !familiaId) {
+        return json({ erro: "'categoria' e 'familiaId' são obrigatórios." }, 400);
+    }
+
+    // Mesma normalização do familias.js (maiúscula, espaços colapsados) -
+    // sem isso "Perfumaria" e "PERFUMARIA" virariam entradas diferentes
+    // e o front-end não acharia a correspondência na hora de comparar.
+    const chave = categoria.trim().toUpperCase().replace(/\s+/g, " ");
+
+    await env.DB.prepare(
+        `INSERT INTO familias_categoria (categoria, familia_id, atualizado_em)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(categoria) DO UPDATE SET
+            familia_id = excluded.familia_id,
+            atualizado_em = excluded.atualizado_em`
+    ).bind(chave, familiaId, Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+/* ===================== EXTRAÇÃO DO FIREBIRD ===================== */
+//
+// O extrator (firebird-extrator/) roda no PC da loja, gera o .xlsx e
+// manda pra cá logo em seguida - o painel, ao abrir, pergunta se tem
+// algo novo esperando e avisa a loja com um botão, em vez de precisar
+// arrastar o arquivo manualmente toda vez.
+
+const CHAVE_ARQUIVO_EXTRACAO = "extracoes/pendente.xlsx";
+
+/* O que NÃO pode sair pela rota curinga de imagem.
+
+   O balde é indexado por EAN, que é só dígito — então qualquer chave
+   com barra é de outra coisa: a extração do PDV (com preço de custo) e
+   as listas de referência. Barrar pelo formato, e não por uma lista de
+   prefixos, cobre também o que vier a ser guardado aí amanhã. */
+function chaveReservada(nome) {
+
+    return String(nome || "").includes("/");
+
+}
+
+async function tratarReceberExtracao(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const url = new URL(request.url);
+    const nomeArquivo = (url.searchParams.get("nome") || "produtos_extraidos.xlsx").slice(0, 200);
+
+    const bytes = await request.arrayBuffer();
+
+    if (!bytes.byteLength) {
+        return json({ erro: "Arquivo vazio." }, 400);
+    }
+
+    await env.IMAGENS_BUCKET.put(CHAVE_ARQUIVO_EXTRACAO, bytes, {
+        httpMetadata: {
+            contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        }
+    });
+
+    await env.DB.prepare(
+        `INSERT INTO extracoes (nome_arquivo, tamanho, enviado_em)
+         VALUES (?1, ?2, ?3)`
+    ).bind(nomeArquivo, bytes.byteLength, Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarStatusExtracao(env) {
+
+    const pendente = await env.DB.prepare(
+        `SELECT id, nome_arquivo, tamanho, enviado_em FROM extracoes
+          WHERE importado_em IS NULL
+          ORDER BY id DESC LIMIT 1`
+    ).first();
+
+    if (!pendente) return json({ pendente: false });
+
+    return json({
+        pendente: true,
+        nomeArquivo: pendente.nome_arquivo,
+        tamanho: pendente.tamanho,
+        enviadoEm: pendente.enviado_em
+    });
+
+}
+
+async function tratarArquivoExtracao(request, env) {
+
+    /* PEDE CHAVE, e isto não é opcional.
+
+       A planilha do PDV traz a coluna "Preço Custo" de cada produto. O
+       produtos.json publicado remove esse campo justamente porque
+       margem não é dado de vitrine - servir a planilha crua sem chave
+       desfaz esse cuidado e entrega a margem da loja inteira a quem
+       souber o endereço. Esta rota já ficou aberta em produção, e a
+       planilha de 2,7 MB esteve baixável por qualquer um.
+
+       Quem baixa é o painel, que já tem a chave para marcar como
+       importada - então exigir aqui não custa nada a ele. */
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const objeto = await env.IMAGENS_BUCKET.get(CHAVE_ARQUIVO_EXTRACAO);
+
+    if (!objeto) return json({ erro: "Nenhuma extração disponível." }, 404);
+
+    return new Response(objeto.body, {
+        headers: {
+            "Content-Type": objeto.httpMetadata?.contentType || "application/octet-stream",
+            // nunca em cache: é dado de custo, e cada extração é outra
+            "Cache-Control": "no-store",
+            ...CORS_HEADERS
+        }
+    });
+
+}
+
+async function tratarMarcarImportada(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.DB.prepare(
+        `UPDATE extracoes SET importado_em = ?1 WHERE importado_em IS NULL`
+    ).bind(Date.now()).run();
+
+    /* Apaga o arquivo, e não só marca a data.
+
+       Marcar sozinho deixava a planilha no balde para sempre: a tabela
+       de custo da loja parada à espera de alguém achar o endereço, sem
+       servir mais para nada, já que o status passa a dizer "nada
+       pendente". A linha no D1 continua, que é o histórico; o que sai é
+       o arquivo. */
+    await env.IMAGENS_BUCKET.delete(CHAVE_ARQUIVO_EXTRACAO).catch(() => {});
+
+    return json({ sucesso: true });
+
+}
+
+/* Descarta uma extração errada sem ter de importá-la antes. */
+async function tratarDescartarExtracao(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.DB.prepare(
+        `UPDATE extracoes SET importado_em = ?1 WHERE importado_em IS NULL`
+    ).bind(Date.now()).run();
+
+    await env.IMAGENS_BUCKET.delete(CHAVE_ARQUIVO_EXTRACAO).catch(() => {});
+
+    return json({ sucesso: true });
+
+}
+
+/* ===================== LISTAS DE REFERÊNCIA (CMED/distribuidora) ===================== */
+//
+// Até aqui, a lista da CMED e a da distribuidora só viviam no
+// IndexedDB de quem usava o padronizador - um site em outro domínio
+// (ex.: o painel da loja) não enxerga esse IndexedDB (armazenamento de
+// navegador é isolado por origem). Guardando aqui, qualquer site
+// consegue buscar a última versão, sem depender de reimportar a
+// planilha manualmente em cada lugar que precisar dela.
+
+// Nomes aceitos - trava a chave num conjunto pequeno de propósito,
+// pra não virar um balde genérico de qualquer coisa que alguém queira
+// guardar (a rota tem a mesma IMAGENS_KEY das outras, então travar o
+// nome limita o estrago de uma chave vazada).
+const CHAVES_REFERENCIA_VALIDAS = new Set(["cmed", "distribuidor"]);
+
+function caminhoReferencia(chave) {
+
+    return `referencias/${chave}.json`;
+
+}
+
+async function tratarSalvarReferencia(chave, request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    if (!CHAVES_REFERENCIA_VALIDAS.has(chave)) {
+        return json({ erro: "Referência desconhecida." }, 400);
+    }
+
+    const bytes = await request.arrayBuffer();
+
+    if (!bytes.byteLength) {
+        return json({ erro: "Arquivo vazio." }, 400);
+    }
+
+    await env.IMAGENS_BUCKET.put(caminhoReferencia(chave), bytes, {
+        httpMetadata: { contentType: "application/json" }
+    });
+
+    await env.DB.prepare(
+        `INSERT INTO referencias (chave, tamanho, atualizado_em)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(chave) DO UPDATE SET
+            tamanho = excluded.tamanho,
+            atualizado_em = excluded.atualizado_em`
+    ).bind(chave, bytes.byteLength, Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarServirReferencia(chave, env) {
+
+    if (!CHAVES_REFERENCIA_VALIDAS.has(chave)) {
+        return json({ erro: "Referência desconhecida." }, 400);
+    }
+
+    const objeto = await env.IMAGENS_BUCKET.get(caminhoReferencia(chave));
+
+    if (!objeto) return json({ erro: "Referência ainda não enviada." }, 404);
+
+    return new Response(objeto.body, {
+        headers: {
+            "Content-Type": "application/json",
+            // 1h de cache - a lista só muda quando alguém sobe uma nova
+            // (mensalmente, no caso da CMED), não precisa buscar a cada
+            // carregamento de página.
+            "Cache-Control": "public, max-age=3600",
+            ...CORS_HEADERS
+        }
+    });
+
+}
+
+/* ===================== PRODUTOS EXCLUÍDOS (lixo do PDV) ===================== */
+//
+// Taxa de entrega, item de teste do sistema, cadastro duplicado -
+// essas linhas voltam em toda extração nova do PDV porque continuam
+// lá, cadastradas por engano. Marcar o código uma vez aqui faz o
+// padronizador (e a publicação automática pelo painel) ignorar
+// sozinho em toda importação futura, sem precisar excluir de novo.
+
+async function tratarExcluirProduto(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const { codigo, motivo } = await request.json().catch(() => ({}));
+
+    if (!codigo) {
+        return json({ erro: "'codigo' é obrigatório." }, 400);
+    }
+
+    await env.DB.prepare(
+        `INSERT INTO produtos_excluidos (codigo, motivo, excluido_em)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(codigo) DO UPDATE SET
+            motivo = excluded.motivo,
+            excluido_em = excluded.excluido_em`
+    ).bind(String(codigo), motivo || "", Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarRestaurarProduto(codigo, request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.DB.prepare(`DELETE FROM produtos_excluidos WHERE codigo = ?1`).bind(codigo).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarListarExcluidos(env) {
+
+    const { results } = await env.DB.prepare(
+        `SELECT codigo, motivo, excluido_em FROM produtos_excluidos`
+    ).all();
+
+    const mapa = {};
+
+    (results || []).forEach((linha) => {
+        mapa[linha.codigo] = { motivo: linha.motivo || "", excluidoEm: linha.excluido_em };
+    });
+
+    return json(mapa);
+
+}
+
+async function tratarListarFamilias(env) {
+
+    const { results } = await env.DB.prepare(
+        `SELECT categoria, familia_id FROM familias_categoria`
+    ).all();
+
+    const mapa = {};
+
+    (results || []).forEach((linha) => {
+        mapa[linha.categoria] = linha.familia_id;
+    });
+
+    return json(mapa);
+
+}
+
 async function tratarLoteCorrecoes(request, env) {
 
     const url = new URL(request.url);
@@ -245,9 +588,81 @@ export default {
             return tratarLoteCorrecoes(request, env);
         }
 
+        if (request.method === "POST" && caminho === "/familias") {
+            return tratarSalvarFamilia(request, env);
+        }
+
+        if (request.method === "GET" && caminho === "/familias") {
+            return tratarListarFamilias(env);
+        }
+
+        if (request.method === "POST" && caminho === "/extracao") {
+            return tratarReceberExtracao(request, env);
+        }
+
+        if (request.method === "GET" && caminho === "/extracao") {
+            return tratarStatusExtracao(env);
+        }
+
+        if (request.method === "GET" && caminho === "/extracao/arquivo") {
+            return tratarArquivoExtracao(request, env);
+        }
+
+        if (request.method === "POST" && caminho === "/extracao/importado") {
+            return tratarMarcarImportada(request, env);
+        }
+
+        if (request.method === "DELETE" && caminho === "/extracao") {
+            return tratarDescartarExtracao(request, env);
+        }
+
+        const referencia = caminho.match(/^\/referencias\/([a-z0-9-]+)$/);
+        if (referencia && request.method === "POST") {
+            return tratarSalvarReferencia(referencia[1], request, env);
+        }
+        if (referencia && request.method === "GET") {
+            return tratarServirReferencia(referencia[1], env);
+        }
+
+        if (request.method === "POST" && caminho === "/excluidos") {
+            return tratarExcluirProduto(request, env);
+        }
+
+        if (request.method === "GET" && caminho === "/excluidos") {
+            return tratarListarExcluidos(env);
+        }
+
+        const excluido = caminho.match(/^\/excluidos\/(.+)$/);
+        if (excluido && request.method === "DELETE") {
+            return tratarRestaurarProduto(decodeURIComponent(excluido[1]), request, env);
+        }
+
         if (request.method === "GET" && caminho.length > 1) {
             const ean = decodeURIComponent(caminho.slice(1));
+
+            /* O balde guarda imagem por EAN e, sob prefixo, coisa que
+               não é imagem: a extração do PDV e as listas de
+               referência. Como esta rota é o curinga que serve QUALQUER
+               chave do balde, sem esta recusa um GET
+               /extracoes/pendente.xlsx entregaria a planilha de custo
+               por aqui, passando por fora da chave que a rota
+               /extracao/arquivo exige. EAN é só dígito, então nada
+               legítimo tem barra no nome. */
+            if (chaveReservada(ean)) {
+                return json({ erro: "Imagem não encontrada." }, 404);
+            }
+
             return tratarServirImagem(ean, env);
+        }
+
+        if (request.method === "DELETE" && caminho.length > 1) {
+            const ean = decodeURIComponent(caminho.slice(1));
+
+            if (chaveReservada(ean)) {
+                return json({ erro: "Imagem não encontrada." }, 404);
+            }
+
+            return tratarExcluir(ean, request, env);
         }
 
         return json({ erro: "Rota não encontrada." }, 404);
