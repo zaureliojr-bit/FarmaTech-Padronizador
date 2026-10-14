@@ -1636,6 +1636,263 @@ async function tratarListarLojas(request, env, dono) {
 
 }
 
+/* Cadastra uma filial nova. Só o dono.
+
+   O que esta rota faz: as três linhas de banco — a farmácia, o horário e
+   o acesso. O que ela NÃO faz, e não pode fazer: criar o banco D1 dela e
+   ligar o binding no worker.
+
+   Isso exigiria um token de API da Cloudflare guardado aqui dentro. O
+   token capaz de mexer em binding de worker é capaz de reescrever o
+   próprio worker — ou seja, guardá-lo aqui é guardar, dentro da casa, a
+   chave que abre a casa. Dois cliques manuais por cliente novo custam
+   menos que isso.
+
+   A filial nasce SEMPRE desligada. Ligar é um passo à parte, que só
+   passa depois de o worker conferir que o banco dela está no ar — ver
+   tratarAtivarLoja. Sem isso, o caminho mais curto entre "cadastrei" e
+   "a dona entrou e viu a fila da farmácia errada" seria um esquecimento. */
+async function tratarCriarLoja(request, env, dono) {
+
+    if (!dono) return json({ erro: "Só o dono da plataforma cadastra filial." }, 403);
+
+    const corpo = await request.json().catch(() => null);
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    const slug = String(corpo.slug || "").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 60);
+    const nome = texto(corpo.nome, 120);
+
+    if (!slug) return json({ erro: "Escolha o apelido da filial (só letra, número e hífen)." }, 400);
+    if (!nome) return json({ erro: "Escreva o nome da farmácia." }, 400);
+
+    const jaExiste = await env.DB.prepare(`SELECT slug FROM lojas WHERE slug = ?1`).bind(slug).first();
+    if (jaExiste) return json({ erro: `Já existe uma filial com o apelido "${slug}".` }, 409);
+
+    /* O nome do binding é derivado do slug AQUI, uma vez, e gravado. Nas
+       consultas ele é sempre lido da coluna, nunca recalculado: derivar
+       na hora de usar faria uma filial renomeada apontar silenciosamente
+       para outro banco. */
+    const banco = "DB_" + slug.replace(/-/g, "_").toUpperCase();
+
+    const numeroOuNulo = (v) => (v === "" || v === null || v === undefined ? null : numero(v));
+
+    await env.DB.prepare(
+        `INSERT INTO lojas (
+            slug, nome, razao_social, cnpj,
+            logradouro, numero, complemento, bairro, cidade, uf, cep,
+            latitude, longitude, whatsapp, telefone,
+            farmaceutico, crf, rotulo_responsavel, autorizacao, licenca_ms,
+            raio_entrega_km, frete_gratis_acima, fuso, ativo
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,0)`
+    ).bind(
+        slug, nome,
+        texto(corpo.razaoSocial, 120), texto(corpo.cnpj, 20),
+        texto(corpo.logradouro, 120), texto(corpo.numeroEndereco, 20),
+        texto(corpo.complemento, 60), texto(corpo.bairro, 80),
+        texto(corpo.cidade, 80), texto(corpo.uf, 2).toUpperCase(), texto(corpo.cep, 12),
+        numeroOuNulo(corpo.latitude), numeroOuNulo(corpo.longitude),
+        soDigitos(corpo.whatsapp), texto(corpo.telefone, 24),
+        texto(corpo.farmaceutico, 120), texto(corpo.crf, 20),
+        texto(corpo.rotuloResponsavel, 60) || "Farmacêutico(a) responsável",
+        texto(corpo.autorizacao, 120), texto(corpo.licencaMs, 60),
+        numero(corpo.raioEntregaKm) || 8,
+        numero(corpo.freteGratisAcima) || 0,
+        texto(corpo.fuso, 40) || "America/Sao_Paulo"
+    ).run();
+
+    /* Horário: o que vier, ou o da farmácia que já existe. Filial sem
+       horário nenhum mostraria "Fechado" para sempre. */
+    const horario = Array.isArray(corpo.horario) && corpo.horario.length
+        ? corpo.horario
+        : [0, 1, 2, 3, 4, 5, 6].map((dia) => ({
+            dia,
+            abre: dia === 0 ? "08:00" : "07:00",
+            fecha: dia === 0 ? "19:30" : "21:30"
+        }));
+
+    const horas = (v) => (/^\d{2}:\d{2}$/.test(String(v || "")) ? String(v) : "");
+
+    const comandos = [];
+    for (const faixa of horario) {
+        const dia = Math.round(numero(faixa?.dia));
+        const abre = horas(faixa?.abre);
+        const fecha = horas(faixa?.fecha);
+        if (dia < 0 || dia > 6 || !abre || !fecha) continue;
+        comandos.push(
+            env.DB.prepare(
+                `INSERT OR REPLACE INTO lojas_horario (slug, dia, abre, fecha) VALUES (?1,?2,?3,?4)`
+            ).bind(slug, dia, abre, fecha)
+        );
+    }
+
+    comandos.push(
+        env.DB.prepare(
+            `INSERT INTO lojas_acesso (slug, banco, prefixo_r2) VALUES (?1, ?2, ?3)
+             ON CONFLICT(slug) DO UPDATE SET banco = ?2, prefixo_r2 = ?3`
+        ).bind(slug, banco, slug)
+    );
+
+    await env.DB.batch(comandos);
+
+    return json({
+        sucesso: true,
+        slug,
+        banco,
+        prefixo: slug,
+        /* O que ainda falta, dito aqui para a tela não ter de saber a
+           regra: ela só mostra. */
+        faltaFazer: {
+            bancoD1: `farmatech-${slug}`,
+            binding: banco,
+            schema: "pedidos-proxy/schema.sql"
+        }
+    });
+
+}
+
+/* A filial está pronta para ser ligada?
+
+   Confere o que o cadastro sozinho não garante: que o banco dela existe,
+   está ligado a este worker e tem as tabelas de operação. É a diferença
+   entre "cadastrei" e "funciona".
+
+   Sem esta conferência, o caminho curto entre uma e outra seria a dona
+   da farmácia abrindo o painel e levando 503 — ou, pior, antes da
+   correção do banco vazio, vendo a fila da farmácia errada. */
+async function tratarConferirLoja(request, env, dono, slug) {
+
+    if (!dono) return json({ erro: "Só o dono da plataforma confere filial." }, 403);
+
+    const loja = await env.DB.prepare(
+        `SELECT l.slug, l.nome, l.ativo, a.banco, a.prefixo_r2,
+                CASE WHEN a.hash IS NOT NULL AND a.hash <> '' THEN 1 ELSE 0 END AS tem_senha
+           FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
+          WHERE l.slug = ?1`
+    ).bind(slug).first();
+
+    if (!loja) return json({ erro: "Essa filial não está cadastrada." }, 404);
+
+    const conferencias = [];
+    const anotar = (o, ok, recado) => conferencias.push({ o, ok, recado });
+
+    anotar("cadastro", true, `${loja.nome} está na tabela de lojas.`);
+
+    const horario = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM lojas_horario WHERE slug = ?1`
+    ).bind(slug).first();
+
+    anotar("horário", (horario?.n || 0) > 0,
+        horario?.n ? `${horario.n} faixas de horário cadastradas.`
+                   : "Sem horário: a loja apareceria sempre fechada.");
+
+    anotar("banco cadastrado", !!loja.banco,
+        loja.banco ? `A filial aponta para o binding ${loja.banco}.`
+                   : "Falta gravar o nome do binding na coluna banco.");
+
+    const db = loja.banco ? env[loja.banco] : null;
+
+    anotar("binding ligado ao worker", !!db,
+        db ? `O binding ${loja.banco} está ligado e respondendo.`
+           : `O binding ${loja.banco || "(nenhum)"} não existe neste worker. ` +
+             "Crie o banco D1, ligue o binding com esse nome e publique o worker.");
+
+    let tabelas = false;
+    if (db) {
+        try {
+            await db.prepare(`SELECT COUNT(*) AS n FROM pedidos`).first();
+            tabelas = true;
+        } catch (erro) {
+            console.error("conferirLoja:", erro);
+        }
+    }
+
+    anotar("tabelas de operação", tabelas,
+        tabelas ? "O banco da filial tem as tabelas de pedidos."
+                : "O banco está ligado, mas sem as tabelas. Rode o schema.sql no console dele.");
+
+    /* O banco da filial NÃO pode ser o mesmo da farmácia original: seria
+       o vazamento com outro nome. Como os dois são objetos de binding
+       diferentes mesmo apontando para o mesmo D1, a comparação direta
+       não serve — então pergunta ao banco se ele conhece a tabela de
+       lojas, que só existe no principal. */
+    let separado = true;
+    if (db && tabelas) {
+        try {
+            await db.prepare(`SELECT COUNT(*) AS n FROM lojas`).first();
+            separado = false;   // respondeu: é o banco principal
+        } catch (erro) {
+            separado = true;    // não conhece a tabela: é banco próprio
+        }
+    }
+
+    anotar("banco separado do principal", separado,
+        separado ? "O banco é só desta filial."
+                 : "ATENÇÃO: o binding está apontando para o banco principal. " +
+                   "A filial veria os pedidos da farmácia original.");
+
+    anotar("senha", !!loja.tem_senha,
+        loja.tem_senha ? "A filial já tem senha própria."
+                       : "Ainda sem senha própria. Cadastre antes de entregar o painel.");
+
+    const bloqueios = conferencias.filter((c) => !c.ok && c.o !== "senha");
+
+    return json({
+        slug,
+        nome: loja.nome,
+        ativo: !!loja.ativo,
+        podeLigar: bloqueios.length === 0,
+        conferencias
+    });
+
+}
+
+/* Liga ou desliga a filial.
+
+   Ligar só passa se a conferência passar: é a trava que impede uma
+   filial meio cadastrada chegar ao cliente. Desligar passa sempre —
+   tirar do ar nunca pode depender de nada estar certo. */
+async function tratarAtivarLoja(request, env, dono, slug) {
+
+    if (!dono) return json({ erro: "Só o dono da plataforma liga filial." }, 403);
+
+    const corpo = await request.json().catch(() => ({}));
+    const ligar = corpo.ativo !== false;
+
+    if (ligar) {
+        const conferido = await tratarConferirLoja(request, env, dono, slug);
+        const resultado = await conferido.json();
+
+        if (resultado.erro) return json(resultado, conferido.status);
+
+        if (!resultado.podeLigar) {
+            return json({
+                erro: "A filial ainda não está pronta para ligar.",
+                conferencias: resultado.conferencias
+            }, 409);
+        }
+    }
+
+    /* Pergunta se a filial existe, em vez de deduzir de meta.changes.
+
+       Deduzir do contador do driver é frágil de dois jeitos: o valor
+       depende de detalhe de implementação, e um UPDATE que não muda
+       nada — ligar o que já está ligado — poderia ser lido como "essa
+       filial não existe". Uma consulta a mais, numa rota que roda uma
+       vez por cliente novo, não é preço nenhum. */
+    const existe = await env.DB.prepare(
+        `SELECT slug FROM lojas WHERE slug = ?1`
+    ).bind(slug).first();
+
+    if (!existe) return json({ erro: "Essa filial não está cadastrada." }, 404);
+
+    await env.DB.prepare(
+        `UPDATE lojas SET ativo = ?2 WHERE slug = ?1`
+    ).bind(slug, ligar ? 1 : 0).run();
+
+    return json({ sucesso: true, slug, ativo: ligar });
+
+}
+
 /* O que o SITE lê. Aberto, como o preço da vitrine — que é público de
    qualquer jeito. Já sai filtrado por data: o site aplica e pronto. */
 async function tratarPromocoesPublicas(request, env, db) {
@@ -2069,6 +2326,21 @@ export default {
                não na tela: aba escondida não é permissão. */
             if (request.method === "GET" && rota === "/lojas") {
                 return await tratarListarLojas(request, env, porta.dono);
+            }
+
+            /* Cadastrar filial nova. Nasce sempre desligada. */
+            if (request.method === "POST" && rota === "/lojas") {
+                return await tratarCriarLoja(request, env, porta.dono);
+            }
+
+            const conferir = rota.match(/^\/lojas\/([a-z0-9-]+)\/conferir$/);
+            if (request.method === "GET" && conferir) {
+                return await tratarConferirLoja(request, env, porta.dono, conferir[1]);
+            }
+
+            const ativar = rota.match(/^\/lojas\/([a-z0-9-]+)\/ativo$/);
+            if (request.method === "POST" && ativar) {
+                return await tratarAtivarLoja(request, env, porta.dono, ativar[1]);
             }
 
             if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env, loja, db);

@@ -1,10 +1,33 @@
 # Cadastrar uma filial nova
 
-Cinco passos. Os quatro primeiros são uma vez por farmácia; o quinto é o
-único que exige publicar o worker de novo.
+**Pelo painel, na aba Filiais.** Preencha o formulário, salve, e a tela
+diz os dois passos que faltam na Cloudflare — e confere se você os fez
+antes de deixar ligar a filial.
 
-Nenhum deles cria site novo nem copia arquivo: a filial nova entra como
-linha de banco, e o site e o painel passam a atendê-la.
+Este documento descreve o caminho manual, pelo console do D1. Ele
+continua valendo para entender o que acontece por baixo, para corrigir um
+cadastro torto e para quando a tela não estiver disponível.
+
+## Por que dois passos continuam manuais
+
+Criar o banco D1 e ligar o binding exigem a API da Cloudflare com um
+token de conta. O token capaz de mexer em binding de worker é capaz de
+**reescrever o próprio worker** — guardá-lo dentro dele é guardar, dentro
+da casa, a chave que abre a casa. Dois cliques por cliente novo custam
+menos que isso.
+
+O que a tela faz, e vale mais do que automatizar: **confere**. Ela
+pergunta ao worker se o banco existe, se está ligado, se tem as tabelas,
+e — o mais importante — se ele não é o banco da farmácia original. Essa
+última é a que impede o erro caro: um binding apontando para o banco
+errado faria a filial nova mostrar os pedidos da primeira.
+
+---
+
+## O caminho manual, passo a passo
+
+Seis passos. Nenhum deles cria site novo nem copia arquivo: a filial nova
+entra como linha de banco, e o site e o painel passam a atendê-la.
 
 > **Antes de começar**, escolha o *apelido* dela — o `slug`. Só letra
 > minúscula, número e hífen. Ele vai no endereço da vitrine

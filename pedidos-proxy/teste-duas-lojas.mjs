@@ -71,8 +71,18 @@ function fingirD1(db) {
                 },
                 async run() {
                     const [s, a] = traduzir(sql, ligados);
-                    db.prepare(s).run(...a);
-                    return { success: true };
+                    const r = db.prepare(s).run(...a);
+                    /* meta.changes e meta.last_row_id existem no D1 de
+                       verdade, e handlers os usam. Sem eles aqui, o teste
+                       passava a mentir: um UPDATE que funcionou parecia
+                       não ter achado nada. */
+                    return {
+                        success: true,
+                        meta: {
+                            changes: Number(r.changes ?? 0),
+                            last_row_id: Number(r.lastInsertRowid ?? 0)
+                        }
+                    };
                 },
                 /* o batch do D1 recebe statements já ligados */
                 _executar() {
@@ -684,6 +694,144 @@ console.log("\n14. filial nova sem banco próprio não cai no banco da primeira"
     const primeira = await pedir("/fila", { loja: "mais-barato", senha: SENHA_WORKER });
     conferir("a farmácia original segue entrando com banco vazio",
         primeira.status === 200, String(primeira.status));
+}
+
+/* ---- 15. cadastrar filial pelo painel -------------------------------- */
+console.log("\n15. cadastrar filial sem escrever SQL");
+{
+    const comoDono = (caminho, corpo, metodo = "POST") => worker.fetch(new Request(
+        "https://exemplo.workers.dev" + caminho,
+        {
+            method: metodo,
+            headers: {
+                "X-Painel-Key": SENHA_DONO,
+                "Content-Type": "application/json",
+                "CF-Connecting-IP": "11.0.0." + Math.floor(Math.random() * 200 + 10)
+            },
+            ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) })
+        }
+    ), env);
+
+    limparTentativas();
+    const criada = await comoDono("/lojas", {
+        slug: "farma-nova", nome: "Farmácia Nova",
+        cnpj: "99.888.777/0001-66",
+        logradouro: "Rua das Flores", numeroEndereco: "42", bairro: "Centro",
+        cidade: "Santos", uf: "SP", cep: "11010-000",
+        whatsapp: "(13) 99999-8888",
+        farmaceutico: "Dra. Ana Lima", crf: "445566",
+        rotuloResponsavel: "Farmacêutica responsável",
+        raioEntregaKm: 10, fuso: "America/Sao_Paulo"
+    });
+
+    conferir("cadastra a filial", criada.status === 200, String(criada.status));
+    const dados = await criada.json();
+
+    conferir("deriva o nome do binding do apelido",
+        dados.banco === "DB_FARMA_NOVA", dados.banco);
+    conferir("e diz o que ainda falta fazer na Cloudflare",
+        !!(dados.faltaFazer && dados.faltaFazer.bancoD1 && dados.faltaFazer.binding),
+        JSON.stringify(dados.faltaFazer));
+
+    const linha = compartilhado.prepare(
+        "SELECT nome, cnpj, whatsapp, raio_entrega_km, ativo FROM lojas WHERE slug='farma-nova'").get();
+    conferir("gravou os dados", linha.nome === "Farmácia Nova" && linha.cnpj === "99.888.777/0001-66",
+        JSON.stringify(linha));
+    conferir("limpou o telefone para só dígitos", linha.whatsapp === "13999998888", linha.whatsapp);
+    conferir("nasce DESLIGADA", linha.ativo === 0, String(linha.ativo));
+
+    const h = compartilhado.prepare(
+        "SELECT COUNT(*) AS n FROM lojas_horario WHERE slug='farma-nova'").get().n;
+    conferir("e já com os 7 dias de horário padrão", h === 7, String(h));
+
+    limparTentativas();
+    const repetida = await comoDono("/lojas", { slug: "farma-nova", nome: "Outra" });
+    conferir("não deixa cadastrar o mesmo apelido duas vezes", repetida.status === 409, String(repetida.status));
+
+    /* ---- a conferência, que é a parte que importa ---- */
+    limparTentativas();
+    const conf1 = await (await comoDono("/lojas/farma-nova/conferir", undefined, "GET")).json();
+    conferir("a conferência reprova enquanto falta o banco",
+        conf1.podeLigar === false, JSON.stringify(conf1.conferencias?.map(c => c.o + "=" + c.ok)));
+
+    const semBinding = (conf1.conferencias || []).find((c) => c.o === "binding ligado ao worker");
+    conferir("e diz exatamente qual binding falta",
+        semBinding && !semBinding.ok && /DB_FARMA_NOVA/.test(semBinding.recado), semBinding?.recado);
+
+    limparTentativas();
+    const naoLiga = await comoDono("/lojas/farma-nova/ativo", { ativo: true });
+    conferir("e ligar é recusado com 409", naoLiga.status === 409, String(naoLiga.status));
+
+    /* Agora o binding existe, mas apontando para o banco PRINCIPAL — que
+       é o erro mais caro possível, e o que a conferência tem de pegar. */
+    limparTentativas();
+    const envErrado = { ...env, DB_FARMA_NOVA: fingirD1(compartilhado) };
+    const conf2 = await (await worker.fetch(new Request(
+        "https://exemplo.workers.dev/lojas/farma-nova/conferir",
+        { headers: { "X-Painel-Key": SENHA_DONO, "CF-Connecting-IP": "11.0.1.1" } }
+    ), envErrado)).json();
+
+    const separado = (conf2.conferencias || []).find((c) => c.o === "banco separado do principal");
+    conferir("pega o binding apontando para o banco principal",
+        separado && !separado.ok, JSON.stringify(separado));
+    conferir("e não deixa ligar nesse estado", conf2.podeLigar === false, String(conf2.podeLigar));
+
+    /* E, finalmente, com o banco certo. */
+    const bancoNovo = new DatabaseSync(":memory:");
+    bancoNovo.exec(semComentario(operacional));
+    const envCerto = { ...env, DB_FARMA_NOVA: fingirD1(bancoNovo) };
+
+    const conf3 = await (await worker.fetch(new Request(
+        "https://exemplo.workers.dev/lojas/farma-nova/conferir",
+        { headers: { "X-Painel-Key": SENHA_DONO, "CF-Connecting-IP": "11.0.2.1" } }
+    ), envCerto)).json();
+    conferir("aprova quando o banco é próprio e tem as tabelas",
+        conf3.podeLigar === true, JSON.stringify(conf3.conferencias?.filter(c => !c.ok)));
+
+    const ligou = await worker.fetch(new Request("https://exemplo.workers.dev/lojas/farma-nova/ativo", {
+        method: "POST",
+        headers: { "X-Painel-Key": SENHA_DONO, "Content-Type": "application/json", "CF-Connecting-IP": "11.0.3.1" },
+        body: JSON.stringify({ ativo: true })
+    }), envCerto);
+    conferir("e aí liga", ligou.status === 200, String(ligou.status));
+
+    const depois = compartilhado.prepare("SELECT ativo FROM lojas WHERE slug='farma-nova'").get();
+    conferir("a filial fica no ar", depois.ativo === 1, String(depois.ativo));
+
+    /* Desligar não depende de nada estar certo: tirar do ar é sempre
+       possível. */
+    const desligou = await worker.fetch(new Request("https://exemplo.workers.dev/lojas/farma-nova/ativo", {
+        method: "POST",
+        headers: { "X-Painel-Key": SENHA_DONO, "Content-Type": "application/json", "CF-Connecting-IP": "11.0.4.1" },
+        body: JSON.stringify({ ativo: false })
+    }), env);   // env SEM o binding, de propósito
+    conferir("e desligar funciona mesmo com o binding fora do ar",
+        desligou.status === 200, String(desligou.status));
+}
+
+/* ---- 16. nada disso é acessível a quem não é dono -------------------- */
+console.log("\n16. cadastrar filial é só do dono");
+{
+    for (const [caminho, metodo, corpo] of [
+        ["/lojas", "POST", { slug: "pirata", nome: "Pirata" }],
+        ["/lojas/farma-nova/conferir", "GET", undefined],
+        ["/lojas/farma-nova/ativo", "POST", { ativo: true }]
+    ]) {
+        limparTentativas();
+        const r = await worker.fetch(new Request("https://exemplo.workers.dev" + caminho, {
+            method: metodo,
+            headers: {
+                "X-Painel-Key": SENHA_WORKER,
+                "Content-Type": "application/json",
+                "CF-Connecting-IP": "12.0.0." + Math.floor(Math.random() * 200 + 10)
+            },
+            ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) })
+        }), env);
+        conferir(`${metodo} ${caminho} recusa a senha de loja`, r.status === 403, String(r.status));
+    }
+
+    const pirata = compartilhado.prepare("SELECT COUNT(*) AS n FROM lojas WHERE slug='pirata'").get().n;
+    conferir("e nenhuma filial foi criada por quem não podia", pirata === 0, String(pirata));
 }
 
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
