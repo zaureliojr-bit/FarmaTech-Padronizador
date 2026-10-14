@@ -326,18 +326,48 @@ async function lojaPublicaDaURL(request, env) {
 
 }
 
+/* A chave do DONO DA PLATAFORMA.
+
+   Quem administra a plataforma precisa entrar em qualquer farmácia:
+   para cadastrar a senha da loja nova, para dar suporte quando a dona
+   liga dizendo que o encarte sumiu, para conferir se a importação do
+   catálogo rodou. Sem isso, cada atendimento viraria "me passa sua
+   senha", que é a pior coisa que se pode ensinar um cliente a fazer.
+
+   É uma chave separada da PAINEL_KEY de propósito. A PAINEL_KEY é a
+   senha de uma LOJA — hoje a da Drogaria Mais Barato. Se ela também
+   abrisse as outras, a dona da primeira farmácia entraria no painel das
+   concorrentes da rede, e ninguém teria decidido isso.
+
+   Enquanto DONO_KEY não estiver configurada, nada muda: ninguém é dono,
+   e cada senha abre só a sua loja.
+
+   O que ela NÃO faz: aparecer em resposta, em log ou na tela. Ela é um
+   secret do worker, como as chaves do catálogo. */
+function ehDono(request, env) {
+
+    const digitada = request.headers.get("X-Painel-Key") || "";
+
+    return !!env.DONO_KEY && mesmoTexto(digitada, env.DONO_KEY);
+
+}
+
 /* A senha confere para ESTA loja?
 
-   Duas formas, e a ordem importa:
+   Três formas, e a ordem importa:
 
-     1. a loja tem hash próprio  -> compara com o hash dela, e só com ele
-     2. a loja não tem hash      -> vale a PAINEL_KEY do worker
+     1. é a chave do dono        -> abre qualquer farmácia
+     2. a loja tem hash próprio  -> compara com o hash dela, e só com ele
+     3. a loja não tem hash      -> vale a PAINEL_KEY do worker
 
-   A segunda é a ponte: a farmácia que já existe continua entrando com a
+   A terceira é a ponte: a farmácia que já existe continua entrando com a
    senha de sempre enquanto ninguém cadastrar a dela. Assim que cadastrar,
    a PAINEL_KEY deixa de valer PARA ELA — e é isso que impede que a chave
-   única do worker vire chave-mestra de todas as lojas da rede. */
+   de uma loja vire chave-mestra da rede inteira. Quem tem esse poder é a
+   DONO_KEY, que é explícita e de quem administra a plataforma. */
 async function senhaDaLojaConfere(request, env, loja) {
+
+    if (ehDono(request, env)) return true;
 
     const digitada = request.headers.get("X-Painel-Key") || "";
 
@@ -608,7 +638,7 @@ async function barrarSeNaoPuder(request, env) {
         return { recusa: json({ erro: erro.message }, 503) };
     }
 
-    return { loja, db };
+    return { loja, db, dono: ehDono(request, env) };
 
 }
 
@@ -1454,7 +1484,7 @@ async function tratarLojaPublica(request, env) {
    PAINEL_KEY cadastrando a primeira senha de cada loja, e cada loja
    trocando só a própria depois. Quando a Fase 5 trouxer o painel de
    operador, isto vira "só o dono da plataforma", que é o certo. */
-async function tratarSenhaDaLoja(request, env, loja) {
+async function tratarSenhaDaLoja(request, env, loja, dono) {
 
     let corpo;
     try {
@@ -1484,10 +1514,14 @@ async function tratarSenhaDaLoja(request, env, loja) {
 
     if (!existe) return json({ erro: "Essa loja não está cadastrada." }, 404);
 
-    /* Quem já tem senha própria só troca a dela. Sem esta linha, a
+    /* O dono da plataforma cadastra e troca a senha de qualquer
+       farmácia — é como a loja nova ganha a primeira senha, já que ela
+       por definição ainda não consegue autenticar.
+
+       Quem não é dono só troca a da própria loja. Sem esta linha, a
        farmácia A entraria com a própria senha e reescreveria a da B —
        que é o vazamento que esta fase inteira existe para fechar. */
-    if (loja.hash && alvo !== loja.slug) {
+    if (!dono && loja.hash && alvo !== loja.slug) {
         return json({ erro: "Você só pode trocar a senha da sua própria loja." }, 403);
     }
 
@@ -1501,6 +1535,56 @@ async function tratarSenhaDaLoja(request, env, loja) {
     ).bind(alvo, hash, sal, new Date().toISOString()).run();
 
     return json({ ok: true, loja: alvo });
+
+}
+
+/* Quem sou eu e em qual farmácia estou.
+
+   O painel chama logo depois do login para saber duas coisas: o nome da
+   loja que vai aparecer no cabeçalho, e se quem entrou é o dono da
+   plataforma — porque só para ele faz sentido mostrar a aba de lojas.
+
+   Esconder a aba NÃO é a segurança: a segurança é o worker recusar
+   /lojas para quem não é dono. A aba escondida só evita mostrar à dona
+   de uma farmácia um botão que ela não pode usar. */
+async function tratarSessao(request, env, loja, dono) {
+
+    return json({
+        dono,
+        loja: {
+            slug: loja.slug || "",
+            nome: loja.nome || "",
+            temSenhaPropria: !!loja.hash
+        }
+    });
+
+}
+
+/* A lista de farmácias da plataforma. Só para o dono.
+
+   Devolve o que ele precisa para administrar — se a loja já tem senha
+   própria, em qual banco ela está, qual o prefixo dos arquivos dela — e
+   NUNCA o hash nem o sal. Guardar hash é uma coisa; passeá-lo por uma
+   API é outra, e não há nenhuma tela que precise dele. */
+async function tratarListarLojas(request, env, dono) {
+
+    if (!dono) {
+        /* 403 e não 401: a senha estava certa, o que falta é ser dono.
+           Dizer isso ajuda quem administra a entender que entrou com a
+           chave errada, e não revela nada a quem não passou do portão —
+           esse já parou no 401 antes de chegar aqui. */
+        return json({ erro: "Só o dono da plataforma vê a lista de lojas." }, 403);
+    }
+
+    const { results } = await env.DB.prepare(
+        `SELECT l.slug, l.nome, l.cidade, l.uf, l.ativo, l.criado_em,
+                CASE WHEN a.hash IS NOT NULL AND a.hash <> '' THEN 1 ELSE 0 END AS tem_senha,
+                a.trocada_em, a.banco, a.prefixo_r2
+           FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
+          ORDER BY l.criado_em`
+    ).all();
+
+    return json({ lojas: results || [] });
 
 }
 
@@ -1925,7 +2009,18 @@ export default {
                por parâmetro — e isso merece estar visível, não perdido no
                meio das outras. */
             if (request.method === "POST" && rota === "/loja/senha") {
-                return await tratarSenhaDaLoja(request, env, loja);
+                return await tratarSenhaDaLoja(request, env, loja, porta.dono);
+            }
+
+            /* Quem sou eu, em qual loja estou, e sou dono da plataforma. */
+            if (request.method === "GET" && rota === "/sessao") {
+                return await tratarSessao(request, env, loja, porta.dono);
+            }
+
+            /* A lista de farmácias. Só o dono — e a recusa é no worker,
+               não na tela: aba escondida não é permissão. */
+            if (request.method === "GET" && rota === "/lojas") {
+                return await tratarListarLojas(request, env, porta.dono);
             }
 
             if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env, loja, db);

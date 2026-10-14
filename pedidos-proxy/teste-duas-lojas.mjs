@@ -34,6 +34,7 @@ const ler = (nome) => readFileSync(new URL("./" + nome, import.meta.url), "utf8"
 
 const SENHA_WORKER = "senha-antiga-do-worker";
 const SENHA_B = "senha-da-farma-centro";
+const SENHA_DONO = "chave-de-quem-administra-a-plataforma";
 
 let falhas = 0;
 function conferir(descricao, condicao, detalhe = "") {
@@ -181,7 +182,8 @@ const env = {
     DB: fingirD1(compartilhado),
     DB_FARMA_CENTRO: fingirD1(bancoB),
     BANNERS_BUCKET: balde,
-    PAINEL_KEY: SENHA_WORKER
+    PAINEL_KEY: SENHA_WORKER,
+    DONO_KEY: SENHA_DONO
 };
 
 function pedir(caminho, { loja, senha, metodo = "GET", corpo, ip = "1.2.3.4" } = {}) {
@@ -490,6 +492,120 @@ console.log("\n10. os arquivos de cada farmácia, no balde que é um só");
     conferir("mas o arquivo da OUTRA loja não foi apagado",
         balde.conteudo.has(envioA.chave) && !balde.apagados.includes(envioA.chave),
         balde.apagados.join(","));
+}
+
+/* ---- 11. a chave do dono da plataforma ------------------------------ */
+console.log("\n11. a chave do dono abre qualquer farmácia");
+{
+    /* Quem administra a plataforma precisa entrar em qualquer loja: para
+       cadastrar a senha da farmácia nova, para dar suporte quando a dona
+       liga dizendo que o encarte sumiu. Sem isso, cada atendimento
+       viraria "me passa sua senha", que é a pior coisa que se pode
+       ensinar um cliente a fazer.
+
+       O que esta seção precisa provar é que esse poder é da DONO_KEY, e
+       NÃO da senha de uma loja — senão a dona da primeira farmácia
+       entraria no painel das concorrentes da rede. */
+    const comoDono = (caminho, loja, extra = {}) => worker.fetch(new Request(
+        "https://exemplo.workers.dev" + caminho,
+        {
+            headers: {
+                "X-Painel-Key": SENHA_DONO,
+                "CF-Connecting-IP": "10.0.0." + Math.floor(Math.random() * 200 + 10),
+                ...(loja ? { "X-Painel-Loja": loja } : {}),
+                ...extra
+            },
+            ...(extra.method ? { method: extra.method } : {})
+        }
+    ), env);
+
+    limparTentativas();
+    const naA = await comoDono("/fila", "mais-barato");
+    const refsA = ((await naA.json()).pedidos || []).map((p) => p.ref);
+    conferir("entra na primeira farmácia", refsA.includes("A-001"), refsA.join(","));
+
+    limparTentativas();
+    const naB = await comoDono("/fila", "farma-centro");
+    const refsB = ((await naB.json()).pedidos || []).map((p) => p.ref);
+    conferir("e na segunda, que tem senha própria", refsB.includes("B-001"), refsB.join(","));
+
+    /* O ponto da seção: entrar nas duas NÃO pode significar ver as duas
+       juntas. Cada visita é dentro de uma loja. */
+    conferir("mas vê uma de cada vez, nunca as duas misturadas",
+        !refsA.some((r) => String(r).startsWith("B-")) && !refsB.some((r) => String(r).startsWith("A-")),
+        `A=${refsA.join(",")} B=${refsB.join(",")}`);
+
+    limparTentativas();
+    const sessao = await (await comoDono("/sessao", "farma-centro")).json();
+    conferir("a sessão diz que é dono", sessao.dono === true, JSON.stringify(sessao));
+    conferir("e diz em qual farmácia ele está", sessao.loja.slug === "farma-centro", JSON.stringify(sessao.loja));
+
+    limparTentativas();
+    const lista = await (await comoDono("/lojas")).json();
+    const slugs = (lista.lojas || []).map((l) => l.slug);
+    conferir("lista as farmácias da plataforma",
+        slugs.includes("mais-barato") && slugs.includes("farma-centro"), slugs.join(","));
+
+    const comSenha = (lista.lojas || []).find((l) => l.slug === "farma-centro");
+    conferir("e diz quais já têm senha própria", comSenha && comSenha.tem_senha === 1, JSON.stringify(comSenha));
+    conferir("sem passear hash nem sal pela API",
+        !JSON.stringify(lista).includes("hash") || !(lista.lojas || []).some((l) => l.hash || l.sal),
+        JSON.stringify(lista).slice(0, 120));
+
+    /* O dono cadastra a senha de qualquer uma — é como a farmácia nova
+       recebe a primeira. */
+    limparTentativas();
+    const trocou = await worker.fetch(new Request("https://exemplo.workers.dev/loja/senha", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Painel-Key": SENHA_DONO,
+            "CF-Connecting-IP": "10.0.1.1"
+        },
+        body: JSON.stringify({ slug: "farma-centro", senha: "nova-senha-da-farma" })
+    }), env);
+    conferir("troca a senha de qualquer farmácia", trocou.status === 200, String(trocou.status));
+
+    limparTentativas();
+    const comNova = await pedir("/fila", { loja: "farma-centro", senha: "nova-senha-da-farma" });
+    conferir("e a senha nova passa a valer", comNova.status === 200, String(comNova.status));
+
+    limparTentativas();
+    const comVelha = await pedir("/fila", { loja: "farma-centro", senha: SENHA_B });
+    conferir("enquanto a antiga deixa de valer", comVelha.status === 401, String(comVelha.status));
+}
+
+/* ---- 12. e quem NÃO é dono não vira dono ---------------------------- */
+console.log("\n12. a senha de uma farmácia não abre a plataforma");
+{
+    /* Esta é a seção que justifica a DONO_KEY existir separada. Se a
+       PAINEL_KEY, que é a senha de UMA loja, também abrisse as outras, a
+       dona da primeira farmácia entraria no painel das concorrentes da
+       rede — e ninguém teria decidido isso. */
+    limparTentativas();
+    const r = await pedir("/lojas", { senha: SENHA_WORKER });
+    conferir("a senha da loja não lista as farmácias", r.status === 403, String(r.status));
+
+    limparTentativas();
+    const r2 = await pedir("/lojas", { loja: "farma-centro", senha: "nova-senha-da-farma" });
+    conferir("a senha da outra farmácia também não", r2.status === 403, String(r2.status));
+
+    limparTentativas();
+    const r3 = await pedir("/fila", { loja: "farma-centro", senha: SENHA_WORKER });
+    conferir("e continua sem abrir a loja alheia", r3.status === 401, String(r3.status));
+
+    limparTentativas();
+    const r4 = await pedir("/sessao", { senha: SENHA_WORKER });
+    const s = await r4.json();
+    conferir("a sessão dela não se diz dona", s.dono === false, JSON.stringify(s));
+
+    /* Sem DONO_KEY configurada, ninguém é dono — nem quem acerta a senha
+       da loja. É o estado de hoje, antes de alguém criar o secret. */
+    const semDono = { ...env, DONO_KEY: undefined };
+    const r5 = await worker.fetch(new Request("https://exemplo.workers.dev/lojas", {
+        headers: { "X-Painel-Key": SENHA_WORKER, "CF-Connecting-IP": "10.0.2.1" }
+    }), semDono);
+    conferir("sem DONO_KEY configurada, ninguém é dono", r5.status === 403, String(r5.status));
 }
 
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
