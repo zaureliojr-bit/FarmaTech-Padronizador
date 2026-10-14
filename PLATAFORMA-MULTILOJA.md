@@ -622,19 +622,58 @@ na frente de qualquer código.
 A ordem importa porque as duas primeiras fases **já servem a loja de
 hoje**, e não são trabalho jogado à espera da plataforma.
 
-### Fase 0 — o que está pendente e bloqueia tudo
+### Fase 0 — FEITA
+Publicada e conferida no ar: senha errada repetida devolve 429, rota de
+painel sem chave devolve 401, rota de catálogo sem chave devolve 401.
+
+### Fase 0 (como foi escrita) — o que estava pendente e bloqueava tudo
 Subir o worker com os dois limites (senha do painel e rotas abertas) e
 rodar as tabelas no D1. Já está escrito, testado e commitado; falta
 publicar. Não dá para levar a uma rede uma plataforma cuja senha não tem
 limite de tentativas.
 
-### Fase 1 — renderização no servidor, ainda com uma loja
+### Fase 1 — FEITA
+No ar. Cada produto com título, descrição e foto próprios, vindos da
+própria URL (`/produto/<nome>-<ean>`) porque ler o catálogo custa 19,7 ms
+e o plano Free dá 10 ms por requisição. Mais `sitemap.xml` com as 6.765
+páginas (gerado por workflow do GitHub, não por função), `robots.txt`,
+JSON-LD de `Pharmacy` e `WebSite` na home e `Product`/`Offer` no produto,
+e `/og/<ean>` servindo a foto da prévia — uma só, decidida no servidor,
+depois de o WhatsApp ter escolhido a imagem errada entre duas.
+
+**Divergência a resolver antes da Fase 4:** esta fase publicou a Drogaria
+Mais Barato em `/produto/<nome>-<ean>`, que a seção 8 reserva para a
+página canônica de busca, sem preço nem vendedor. Era a escolha certa com
+uma loja só. Com duas, ou as 6.765 URLs já indexadas continuam sendo da
+Mais Barato e as outras entram por `/loja/<slug>/...` (assimétrico), ou
+migra-se e perde-se o índice. Decidir antes de cadastrar a segunda.
+
+### Fase 1 (como foi escrita) — renderização no servidor, ainda com uma loja
 Pages Functions, título e `og:image` por produto, `sitemap.xml`,
 `robots.txt`, JSON-LD de `Pharmacy` e `Product`. Entrega valor imediato
 (prévia no WhatsApp e Google) **e** é a fundação da plataforma. Se a
 venda para a rede não acontecer, isso continua valendo.
 
-### Fase 2 — a loja vira dado
+### Fase 2 — ESCRITA, FALTA PUBLICAR
+`pedidos-proxy/schema-lojas.sql` cria `lojas` e `lojas_horario` e cadastra
+a Mais Barato com os valores que já estão no ar. A rota pública
+`GET /loja` devolve a loja e o horário. No site, `public/loja.js` lê dela
+e sobrescreve o que estava escrito à mão nos 29 lugares — o HTML continua
+trazendo os valores, porque é o que o Google lê e o que aparece se a API
+cair; o que vem da API substitui.
+
+Dois testes: `pedidos-proxy/teste-loja.mjs` roda o handler contra um
+SQLite de verdade e compara valor por valor com o que o site publica
+hoje; `drogaria-site/teste-loja-no-site.mjs` abre o site num navegador e
+prova que, com outra farmácia na resposta, rodapé, WhatsApp, coordenadas,
+raio de entrega e horário trocam sozinhos.
+
+Duas coisas saíram do código e foram para a tabela de quebra: o horário
+passou a ser lido no **relógio da loja** (o Brasil tem quatro fusos), e o
+rótulo do responsável técnico passou a ser cadastrado, em vez de o site
+escrever "Farmacêutica" deduzindo do primeiro nome.
+
+### Fase 2 (como foi escrita) — a loja vira dado
 Tabela `lojas` + `lojas_horario`, e o site passa a ler dela em vez do
 HTML. Ainda com uma loja cadastrada. Nada muda para o cliente; muda que
 a segunda loja passa a ser um `INSERT`.

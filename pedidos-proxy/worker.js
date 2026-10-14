@@ -1041,6 +1041,75 @@ async function tratarArquivoDeBanner(request, env, nome) {
 
 const MAX_PROMOCOES_POR_LOTE = 500;
 
+/* =====================================================================
+   A LOJA
+   =====================================================================
+
+   Quem é a farmácia: endereço, CNPJ, CRF da farmacêutica, telefone,
+   coordenadas, raio de entrega e horário. Até a Fase 2 isso estava
+   escrito em 29 lugares dentro de 6 arquivos do site; agora está na
+   tabela `lojas` (ver schema-lojas.sql) e o site lê daqui.
+
+   Aberto, sem chave, e é intencional: tudo que esta rota devolve já está
+   impresso no rodapé de todas as páginas do site e na placa da porta. O
+   que NÃO entra aqui é a senha do painel, que mora em outro lugar e tem
+   hash próprio a partir da Fase 3.
+
+   Cache de 5 minutos na borda: endereço de farmácia muda de ano em ano,
+   e sem cache cada visita ao site viraria uma consulta ao D1. */
+async function tratarLojaPublica(request, env) {
+
+    const url = new URL(request.url);
+    const slug = texto(url.searchParams.get("slug"), 60);
+
+    let loja;
+    let horario;
+
+    try {
+        /* Sem slug, a loja ativa — hoje só existe uma, e exigir o slug
+           agora quebraria o site por nada. Quando houver duas, quem
+           chama sem slug recebe a mais antiga, e o endereço da vitrine
+           passa a carregar o slug (seção 8 do PLATAFORMA-MULTILOJA). */
+        loja = slug
+            ? await env.DB.prepare(
+                `SELECT * FROM lojas WHERE slug = ?1 AND ativo = 1`
+            ).bind(slug).first()
+            : await env.DB.prepare(
+                `SELECT * FROM lojas WHERE ativo = 1 ORDER BY criado_em LIMIT 1`
+            ).first();
+
+        if (!loja) return json({ erro: "Loja não encontrada." }, 404);
+
+        const { results } = await env.DB.prepare(
+            `SELECT dia, abre, fecha FROM lojas_horario
+              WHERE slug = ?1 ORDER BY dia, abre`
+        ).bind(loja.slug).all();
+
+        horario = results || [];
+
+    } catch (erro) {
+        /* Caso concreto, e o motivo deste catch existir: o worker novo
+           publicado antes de alguém rodar o schema-lojas.sql no console
+           do D1. Aí a consulta estoura em "no such table: lojas".
+
+           Um 500 genérico faria o site parecer quebrado quando o que
+           falta é um passo de instalação. O site trata esta rota como
+           complemento — ele tem os valores de hoje embutidos no HTML e
+           só sobrescreve com o que chega daqui —, então 503 com recado
+           claro é o que permite diagnosticar sem abrir o log. */
+        console.error("loja:", erro);
+        return json({
+            erro: "Cadastro de lojas ainda não foi criado neste banco. " +
+                  "Rode o pedidos-proxy/schema-lojas.sql no console do D1."
+        }, 503);
+    }
+
+    return json({ loja, horario }, 200, {
+        "Cache-Control": "public, max-age=300"
+    });
+
+}
+
 /* O que o SITE lê. Aberto, como o preço da vitrine — que é público de
    qualquer jeito. Já sai filtrado por data: o site aplica e pronto. */
 async function tratarPromocoesPublicas(request, env) {
@@ -1389,6 +1458,12 @@ export default {
             // vitrine é pública. Quem EDITA, mais abaixo, precisa da chave.
             if (request.method === "GET" && rota === "/banners") {
                 return await tratarBannersPublicos(request, env);
+            }
+
+            /* Quem é a farmácia. Público: é o mesmo conteúdo do rodapé
+               de todas as páginas e da placa na porta. */
+            if (request.method === "GET" && rota === "/loja") {
+                return await tratarLojaPublica(request, env);
             }
 
             // preço de vitrine é público de qualquer jeito
