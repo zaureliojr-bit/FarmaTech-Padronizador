@@ -4,3 +4,10 @@ node_modules
 extracao.log
 dist/
 instalador/extrator.exe
+
+# Pacote montado pra levar ao balcão: o .exe gerado mais uma cópia dos
+# dois instaladores. Tudo aqui é derivado - o .exe sai do build e os
+# instaladores já estão versionados em instalador/. Fora do git também
+# porque é aqui que o instalador grava o .env, com FB_PASSWORD (senha do
+# banco do PDV) e UPLOAD_KEY ao lado do executável.
+Extrator FarmaTech/
