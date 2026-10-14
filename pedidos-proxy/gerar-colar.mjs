@@ -1,4 +1,4 @@
-/* Refaz o schema-lojas-colar.sql a partir do schema-lojas.sql.
+/* Refaz os *-colar.sql a partir dos schema-*.sql.
 
    Existe porque o console do D1 não aceita comentário de jeito nenhum:
    nem o de linha, que achatado apaga o resto do arquivo, nem o de bloco,
@@ -7,12 +7,13 @@
 
    E não dá para simplesmente escrever o SQL sem comentário: daqui a seis
    meses, ninguém (inclusive eu) vai lembrar por que o horário é uma
-   linha por dia em vez de uma coluna de texto, nem por que o rótulo do
-   responsável técnico é cadastrado em vez de escrito no site.
+   linha por dia em vez de uma coluna de texto, nem por que o sal da
+   senha é por loja em vez de um só. Sem isso, a próxima pessoa
+   "simplifica" os dois.
 
-   Então são dois arquivos: o que explica e o que roda. Este script
-   garante que o segundo é o primeiro, sem os comentários — e não uma
-   cópia que alguém esqueceu de atualizar.
+   Então são dois arquivos para cada schema: o que explica e o que roda.
+   Este script garante que o segundo é o primeiro sem os comentários — e
+   não uma cópia que alguém esqueceu de atualizar.
 
    Uso:  node gerar-colar.mjs
          node gerar-colar.mjs --conferir   (não grava; falha se divergir)
@@ -21,40 +22,59 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
-const ENTRADA = new URL("./schema-lojas.sql", import.meta.url);
-const SAIDA = new URL("./schema-lojas-colar.sql", import.meta.url);
+/* Na ordem em que se roda no console: o de lojas cria as tabelas que o
+   de acesso pressupõe. A ordem também é a do teste aqui embaixo. */
+const SCHEMAS = ["schema-lojas.sql", "schema-acesso.sql"];
 
-const original = readFileSync(ENTRADA, "utf8");
+const CONFERIR = process.argv.includes("--conferir");
 
-const limpo = original
-    .replace(/\/\*[\s\S]*?\*\//g, "")   // comentário de bloco
-    .replace(/^\s*--.*$/gm, "")          // comentário de linha
-    .replace(/\n\s*\n/g, "\n")           // linhas em branco que sobraram
-    .trim() + "\n";
-
-/* Conferências antes de gravar. São as três formas conhecidas de o
-   console do D1 recusar o arquivo. */
-const problemas = [];
-
-if (/--|\/\*/.test(limpo)) problemas.push("sobrou comentário");
-
-const pedacos = limpo.split(";").map((p) => p.trim()).filter(Boolean);
-if (pedacos.some((p) => !/[a-zA-Z]/.test(p))) {
-    problemas.push("algum pedaço entre ponto-e-vírgula ficou sem instrução");
+function semComentario(sql) {
+    return sql
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*--.*$/gm, "")
+        .replace(/\n\s*\n/g, "\n")
+        .trim() + "\n";
 }
 
-/* Roda de verdade, inclusive achatado numa linha — que é o que o console
-   faz antes de enviar — e duas vezes, porque colar de novo tem de ser
-   inofensivo. */
-for (const [nome, versao] of [["como arquivo", limpo], ["achatado", limpo.replace(/\r?\n/g, " ")]]) {
+const problemas = [];
+const limpos = new Map();
+
+for (const arquivo of SCHEMAS) {
+    const original = readFileSync(new URL("./" + arquivo, import.meta.url), "utf8");
+    const limpo = semComentario(original);
+    limpos.set(arquivo, limpo);
+
+    if (/--|\/\*/.test(limpo)) problemas.push(`${arquivo}: sobrou comentário`);
+
+    const pedacos = limpo.split(";").map((p) => p.trim()).filter(Boolean);
+    if (pedacos.some((p) => !/[a-zA-Z]/.test(p))) {
+        problemas.push(`${arquivo}: algum pedaço entre ponto-e-vírgula ficou sem instrução`);
+    }
+}
+
+/* Roda a sequência inteira num banco de mentira, inclusive achatada numa
+   linha — que é o que o console faz antes de enviar — e duas vezes, porque
+   colar de novo tem de ser inofensivo. */
+for (const [nome, achatar] of [["como arquivo", false], ["achatado", true]]) {
     try {
         const db = new DatabaseSync(":memory:");
-        db.exec(versao);
-        db.exec(versao);
-        const lojas = db.prepare("SELECT COUNT(*) AS n FROM lojas").get().n;
-        const horarios = db.prepare("SELECT COUNT(*) AS n FROM lojas_horario").get().n;
-        if (lojas !== 1 || horarios !== 7) {
-            problemas.push(`${nome}: ${lojas} lojas e ${horarios} horários, esperava 1 e 7`);
+        for (const volta of [1, 2]) {
+            for (const arquivo of SCHEMAS) {
+                const sql = limpos.get(arquivo);
+                db.exec(achatar ? sql.replace(/\r?\n/g, " ") : sql);
+            }
+            if (volta === 1) {
+                const lojas = db.prepare("SELECT COUNT(*) AS n FROM lojas").get().n;
+                const horarios = db.prepare("SELECT COUNT(*) AS n FROM lojas_horario").get().n;
+                if (lojas !== 1 || horarios !== 7) {
+                    problemas.push(`${nome}: ${lojas} lojas e ${horarios} horários, esperava 1 e 7`);
+                }
+                /* A tabela de acesso nasce vazia de propósito: loja sem
+                   linha nela é a loja de hoje, que segue com a PAINEL_KEY
+                   e com o banco de sempre. */
+                const acessos = db.prepare("SELECT COUNT(*) AS n FROM lojas_acesso").get().n;
+                if (acessos !== 0) problemas.push(`${nome}: lojas_acesso devia nascer vazia, veio com ${acessos}`);
+            }
         }
     } catch (erro) {
         problemas.push(`${nome}: ${erro.message}`);
@@ -66,17 +86,29 @@ if (problemas.length) {
     process.exit(1);
 }
 
-if (process.argv.includes("--conferir")) {
-    const atual = (() => {
-        try { return readFileSync(SAIDA, "utf8"); } catch { return ""; }
-    })();
-    if (atual !== limpo) {
-        console.error("o schema-lojas-colar.sql está desatualizado — rode: node gerar-colar.mjs");
-        process.exit(1);
+let divergiu = false;
+
+for (const arquivo of SCHEMAS) {
+    const destino = new URL("./" + arquivo.replace(/\.sql$/, "-colar.sql"), import.meta.url);
+    const limpo = limpos.get(arquivo);
+
+    if (CONFERIR) {
+        let atual = "";
+        try { atual = readFileSync(destino, "utf8"); } catch { /* ainda não existe */ }
+        if (atual !== limpo) {
+            console.error(`${arquivo}: o -colar está desatualizado`);
+            divergiu = true;
+        }
+        continue;
     }
-    console.log("schema-lojas-colar.sql confere com o schema-lojas.sql");
-    process.exit(0);
+
+    writeFileSync(destino, limpo, "utf8");
+    const instrucoes = limpo.split(";").filter((p) => p.trim()).length;
+    console.log(`gravado ${arquivo.replace(/\.sql$/, "-colar.sql")}: ${instrucoes} instruções`);
 }
 
-writeFileSync(SAIDA, limpo, "utf8");
-console.log(`gravado: ${pedacos.length} instruções, ${(limpo.length / 1024).toFixed(1)} KB`);
+if (divergiu) {
+    console.error("rode: node gerar-colar.mjs");
+    process.exit(1);
+}
+if (CONFERIR) console.log("os -colar conferem com os schemas");

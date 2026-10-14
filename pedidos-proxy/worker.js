@@ -68,6 +68,240 @@ function senhaConfere(request, env) {
 
 }
 
+/* ===================== ISOLAMENTO POR LOJA =====================
+
+   Fase 3. Três perguntas, nesta ordem, e nenhuma delas aceita resposta
+   vinda de parâmetro depois de autenticar:
+
+     quem está entrando?   o slug, junto com a senha, no login
+     a senha é dela?       hash com sal próprio, na tabela lojas_acesso
+     onde ficam os dados?  o binding de D1 que a linha dela indica
+
+   A terceira é a que resolve o problema que não dá erro. Uma consulta
+   que esquece o WHERE devolve o dado de todas as lojas e parece certa —
+   nunca falha, nunca aparece em teste com uma loja só, e o estrago é
+   mostrar a fila de pedidos de uma farmácia para a concorrente. Com um
+   banco por loja, o dado da farmácia A não está ao alcance do código que
+   atende a B: não por disciplina de quem escreve a consulta, mas porque
+   a conexão é outra.
+*/
+
+/* O banco daquela farmácia.
+
+   Sem linha em lojas_acesso, ou com `banco` vazio, é o banco que o
+   worker já usa — o caso da loja que existe hoje, e o que permite esta
+   fase subir sem mover dado e sem ninguém ficar de fora do painel.
+
+   Com `banco` preenchido, o binding TEM de existir. Cair no env.DB
+   quando o binding falta seria o pior dos mundos: a loja nova passaria a
+   gravar pedido no banco da loja antiga, em silêncio, e ninguém
+   descobriria até alguém estranhar um pedido alheio na fila. */
+function bancoDaLoja(env, loja) {
+
+    const nome = (loja && loja.banco) || "";
+
+    if (!nome) return env.DB;
+
+    const db = env[nome];
+
+    if (!db) {
+        const erro = new Error(`a loja "${loja.slug}" aponta para o banco ${nome}, que não está ligado a este worker`);
+        erro.configuracao = true;
+        throw erro;
+    }
+
+    return db;
+
+}
+
+/* SHA-256 de (sal + senha), em hexa.
+
+   O Workers tem Web Crypto nativo, então não entra dependência. Não é
+   bcrypt: o que protege aqui é o limite de cinco tentativas por IP, já
+   no ar. Hash lento serviria contra quem baixasse o banco — e quem baixa
+   o banco já tem acesso ao D1, onde a senha é o menor problema. */
+async function hashDeSenha(senha, sal) {
+
+    const bytes = new TextEncoder().encode(String(sal) + String(senha));
+    const digerido = await crypto.subtle.digest("SHA-256", bytes);
+
+    return [...new Uint8Array(digerido)]
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+
+}
+
+/* Comparação em tempo constante.
+
+   Com "===", o tempo da comparação conta quantos caracteres do hash
+   bateram antes de parar. É pouco, e por cima de uma rede é quase
+   impossível de medir — mas custa quatro linhas, e o limite de
+   tentativas por IP justamente permite ao atacante repetir a medição
+   devagar e com paciência, que é o cenário em que isso deixa de ser
+   teórico. */
+function mesmoTexto(a, b) {
+
+    const x = String(a || "");
+    const y = String(b || "");
+
+    if (x.length !== y.length) return false;
+
+    let diferenca = 0;
+    for (let i = 0; i < x.length; i++) diferenca |= x.charCodeAt(i) ^ y.charCodeAt(i);
+
+    return diferenca === 0;
+
+}
+
+function salNovo() {
+
+    return [...crypto.getRandomValues(new Uint8Array(16))]
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+
+}
+
+/* Qual loja está pedindo.
+
+   Vem do cabeçalho X-Painel-Loja, posto pelo painel a partir do próprio
+   endereço (/painel/<slug>). Sem cabeçalho, é a loja mais antiga ativa —
+   o que mantém o painel de hoje funcionando sem nenhuma mudança.
+
+   Vir de cabeçalho não é o mesmo que "a loja vem de parâmetro", que é o
+   que o desenho proíbe. O slug aqui é PARTE da autenticação: o hash
+   conferido é o daquele slug. Quem mandar o slug da farmácia B com a
+   senha da A não passa, porque a senha da A não bate com o hash da B. O
+   que o desenho proíbe é outra coisa — um handler JÁ autenticado aceitar
+   "?loja=" e ler o dado de outra. Esses não aceitam: recebem a loja como
+   argumento obrigatório, vinda daqui. */
+async function lojaDeQuemPede(request, env) {
+
+    const pedido = String(request.headers.get("X-Painel-Loja") || "")
+        .toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 60);
+
+    const sql = pedido
+        ? `SELECT l.slug, l.nome, a.hash, a.sal, a.banco
+             FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
+            WHERE l.slug = ?1 AND l.ativo = 1`
+        : `SELECT l.slug, l.nome, a.hash, a.sal, a.banco
+             FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
+            WHERE l.ativo = 1 ORDER BY l.criado_em LIMIT 1`;
+
+    let loja = null;
+
+    try {
+        const consulta = env.DB.prepare(sql);
+        loja = await (pedido ? consulta.bind(pedido) : consulta).first();
+    } catch (erro) {
+        /* Cadastro de lojas fora do ar, ou tabela ainda não criada. */
+        console.error("lojaDeQuemPede:", erro);
+    }
+
+    if (loja) return loja;
+
+    /* Ninguém pediu loja e não há cadastro: é a instalação de uma loja
+       só, como era antes da Fase 2. Devolve a loja anônima, que usa o
+       banco de sempre e a PAINEL_KEY de sempre.
+
+       Isto é tolerância na IDENTIFICAÇÃO, não na autenticação: a senha
+       continua sendo conferida logo abaixo, e sem ela não passa. E não
+       vaza dado entre lojas porque, nesse estado, não existe segunda
+       loja para vazar.
+
+       Existe porque o portão passou a depender do cadastro. Sem esta
+       saída, um problema na tabela `lojas` — ou publicar o worker antes
+       de rodar o schema — tranca a farmácia fora do próprio painel no
+       meio do expediente, que é um estrago maior do que o que a Fase 3
+       veio evitar.
+
+       Com slug pedido, nada disso vale: quem nomeia uma loja que não
+       existe leva 401. */
+    if (pedido) return null;
+
+    return { slug: "", nome: "", hash: null, sal: null, banco: null };
+
+}
+
+/* A loja de uma rota PÚBLICA.
+
+   Aqui a loja vem mesmo de parâmetro — e pode. Rota pública não lê dado
+   de ninguém: grava um pedido naquela farmácia, ou mostra o que aquela
+   farmácia já publicou na vitrine (banner, promoção, encarte). Escolher
+   a loja errada mostra a oferta da outra, o que é um erro de endereço,
+   não um vazamento.
+
+   O que NÃO pode é rota de painel aceitar loja por parâmetro. Essas
+   recebem a loja de quem provou a senha, e é a diferença entre as duas
+   famílias de rota neste arquivo.
+
+   Sem ?loja=, a mais antiga ativa — que é o que mantém o site de hoje
+   funcionando sem mudar uma linha. */
+async function lojaPublicaDaURL(request, env) {
+
+    const pedido = String(new URL(request.url).searchParams.get("loja") || "")
+        .toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 60);
+
+    const sql = pedido
+        ? `SELECT l.slug, l.nome, a.banco
+             FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
+            WHERE l.slug = ?1 AND l.ativo = 1`
+        : `SELECT l.slug, l.nome, a.banco
+             FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
+            WHERE l.ativo = 1 ORDER BY l.criado_em LIMIT 1`;
+
+    let loja = null;
+
+    try {
+        const consulta = env.DB.prepare(sql);
+        loja = await (pedido ? consulta.bind(pedido) : consulta).first();
+    } catch (erro) {
+        console.error("lojaPublicaDaURL:", erro);
+    }
+
+    /* Mesma tolerância do portão, e pelo mesmo motivo: sem ?loja= e sem
+       cadastro, é a instalação de uma loja só, e a vitrine tem de
+       continuar mostrando banner e promoção. Um 404 aqui apagaria as
+       ofertas da home por causa de um problema de cadastro.
+
+       Com ?loja= nomeando loja que não existe, 404 — aí é endereço
+       errado, e fingir que é outra loja seria pior. */
+    if (!loja) {
+        if (pedido) return { recusa: json({ erro: "Loja não encontrada." }, 404) };
+        return { loja: { slug: "", nome: "", banco: null }, db: env.DB };
+    }
+
+    try {
+        return { loja, db: bancoDaLoja(env, loja) };
+    } catch (erro) {
+        console.error("bancoDaLoja:", erro);
+        return { recusa: json({ erro: erro.message }, 503) };
+    }
+
+}
+
+/* A senha confere para ESTA loja?
+
+   Duas formas, e a ordem importa:
+
+     1. a loja tem hash próprio  -> compara com o hash dela, e só com ele
+     2. a loja não tem hash      -> vale a PAINEL_KEY do worker
+
+   A segunda é a ponte: a farmácia que já existe continua entrando com a
+   senha de sempre enquanto ninguém cadastrar a dela. Assim que cadastrar,
+   a PAINEL_KEY deixa de valer PARA ELA — e é isso que impede que a chave
+   única do worker vire chave-mestra de todas as lojas da rede. */
+async function senhaDaLojaConfere(request, env, loja) {
+
+    const digitada = request.headers.get("X-Painel-Key") || "";
+
+    if (loja && loja.hash && loja.sal) {
+        return mesmoTexto(await hashDeSenha(digitada, loja.sal), loja.hash);
+    }
+
+    return senhaConfere(request, env);
+
+}
+
 /* ===================== LIMITE DE TENTATIVAS =====================
 
    A PAINEL_KEY é uma senha curta digitada por gente, e gente escolhe
@@ -265,7 +499,18 @@ async function barrarRotaPublica(env, request, rotulo, teto, recado) {
 
 }
 
-/* O portão. Devolve null quando pode passar, ou a resposta de recusa. */
+/* O portão.
+
+   Devolve { loja, db } quando pode passar, ou { recusa } com a resposta.
+
+   Antes devolvia null para "pode passar", e cada handler ia buscar o
+   env.DB por conta própria. Agora quem passa recebe QUAL loja provou a
+   senha e QUAL banco é o dela — e os handlers de painel passam a receber
+   isso como argumento obrigatório.
+
+   Argumento obrigatório é de propósito: um handler novo que esqueça de
+   usar a loja fica visível na assinatura, e não escondido dentro de uma
+   consulta que ninguém relê. */
 async function barrarSeNaoPuder(request, env) {
 
     const ip = ipDeQuemChama(request);
@@ -277,15 +522,23 @@ async function barrarSeNaoPuder(request, env) {
     if (faltam > 0) {
         await varrerDeVezEmQuando(env);
         const segundos = Math.ceil(faltam / 1000);
-        return json({
+        return { recusa: json({
             erro: `Tentativas demais. Tente de novo em ${Math.ceil(segundos / 60)} minuto(s).`
-        }, 429, { "Retry-After": String(segundos) });
+        }, 429, { "Retry-After": String(segundos) }) };
     }
 
-    if (!senhaConfere(request, env)) {
+    /* O limite de tentativas continua por IP, e só por IP. Se fosse por
+       (IP, loja), quem ataca ganharia cinco tentativas novas a cada loja
+       que escolhesse: com 30 farmácias, 150 tentativas em vez de 5. */
+    const loja = await lojaDeQuemPede(request, env);
+
+    if (!loja || !(await senhaDaLojaConfere(request, env, loja))) {
         await registrarErro(env, ip, linha);
         await varrerDeVezEmQuando(env);
-        return json({ erro: "Não autorizado." }, 401);
+        /* Mesma resposta para senha errada e para loja que não existe:
+           respostas diferentes contariam a quem tenta quais farmácias
+           estão cadastradas na plataforma. */
+        return { recusa: json({ erro: "Não autorizado." }, 401) };
     }
 
     /* Acertou: a conta daquele IP zera. Quem erra duas vezes e acerta na
@@ -297,7 +550,18 @@ async function barrarSeNaoPuder(request, env) {
        no D1 à toa, o dia inteiro, para apagar nada. */
     if (linha) await limparTentativas(env, ip);
 
-    return null;
+    let db;
+    try {
+        db = bancoDaLoja(env, loja);
+    } catch (erro) {
+        /* Binding faltando é erro de instalação, não de quem está
+           entrando: a loja foi cadastrada apontando para um banco que
+           ninguém ligou ao worker. Diz isso, em vez de um 500 mudo. */
+        console.error("bancoDaLoja:", erro);
+        return { recusa: json({ erro: erro.message }, 503) };
+    }
+
+    return { loja, db };
 
 }
 
@@ -430,7 +694,7 @@ const publicacao = (env) => ({
 
    Guarda o termo e nada mais. Sem telefone, sem IP, sem sessão: o que
    entra aqui não volta a ser ligado a uma pessoa. */
-async function tratarNovaBusca(request, env) {
+async function tratarNovaBusca(request, env, db) {
 
     const corpo = await request.json().catch(() => null);
 
@@ -443,7 +707,7 @@ async function tratarNovaBusca(request, env) {
 
     const resultados = Math.round(numero(corpo.resultados));
 
-    await env.DB.prepare(
+    await db.prepare(
         `INSERT INTO buscas (termo, criado_em, resultados) VALUES (?1, ?2, ?3)`
     ).bind(termo, Date.now(), resultados).run();
 
@@ -451,7 +715,7 @@ async function tratarNovaBusca(request, env) {
 
 }
 
-async function tratarNovoPedido(request, env) {
+async function tratarNovoPedido(request, env, db) {
 
     const corpo = await request.json().catch(() => null);
 
@@ -492,7 +756,7 @@ async function tratarNovoPedido(request, env) {
     // diferentes. No segundo caso, seguir em frente apagaria os itens de
     // um pedido e colocaria os do outro por cima, deixando um registro
     // que não é nem um nem outro. É raro, mas silencioso — então recusa.
-    const jaExiste = await env.DB.prepare(
+    const jaExiste = await db.prepare(
         `SELECT telefone FROM pedidos WHERE ref = ?1`
     ).bind(ref).first();
 
@@ -505,7 +769,7 @@ async function tratarNovoPedido(request, env) {
 
     const comandos = [
 
-        env.DB.prepare(
+        db.prepare(
             `INSERT INTO pedidos
                 (ref, criado_em, cliente, telefone, entrega, endereco,
                  pagamento, subtotal, frete, total, tem_receita, status)
@@ -525,13 +789,13 @@ async function tratarNovoPedido(request, env) {
         // Se o mesmo ref chegar duas vezes (cliente clicou de novo, rede
         // instável), o INSERT do pedido não faz nada — mas os itens
         // entrariam duplicados. Limpar antes deixa a operação repetível.
-        env.DB.prepare(`DELETE FROM pedido_itens WHERE ref = ?1`).bind(ref)
+        db.prepare(`DELETE FROM pedido_itens WHERE ref = ?1`).bind(ref)
 
     ];
 
     linhas.forEach((l) => {
         comandos.push(
-            env.DB.prepare(
+            db.prepare(
                 `INSERT INTO pedido_itens
                     (ref, ean, codigo, descricao, qtd, preco_unit, total_item)
                  VALUES (?1,?2,?3,?4,?5,?6,?7)`
@@ -540,7 +804,7 @@ async function tratarNovoPedido(request, env) {
     });
 
     comandos.push(
-        env.DB.prepare(
+        db.prepare(
             `INSERT INTO clientes
                 (telefone, nome, ultimo_endereco, primeiro_pedido, ultimo_pedido, pedidos, total_gasto)
              VALUES (?1,?2,?3,?4,?4,1,?5)
@@ -554,7 +818,7 @@ async function tratarNovoPedido(request, env) {
     );
 
     // batch roda tudo numa transação: ou o pedido inteiro entra, ou nada
-    await env.DB.batch(comandos);
+    await db.batch(comandos);
 
     return json({ sucesso: true, ref, itens: linhas.length });
 
@@ -573,7 +837,7 @@ function janela(url) {
 
 }
 
-async function tratarResumo(request, env) {
+async function tratarResumo(request, env, loja, db) {
 
     const url = new URL(request.url);
     const { dias, desde } = janela(url);
@@ -586,27 +850,27 @@ async function tratarResumo(request, env) {
     ) + 3 * 3600000;
 
     const [hoje, periodo, porDia, topProdutos, recentes, aguardando,
-           maisProcurados, naoEncontrados] = await env.DB.batch([
+           maisProcurados, naoEncontrados] = await db.batch([
 
-        env.DB.prepare(
+        db.prepare(
             `SELECT COUNT(*) AS pedidos, COALESCE(SUM(total),0) AS faturamento
                FROM pedidos WHERE criado_em >= ?1`
         ).bind(inicioDoDiaSP),
 
-        env.DB.prepare(
+        db.prepare(
             `SELECT COUNT(*) AS pedidos, COALESCE(SUM(total),0) AS faturamento,
                     COALESCE(AVG(total),0) AS ticket
                FROM pedidos WHERE criado_em >= ?1`
         ).bind(desde),
 
-        env.DB.prepare(
+        db.prepare(
             `SELECT date((criado_em - 10800000)/1000, 'unixepoch') AS dia,
                     COUNT(*) AS pedidos, COALESCE(SUM(total),0) AS faturamento
                FROM pedidos WHERE criado_em >= ?1
               GROUP BY dia ORDER BY dia`
         ).bind(desde),
 
-        env.DB.prepare(
+        db.prepare(
             `SELECT i.descricao, i.ean,
                     SUM(i.qtd) AS unidades,
                     SUM(i.total_item) AS faturamento
@@ -618,19 +882,19 @@ async function tratarResumo(request, env) {
               LIMIT 20`
         ).bind(desde),
 
-        env.DB.prepare(
+        db.prepare(
             `SELECT ref, criado_em, cliente, telefone, entrega, pagamento,
                     total, tem_receita, status
                FROM pedidos ORDER BY criado_em DESC LIMIT 30`
         ),
 
-        env.DB.prepare(
+        db.prepare(
             `SELECT COUNT(*) AS n FROM pedidos
               WHERE tem_receita = 1 AND status = 'novo'`
         ),
 
         // o que mais procuram, com quantas dessas vezes não acharam nada
-        env.DB.prepare(
+        db.prepare(
             `SELECT termo,
                     COUNT(*) AS buscas,
                     SUM(CASE WHEN resultados = 0 THEN 1 ELSE 0 END) AS vazias
@@ -640,7 +904,7 @@ async function tratarResumo(request, env) {
         ).bind(desde),
 
         // procuraram e o site não tinha: cada linha é uma venda perdida
-        env.DB.prepare(
+        db.prepare(
             `SELECT termo, COUNT(*) AS buscas, MAX(criado_em) AS ultima
                FROM buscas
               WHERE criado_em >= ?1 AND resultados = 0
@@ -664,12 +928,12 @@ async function tratarResumo(request, env) {
 
 }
 
-async function tratarClientes(request, env) {
+async function tratarClientes(request, env, loja, db) {
 
     const url = new URL(request.url);
     const limite = Math.min(parseInt(url.searchParams.get("limite") || "100", 10) || 100, 500);
 
-    const { results } = await env.DB.prepare(
+    const { results } = await db.prepare(
         `SELECT telefone, nome, ultimo_endereco, primeiro_pedido,
                 ultimo_pedido, pedidos, total_gasto
            FROM clientes ORDER BY ultimo_pedido DESC LIMIT ?1`
@@ -679,11 +943,11 @@ async function tratarClientes(request, env) {
 
 }
 
-async function tratarPedido(request, env, ref) {
+async function tratarPedido(request, env, loja, db, ref) {
 
-    const [pedido, itens] = await env.DB.batch([
-        env.DB.prepare(`SELECT * FROM pedidos WHERE ref = ?1`).bind(ref),
-        env.DB.prepare(
+    const [pedido, itens] = await db.batch([
+        db.prepare(`SELECT * FROM pedidos WHERE ref = ?1`).bind(ref),
+        db.prepare(
             `SELECT ean, codigo, descricao, qtd, preco_unit, total_item
                FROM pedido_itens WHERE ref = ?1 ORDER BY id`
         ).bind(ref)
@@ -706,11 +970,11 @@ async function tratarPedido(request, env, ref) {
 
    Os itens vêm na mesma resposta, e não um pedido por vez: separar dez
    pedidos custaria onze idas ao servidor em vez de uma. */
-async function tratarFila(request, env) {
+async function tratarFila(request, env, loja, db) {
 
     const ABERTOS = ["novo", "separando", "receita-ok"];
 
-    const pedidos = await env.DB.prepare(
+    const pedidos = await db.prepare(
         `SELECT ref, criado_em, cliente, telefone, entrega, endereco,
                 pagamento, subtotal, frete, total, tem_receita, status
            FROM pedidos
@@ -729,7 +993,7 @@ async function tratarFila(request, env) {
     const refs = lista.map(p => p.ref);
     const marcadores = refs.map((_, i) => `?${i + 1}`).join(",");
 
-    const itens = await env.DB.prepare(
+    const itens = await db.prepare(
         `SELECT ref, ean, codigo, descricao, qtd, preco_unit, total_item
            FROM pedido_itens
           WHERE ref IN (${marcadores})
@@ -790,11 +1054,11 @@ function urlSegura(valor, { permitirVazio = false } = {}) {
 /* O que o SITE lê. Aberto, sem chave: é conteúdo de vitrine, aparece
    para qualquer visitante de qualquer jeito. Já sai filtrado por data,
    para o site não precisar saber a regra nem conferir o relógio. */
-async function tratarBannersPublicos(request, env) {
+async function tratarBannersPublicos(request, env, db) {
 
     const hoje = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
 
-    const { results } = await env.DB.prepare(
+    const { results } = await db.prepare(
         `SELECT id, imagem, alt, link
            FROM banners
           WHERE ativo = 1
@@ -809,9 +1073,9 @@ async function tratarBannersPublicos(request, env) {
 
 /* O que o PAINEL lê: tudo, inclusive desligado e fora do prazo, porque
    é justamente isso que a loja precisa ver para editar. */
-async function tratarBannersDaLoja(request, env) {
+async function tratarBannersDaLoja(request, env, loja, db) {
 
-    const { results } = await env.DB.prepare(
+    const { results } = await db.prepare(
         `SELECT id, imagem, alt, link, inicio, fim, ativo, ordem, criado_em, r2_chave
            FROM banners ORDER BY ordem, id`
     ).all();
@@ -820,7 +1084,7 @@ async function tratarBannersDaLoja(request, env) {
 
 }
 
-async function tratarSalvarBanner(request, env) {
+async function tratarSalvarBanner(request, env, loja, db) {
 
     const corpo = await request.json().catch(() => null);
     if (!corpo) return json({ erro: "Corpo inválido." }, 400);
@@ -846,7 +1110,7 @@ async function tratarSalvarBanner(request, env) {
     const id = Math.round(numero(corpo.id));
 
     if (id > 0) {
-        await env.DB.prepare(
+        await db.prepare(
             `UPDATE banners
                 SET imagem = ?2, alt = ?3, link = ?4, inicio = ?5, fim = ?6,
                     ativo = ?7, ordem = ?8, r2_chave = COALESCE(?9, r2_chave)
@@ -857,7 +1121,7 @@ async function tratarSalvarBanner(request, env) {
         return json({ sucesso: true, id });
     }
 
-    const r = await env.DB.prepare(
+    const r = await db.prepare(
         `INSERT INTO banners (imagem, alt, link, inicio, fim, ativo, ordem, criado_em, r2_chave)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`
     ).bind(imagem, alt, link, inicio, fim, ativo, ordem, Date.now(),
@@ -867,7 +1131,7 @@ async function tratarSalvarBanner(request, env) {
 
 }
 
-async function tratarExcluirBanner(request, env) {
+async function tratarExcluirBanner(request, env, loja, db) {
 
     const { id } = await request.json().catch(() => ({}));
     const alvo = Math.round(numero(id));
@@ -876,7 +1140,7 @@ async function tratarExcluirBanner(request, env) {
     /* Apaga o arquivo junto. Sem isto o balde vira depósito de imagem
        de campanha de dois anos atrás, que ninguém sabe se ainda serve
        para alguma coisa e por isso ninguém apaga. */
-    const linha = await env.DB.prepare(
+    const linha = await db.prepare(
         `SELECT r2_chave FROM banners WHERE id = ?1`
     ).bind(alvo).first();
 
@@ -884,7 +1148,7 @@ async function tratarExcluirBanner(request, env) {
         await env.BANNERS_BUCKET.delete(linha.r2_chave).catch(() => {});
     }
 
-    const r = await env.DB.prepare(`DELETE FROM banners WHERE id = ?1`).bind(alvo).run();
+    const r = await db.prepare(`DELETE FROM banners WHERE id = ?1`).bind(alvo).run();
 
     return json({ sucesso: true, apagados: r.meta?.changes ?? 0 });
 
@@ -908,7 +1172,7 @@ const MAX_PDF_BYTES = 12 * 1024 * 1024;   // encarte de 8 páginas cabe nisso
 
    A pasta vem de uma lista fechada: sem isso, "../" no parâmetro
    escreveria onde não devia. */
-async function tratarEnviarArquivo(request, env, pasta) {
+async function tratarEnviarArquivo(request, env, loja, db, pasta) {
 
     if (!env.BANNERS_BUCKET) {
         return json({
@@ -955,7 +1219,7 @@ async function tratarEnviarArquivo(request, env, pasta) {
 /* Serve qualquer arquivo das pastas conhecidas. O /banners/arquivo/...
    continua atendendo os banners já cadastrados, que guardaram o endereço
    antigo — endereço publicado não se quebra. */
-async function tratarServirArquivo(request, env, pasta, nome) {
+async function tratarServirArquivo(request, env, db, pasta, nome) {
 
     if (!env.BANNERS_BUCKET || !PASTAS.includes(pasta)) return json({ erro: "Não encontrado." }, 404);
 
@@ -972,7 +1236,7 @@ async function tratarServirArquivo(request, env, pasta, nome) {
 
 }
 
-async function tratarEnviarImagemDeBanner(request, env) {
+async function tratarEnviarImagemDeBanner(request, env, loja, db) {
 
     if (!env.BANNERS_BUCKET) {
         return json({
@@ -1010,7 +1274,7 @@ async function tratarEnviarImagemDeBanner(request, env) {
    O cache longo é seguro porque o nome do arquivo tem a hora e um
    sorteio dentro: trocar o banner gera nome novo, então nunca é preciso
    invalidar cache — o endereço antigo simplesmente deixa de ser usado. */
-async function tratarArquivoDeBanner(request, env, nome) {
+async function tratarArquivoDeBanner(request, env, db, nome) {
 
     if (!env.BANNERS_BUCKET) return json({ erro: "Não encontrado." }, 404);
 
@@ -1110,13 +1374,83 @@ async function tratarLojaPublica(request, env) {
 
 }
 
+/* Cadastra ou troca a senha de uma farmácia.
+
+   A senha NUNCA é escrita no console do D1, e é por isso que esta rota
+   existe em vez de um INSERT na mão: senha digitada em console de banco
+   fica no histórico do navegador, no log de quem administra e, não raro,
+   num print mandado por WhatsApp. Aqui ela chega pelo corpo da
+   requisição, sob TLS, vira hash com sal novo e some.
+
+   Quem pode chamar: quem já passou pelo portão. Na prática,
+
+     - enquanto a loja não tem senha própria, a PAINEL_KEY do worker —
+       que é como se cadastra a primeira;
+     - depois que tem, só a senha dela.
+
+   O slug alvo vem do corpo, e é a ÚNICA rota de painel que aceita loja
+   por parâmetro. Tem de aceitar: é ela que cadastra a loja nova, que por
+   definição ainda não consegue autenticar. A trava é a de cima — com a
+   PAINEL_KEY cadastrando a primeira senha de cada loja, e cada loja
+   trocando só a própria depois. Quando a Fase 5 trouxer o painel de
+   operador, isto vira "só o dono da plataforma", que é o certo. */
+async function tratarSenhaDaLoja(request, env, loja) {
+
+    let corpo;
+    try {
+        corpo = await request.json();
+    } catch (erro) {
+        return json({ erro: "Corpo inválido." }, 400);
+    }
+
+    const alvo = String(corpo.slug || loja.slug || "")
+        .toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 60);
+    const senha = String(corpo.senha || "");
+
+    if (!alvo) return json({ erro: "Qual loja?" }, 400);
+
+    /* Oito caracteres não é segurança por si — o que segura é o limite de
+       cinco tentativas por IP. É piso para não cadastrarem "1234". */
+    if (senha.length < 8) {
+        return json({ erro: "A senha precisa de pelo menos 8 caracteres." }, 400);
+    }
+
+    /* Só troca senha de loja que existe: sem isto, um erro de digitação
+       no slug criaria uma linha órfã, e a loja continuaria entrando com a
+       PAINEL_KEY sem ninguém entender por quê. */
+    const existe = await env.DB.prepare(
+        `SELECT slug FROM lojas WHERE slug = ?1`
+    ).bind(alvo).first();
+
+    if (!existe) return json({ erro: "Essa loja não está cadastrada." }, 404);
+
+    /* Quem já tem senha própria só troca a dela. Sem esta linha, a
+       farmácia A entraria com a própria senha e reescreveria a da B —
+       que é o vazamento que esta fase inteira existe para fechar. */
+    if (loja.hash && alvo !== loja.slug) {
+        return json({ erro: "Você só pode trocar a senha da sua própria loja." }, 403);
+    }
+
+    const sal = salNovo();
+    const hash = await hashDeSenha(senha, sal);
+
+    await env.DB.prepare(
+        `INSERT INTO lojas_acesso (slug, hash, sal, trocada_em)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(slug) DO UPDATE SET hash = ?2, sal = ?3, trocada_em = ?4`
+    ).bind(alvo, hash, sal, new Date().toISOString()).run();
+
+    return json({ ok: true, loja: alvo });
+
+}
+
 /* O que o SITE lê. Aberto, como o preço da vitrine — que é público de
    qualquer jeito. Já sai filtrado por data: o site aplica e pronto. */
-async function tratarPromocoesPublicas(request, env) {
+async function tratarPromocoesPublicas(request, env, db) {
 
     const hoje = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
 
-    const { results } = await env.DB.prepare(
+    const { results } = await db.prepare(
         `SELECT codigo, preco
            FROM promocoes
           WHERE ativo = 1
@@ -1128,14 +1462,14 @@ async function tratarPromocoesPublicas(request, env) {
 
 }
 
-async function tratarPromocoesDaLoja(request, env) {
+async function tratarPromocoesDaLoja(request, env, loja, db) {
 
-    const { results } = await env.DB.prepare(
+    const { results } = await db.prepare(
         `SELECT codigo, preco, inicio, fim, ativo, lote, criado_em
            FROM promocoes ORDER BY criado_em DESC`
     ).all();
 
-    const lotes = await env.DB.prepare(
+    const lotes = await db.prepare(
         `SELECT lote, COUNT(*) AS itens, MIN(inicio) AS inicio, MAX(fim) AS fim
            FROM promocoes WHERE lote IS NOT NULL AND lote <> ''
           GROUP BY lote ORDER BY MAX(criado_em) DESC`
@@ -1151,7 +1485,7 @@ async function tratarPromocoesDaLoja(request, env) {
    o preço que vai valer, item por item, antes de confirmar. O worker
    recebe preços prontos justamente para não existir um segundo lugar
    onde o valor possa sair diferente do que foi mostrado. */
-async function tratarSalvarPromocoes(request, env) {
+async function tratarSalvarPromocoes(request, env, loja, db) {
 
     const corpo = await request.json().catch(() => null);
     if (!corpo) return json({ erro: "Corpo inválido." }, 400);
@@ -1185,7 +1519,7 @@ async function tratarSalvarPromocoes(request, env) {
         }
 
         comandos.push(
-            env.DB.prepare(
+            db.prepare(
                 `INSERT INTO promocoes (codigo, preco, inicio, fim, ativo, lote, criado_em)
                  VALUES (?1,?2,?3,?4,?5,?6,?7)
                  ON CONFLICT(codigo) DO UPDATE SET
@@ -1197,7 +1531,7 @@ async function tratarSalvarPromocoes(request, env) {
 
     // uma transação só: ou o lote inteiro entra, ou nada. Meio lote de
     // promoção aplicado é pior do que nenhum — ninguém sabe onde parou.
-    await env.DB.batch(comandos);
+    await db.batch(comandos);
 
     return json({ sucesso: true, gravados: comandos.length, lote });
 
@@ -1208,13 +1542,13 @@ async function tratarSalvarPromocoes(request, env) {
    O lote existe para isto. Sem ele, desfazer uma promoção de 300 itens
    seria trezentos cliques, e na prática ninguém desfaz — a promoção fica
    no ar para sempre. */
-async function tratarExcluirPromocoes(request, env) {
+async function tratarExcluirPromocoes(request, env, loja, db) {
 
     const corpo = await request.json().catch(() => ({}));
 
     const lote = texto(corpo.lote, 60);
     if (lote) {
-        const r = await env.DB.prepare(`DELETE FROM promocoes WHERE lote = ?1`).bind(lote).run();
+        const r = await db.prepare(`DELETE FROM promocoes WHERE lote = ?1`).bind(lote).run();
         return json({ sucesso: true, apagados: r.meta?.changes ?? 0 });
     }
 
@@ -1227,7 +1561,7 @@ async function tratarExcluirPromocoes(request, env) {
     }
 
     const marcadores = codigos.map((_, i) => `?${i + 1}`).join(",");
-    const r = await env.DB.prepare(
+    const r = await db.prepare(
         `DELETE FROM promocoes WHERE codigo IN (${marcadores})`
     ).bind(...codigos).run();
 
@@ -1251,11 +1585,11 @@ async function tratarExcluirPromocoes(request, env) {
 /* O que o SITE lê: o encarte que está valendo hoje, com as páginas na
    ordem. Um só — dois encartes válidos ao mesmo tempo é erro de
    cadastro, e mostrar os dois esconderia o erro. Ganha o mais recente. */
-async function tratarEncartePublico(request, env) {
+async function tratarEncartePublico(request, env, db) {
 
     const hoje = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
 
-    const encarte = await env.DB.prepare(
+    const encarte = await db.prepare(
         `SELECT id, titulo, pdf
            FROM encartes
           WHERE ativo = 1
@@ -1267,7 +1601,7 @@ async function tratarEncartePublico(request, env) {
 
     if (!encarte) return json({ encarte: null });
 
-    const { results } = await env.DB.prepare(
+    const { results } = await db.prepare(
         `SELECT imagem FROM encarte_paginas WHERE encarte_id = ?1 ORDER BY ordem, id`
     ).bind(encarte.id).all();
 
@@ -1275,14 +1609,14 @@ async function tratarEncartePublico(request, env) {
 
 }
 
-async function tratarEncartesDaLoja(request, env) {
+async function tratarEncartesDaLoja(request, env, loja, db) {
 
-    const encartes = await env.DB.prepare(
+    const encartes = await db.prepare(
         `SELECT id, titulo, inicio, fim, ativo, pdf, pdf_chave, criado_em
            FROM encartes ORDER BY criado_em DESC`
     ).all();
 
-    const paginas = await env.DB.prepare(
+    const paginas = await db.prepare(
         `SELECT id, encarte_id, imagem, r2_chave, ordem
            FROM encarte_paginas ORDER BY encarte_id, ordem, id`
     ).all();
@@ -1300,7 +1634,7 @@ async function tratarEncartesDaLoja(request, env) {
 
 }
 
-async function tratarSalvarEncarte(request, env) {
+async function tratarSalvarEncarte(request, env, loja, db) {
 
     const corpo = await request.json().catch(() => null);
     if (!corpo) return json({ erro: "Corpo inválido." }, 400);
@@ -1335,13 +1669,13 @@ async function tratarSalvarEncarte(request, env) {
     let encarteId = id;
 
     if (id > 0) {
-        await env.DB.prepare(
+        await db.prepare(
             `UPDATE encartes SET titulo = ?2, inicio = ?3, fim = ?4, ativo = ?5,
                                  pdf = ?6, pdf_chave = COALESCE(?7, pdf_chave)
               WHERE id = ?1`
         ).bind(id, titulo, inicio, fim, ativo, pdf, texto(corpo.pdfChave, 200) || null).run();
     } else {
-        const r = await env.DB.prepare(
+        const r = await db.prepare(
             `INSERT INTO encartes (titulo, inicio, fim, ativo, pdf, pdf_chave, criado_em)
              VALUES (?1,?2,?3,?4,?5,?6,?7)`
         ).bind(titulo, inicio, fim, ativo, pdf, texto(corpo.pdfChave, 200) || null, agora).run();
@@ -1355,25 +1689,25 @@ async function tratarSalvarEncarte(request, env) {
        encartes com página repetida ou faltando. Apagar e reinserir num
        batch só deixa o resultado igual ao que a tela mostrava. */
     const comandos = [
-        env.DB.prepare(`DELETE FROM encarte_paginas WHERE encarte_id = ?1`).bind(encarteId)
+        db.prepare(`DELETE FROM encarte_paginas WHERE encarte_id = ?1`).bind(encarteId)
     ];
 
     limpas.forEach((pag, i) => {
         comandos.push(
-            env.DB.prepare(
+            db.prepare(
                 `INSERT INTO encarte_paginas (encarte_id, imagem, r2_chave, ordem)
                  VALUES (?1,?2,?3,?4)`
             ).bind(encarteId, pag.imagem, pag.r2_chave, i)
         );
     });
 
-    await env.DB.batch(comandos);
+    await db.batch(comandos);
 
     return json({ sucesso: true, id: encarteId, paginas: limpas.length });
 
 }
 
-async function tratarExcluirEncarte(request, env) {
+async function tratarExcluirEncarte(request, env, loja, db) {
 
     const { id } = await request.json().catch(() => ({}));
     const alvo = Math.round(numero(id));
@@ -1384,24 +1718,24 @@ async function tratarExcluirEncarte(request, env) {
        todo mês, que ninguém vai olhar de novo. */
     if (env.BANNERS_BUCKET) {
         const [pags, enc] = await Promise.all([
-            env.DB.prepare(`SELECT r2_chave FROM encarte_paginas WHERE encarte_id = ?1`).bind(alvo).all(),
-            env.DB.prepare(`SELECT pdf_chave FROM encartes WHERE id = ?1`).bind(alvo).first()
+            db.prepare(`SELECT r2_chave FROM encarte_paginas WHERE encarte_id = ?1`).bind(alvo).all(),
+            db.prepare(`SELECT pdf_chave FROM encartes WHERE id = ?1`).bind(alvo).first()
         ]);
 
         const chaves = [...(pags.results || []).map(p => p.r2_chave), enc?.pdf_chave].filter(Boolean);
         await Promise.all(chaves.map(c => env.BANNERS_BUCKET.delete(c).catch(() => {})));
     }
 
-    await env.DB.batch([
-        env.DB.prepare(`DELETE FROM encarte_paginas WHERE encarte_id = ?1`).bind(alvo),
-        env.DB.prepare(`DELETE FROM encartes WHERE id = ?1`).bind(alvo)
+    await db.batch([
+        db.prepare(`DELETE FROM encarte_paginas WHERE encarte_id = ?1`).bind(alvo),
+        db.prepare(`DELETE FROM encartes WHERE id = ?1`).bind(alvo)
     ]);
 
     return json({ sucesso: true });
 
 }
 
-async function tratarStatus(request, env) {
+async function tratarStatus(request, env, loja, db) {
 
     const { ref, status } = await request.json().catch(() => ({}));
 
@@ -1411,7 +1745,7 @@ async function tratarStatus(request, env) {
         return json({ erro: "Informe 'ref' e um 'status' válido." }, 400);
     }
 
-    const r = await env.DB.prepare(
+    const r = await db.prepare(
         `UPDATE pedidos SET status = ?2 WHERE ref = ?1`
     ).bind(texto(ref, 40), status).run();
 
@@ -1441,7 +1775,9 @@ export default {
                     "Se foi você mesmo, fale com a gente pelo WhatsApp."
                 );
                 if (cheio) return cheio;
-                return await tratarNovoPedido(request, env);
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarNovoPedido(request, env, alvo.db);
             }
 
             // idem: quem grava é o site público
@@ -1451,13 +1787,17 @@ export default {
                     "Muitas buscas deste acesso em pouco tempo."
                 );
                 if (cheio) return cheio;
-                return await tratarNovaBusca(request, env);
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarNovaBusca(request, env, alvo.db);
             }
 
             // Banners: a lista e os arquivos são conteúdo de vitrine, e a
             // vitrine é pública. Quem EDITA, mais abaixo, precisa da chave.
             if (request.method === "GET" && rota === "/banners") {
-                return await tratarBannersPublicos(request, env);
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarBannersPublicos(request, env, alvo.db);
             }
 
             /* Quem é a farmácia. Público: é o mesmo conteúdo do rodapé
@@ -1468,48 +1808,73 @@ export default {
 
             // preço de vitrine é público de qualquer jeito
             if (request.method === "GET" && rota === "/promocoes") {
-                return await tratarPromocoesPublicas(request, env);
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarPromocoesPublicas(request, env, alvo.db);
             }
 
             if (request.method === "GET" && rota === "/encarte") {
-                return await tratarEncartePublico(request, env);
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarEncartePublico(request, env, alvo.db);
             }
 
             const arquivo = rota.match(/^\/arquivos\/([a-z]+)\/([A-Za-z0-9._-]+)$/);
             if (request.method === "GET" && arquivo) {
-                return await tratarServirArquivo(request, env, arquivo[1], arquivo[2]);
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarServirArquivo(request, env, alvo.db, arquivo[1], arquivo[2]);
             }
 
             const arquivoBanner = rota.match(/^\/banners\/arquivo\/([A-Za-z0-9._-]+)$/);
             if (request.method === "GET" && arquivoBanner) {
-                return await tratarArquivoDeBanner(request, env, arquivoBanner[1]);
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarArquivoDeBanner(request, env, alvo.db, arquivoBanner[1]);
             }
 
-            // daqui para baixo é a loja olhando os próprios dados
-            const recusa = await barrarSeNaoPuder(request, env);
-            if (recusa) return recusa;
+            /* Daqui para baixo é a loja olhando os PRÓPRIOS dados.
 
-            if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env);
-            if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env);
-            if (request.method === "GET" && rota === "/clientes") return await tratarClientes(request, env);
-            if (request.method === "POST" && rota === "/status")  return await tratarStatus(request, env);
+               O portão devolve qual farmácia provou a senha e qual é o
+               banco dela. Nenhum handler abaixo lê a loja do request:
+               todos a recebem como argumento. Se um deles aceitasse
+               "?loja=", a dona da farmácia A autenticada pediria
+               /fila?loja=farmacia-b e leria a fila da concorrente. */
+            const porta = await barrarSeNaoPuder(request, env);
+            if (porta.recusa) return porta.recusa;
 
-            if (request.method === "GET"  && rota === "/banners/todos")   return await tratarBannersDaLoja(request, env);
-            if (request.method === "POST" && rota === "/banners")         return await tratarSalvarBanner(request, env);
-            if (request.method === "POST" && rota === "/banners/excluir") return await tratarExcluirBanner(request, env);
-            if (request.method === "POST" && rota === "/banners/imagem")  return await tratarEnviarImagemDeBanner(request, env);
+            const loja = porta.loja;
+            const db = porta.db;
+
+            /* Cadastrar/trocar senha. Fica aqui em cima, logo depois do
+               portão, porque é a única rota de painel que aceita o slug
+               por parâmetro — e isso merece estar visível, não perdido no
+               meio das outras. */
+            if (request.method === "POST" && rota === "/loja/senha") {
+                return await tratarSenhaDaLoja(request, env, loja);
+            }
+
+            if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env, loja, db);
+            if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env, loja, db);
+            if (request.method === "GET" && rota === "/clientes") return await tratarClientes(request, env, loja, db);
+            if (request.method === "POST" && rota === "/status")  return await tratarStatus(request, env, loja, db);
+
+            if (request.method === "GET"  && rota === "/banners/todos")   return await tratarBannersDaLoja(request, env, loja, db);
+            if (request.method === "POST" && rota === "/banners")         return await tratarSalvarBanner(request, env, loja, db);
+            if (request.method === "POST" && rota === "/banners/excluir") return await tratarExcluirBanner(request, env, loja, db);
+            if (request.method === "POST" && rota === "/banners/imagem")  return await tratarEnviarImagemDeBanner(request, env, loja, db);
 
             if (request.method === "POST" && rota === "/arquivos") {
-                return await tratarEnviarArquivo(request, env, new URL(request.url).searchParams.get("pasta") || "banner");
+                return await tratarEnviarArquivo(request, env, loja, db, new URL(request.url).searchParams.get("pasta") || "banner");
             }
 
-            if (request.method === "GET"  && rota === "/encartes")         return await tratarEncartesDaLoja(request, env);
-            if (request.method === "POST" && rota === "/encartes")         return await tratarSalvarEncarte(request, env);
-            if (request.method === "POST" && rota === "/encartes/excluir") return await tratarExcluirEncarte(request, env);
+            if (request.method === "GET"  && rota === "/encartes")         return await tratarEncartesDaLoja(request, env, loja, db);
+            if (request.method === "POST" && rota === "/encartes")         return await tratarSalvarEncarte(request, env, loja, db);
+            if (request.method === "POST" && rota === "/encartes/excluir") return await tratarExcluirEncarte(request, env, loja, db);
 
-            if (request.method === "GET"  && rota === "/promocoes/todas")   return await tratarPromocoesDaLoja(request, env);
-            if (request.method === "POST" && rota === "/promocoes")         return await tratarSalvarPromocoes(request, env);
-            if (request.method === "POST" && rota === "/promocoes/excluir") return await tratarExcluirPromocoes(request, env);
+            if (request.method === "GET"  && rota === "/promocoes/todas")   return await tratarPromocoesDaLoja(request, env, loja, db);
+            if (request.method === "POST" && rota === "/promocoes")         return await tratarSalvarPromocoes(request, env, loja, db);
+            if (request.method === "POST" && rota === "/promocoes/excluir") return await tratarExcluirPromocoes(request, env, loja, db);
 
             /* Catálogo: a senha do painel já foi conferida acima, então
                daqui para baixo quem chama provou quem é. Este worker
@@ -1580,7 +1945,7 @@ export default {
 
             const umPedido = rota.match(/^\/pedidos\/(.+)$/);
             if (request.method === "GET" && umPedido) {
-                return await tratarPedido(request, env, decodeURIComponent(umPedido[1]));
+                return await tratarPedido(request, env, loja, db, decodeURIComponent(umPedido[1]));
             }
 
             return json({ erro: "Rota não encontrada." }, 404);
