@@ -333,7 +333,7 @@ const MAX_ENCAMINHAR_BYTES = 25 * 1024 * 1024;
 
 /* Repassa a chamada ao worker de destino, trocando a senha do painel
    (que o navegador tem) pela chave daquele worker (que ele não tem). */
-async function encaminhar(request, env, { destino, caminho, cabecalho, chave, metodo }) {
+async function encaminhar(request, env, { servico, destino, caminho, cabecalho, chave, metodo }) {
 
     if (!destino || !chave) {
         /* 501 e não 500: não é defeito, é configuração que falta. A
@@ -366,7 +366,21 @@ async function encaminhar(request, env, { destino, caminho, cabecalho, chave, me
     let resposta;
 
     try {
-        resposta = await fetch(url, opcoes);
+        /* Pelo SERVICE BINDING, e não por fetch() no endereço do outro
+           worker. A Cloudflare recusa um Worker chamar outro Worker da
+           mesma zona por HTTP: devolve 404 com "error code: 1042", que
+           é indistinguível de rota inexistente e manda a gente procurar
+           defeito no lugar errado — foi o que aconteceu aqui.
+
+           O binding é o caminho suportado: a chamada vai direto, sem
+           sair para a internet, e ainda é mais rápida. O endereço acima
+           continua servindo para montar o caminho; o host é ignorado.
+
+           O fetch() comum fica como reserva, para destino que NÃO é
+           worker da mesma conta e para os testes. */
+        resposta = servico
+            ? await servico.fetch(new Request(url, opcoes))
+            : await fetch(url, opcoes);
     } catch (erro) {
         console.error("encaminhar:", erro);
         return json({ erro: "Não consegui falar com o serviço de catálogo." }, 502);
@@ -387,13 +401,19 @@ async function encaminhar(request, env, { destino, caminho, cabecalho, chave, me
 
 }
 
+/* O "servico" é o binding de serviço, configurado no painel do
+   Cloudflare (Bindings -> Service). Sem ele a chamada sai por HTTP e a
+   Cloudflare a recusa com 1042, porque é worker chamando worker da
+   mesma zona. */
 const imagens = (env) => ({
+    servico: env.IMAGENS_SERVICE,
     destino: env.IMAGENS_PROXY_URL,
     cabecalho: "X-Imagens-Key",
     chave: env.IMAGENS_KEY
 });
 
 const publicacao = (env) => ({
+    servico: env.PUBLISH_SERVICE,
     destino: env.PUBLISH_WORKER_URL,
     cabecalho: "X-Publish-Key",
     chave: env.PUBLISH_KEY

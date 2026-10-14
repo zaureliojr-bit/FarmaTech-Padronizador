@@ -55,6 +55,38 @@ function interceptarFetch() {
   return recebidas;
 }
 
+/* Binding de serviço de mentira. Registra o que recebeu, para o teste
+   provar que a chamada foi POR ELE e não por fetch() — a Cloudflare
+   recusa worker chamando worker da mesma zona por HTTP (erro 1042). */
+function fazerServico(registro, nome) {
+  return {
+    async fetch(pedido) {
+      const corpo = pedido.method === "GET" ? "" : await pedido.text();
+      registro.push({
+        via: nome,
+        url: pedido.url,
+        metodo: pedido.method,
+        cabecalhos: Object.fromEntries(pedido.headers),
+        corpo
+      });
+      if (pedido.url.includes("/extracao/arquivo")) {
+        return new Response("conteudo-da-planilha", {
+          status: 200,
+          headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
+        });
+      }
+      if (pedido.url.includes("falha")) {
+        return new Response(JSON.stringify({ erro: "o destino recusou" }), {
+          status: 422, headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ sucesso: true }), {
+        status: 200, headers: { "Content-Type": "application/json" }
+      });
+    }
+  };
+}
+
 function fazerEnv(extra = {}) {
   return {
     DB: fazerDB(),
@@ -260,7 +292,50 @@ const ROTAS = [
     !recebidas.length ? ok("e não foi encaminhado") : nao("mandou assim mesmo");
   }
 
-  console.log("\n11 · As rotas de sempre continuam de pé");
+  console.log("\n11 · Vai pelo binding de serviço, não por fetch()");
+  {
+    /* A Cloudflare recusa um Worker chamar outro Worker da mesma zona
+       por HTTP: 404 com "error code: 1042", que parece rota inexistente.
+       Esta seção existe porque esse bug chegou a produção e custou uma
+       hora de caça no lugar errado. */
+    const porFetch = interceptarFetch();
+    const porBinding = [];
+    const env = {
+      ...fazerEnv(),
+      IMAGENS_SERVICE: fazerServico(porBinding, "imagens"),
+      PUBLISH_SERVICE: fazerServico(porBinding, "publicar")
+    };
+
+    for (const [metodo, rota, corpo] of ROTAS) {
+      await chamar(env, metodo, rota, { senha: CHAVE_PAINEL, corpo, tipo: "application/json" });
+    }
+
+    porBinding.length === ROTAS.length
+      ? ok(`as ${ROTAS.length} chamadas foram pelo binding`)
+      : nao(`só ${porBinding.length} de ${ROTAS.length} foram pelo binding`);
+
+    porFetch.length === 0
+      ? ok("e nenhuma saiu por fetch() — é isso que a Cloudflare recusa")
+      : nao(`${porFetch.length} saíram por fetch() e levariam 1042 em produção`);
+
+    porBinding.every(r => r.cabecalhos["x-imagens-key"] || r.cabecalhos["x-publish-key"])
+      ? ok("a chave do destino continua sendo carimbada") : nao("alguma foi sem chave");
+
+    porBinding.some(r => r.via === "imagens") && porBinding.some(r => r.via === "publicar")
+      ? ok("cada rota foi para o serviço certo") : nao("alguma foi para o serviço errado");
+  }
+
+  console.log("\n12 · Sem binding, ainda funciona por fetch (teste e destino de fora)");
+  {
+    const porFetch = interceptarFetch();
+    const env = fazerEnv();   // sem IMAGENS_SERVICE nem PUBLISH_SERVICE
+    const r = await chamar(env, "POST", "/catalogo/imagem",
+      { senha: CHAVE_PAINEL, corpo: { ean: "1" }, tipo: "application/json" });
+    r.status === 200 && porFetch.length === 1
+      ? ok("cai no fetch() como reserva, sem quebrar") : nao("reserva falhou: " + r.status);
+  }
+
+  console.log("\n13 · As rotas de sempre continuam de pé");
   {
     interceptarFetch();
     const env = fazerEnv();

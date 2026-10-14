@@ -122,3 +122,31 @@ sem os dados que identificam a pessoa.
 D1 no free tier: 5 GB de armazenamento e 5 milhões de linhas lidas por
 dia. Um pedido com 5 itens ocupa por volta de 1 KB. Não é o tipo de
 coisa que essa loja vai estourar.
+
+
+## Porteiro do catálogo: os bindings de serviço
+
+As rotas `/catalogo/*` repassam a chamada para o `imagens-proxy` e o
+`publish-proxy`, carimbando a chave de cada um — é o que tira essas
+chaves do navegador.
+
+O repasse **tem de ser por binding de serviço**, não por `fetch()` no
+endereço do outro worker. A Cloudflare recusa um Worker chamar outro
+Worker da mesma zona por HTTP e devolve **404 com `error code: 1042`**,
+que é indistinguível de rota inexistente — já custou uma hora de caça no
+lugar errado aqui.
+
+No painel: worker `farmatech-pedidos-proxy` → **Configurações** →
+**Bindings** → **Adicionar** → tipo **Service**:
+
+| Nome da variável | Worker de destino |
+|---|---|
+| `IMAGENS_SERVICE` | `farmatech-imagens-proxy` |
+| `PUBLISH_SERVICE` | `farmatech-publish-proxy` |
+
+As variáveis de endereço (`IMAGENS_PROXY_URL`, `PUBLISH_WORKER_URL`)
+continuam necessárias: elas montam o caminho da chamada. O host é
+ignorado quando o binding existe.
+
+Sem os bindings o código cai num `fetch()` comum — que serve para destino
+fora da conta e para os testes, mas em produção leva 1042.
