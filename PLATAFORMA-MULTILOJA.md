@@ -535,9 +535,36 @@ E a divisão de URL que o Farmatch usa, que vale copiar inteira:
 
 | Papel | Rota | Canônica |
 |---|---|---|
-| Vitrine da loja | `/<slug-da-loja>` | si mesma, com `Pharmacy` JSON-LD daquela loja |
-| Compra | `/loja/<slug>/produto/<nome>-<ean>` | a página de busca |
-| Busca (sem loja) | `/produto/<nome>-<ean>` | si mesma, **sem preço nem vendedor** |
+| Vitrine da loja | `/loja/<slug>` | si mesma, com `Pharmacy` JSON-LD daquela loja |
+| Compra | `/loja/<slug>/produto/<nome>-<ean>` | a página do produto |
+| Produto (sem loja) | `/produto/<nome>-<ean>` | si mesma, **sem vendedor** |
+
+**DECIDIDO E IMPLEMENTADO** (14/10/2026). As três rotas estão no ar, com
+uma loja cadastrada. Foi feito no dia seguinte ao lançamento das URLs de
+produto justamente porque o Google ainda não tinha indexado nada: migrar
+a forma dos endereços era grátis naquela semana e deixaria de ser.
+
+Três correções ao desenho acima, todas descobertas implementando:
+
+**A vitrine é `/loja/<slug>`, não `/<slug>`.** Um arquivo de função na
+raiz (`functions/[[slug]].js`) captura TODOS os caminhos do site, e na
+Pages a função tem prioridade sobre o arquivo estático — `/style.css` e
+`/logo.png` passariam por ela. Trocar esse risco por uma barra a menos no
+endereço não paga.
+
+**A página de compra não leva `noindex`.** O desenho dizia "fora do
+índice". Mas `noindex` junto com `canonical` são instruções que se
+contradizem, e o Google avisa que nesses casos pode acabar tirando as
+duas páginas. O `canonical` sozinho consolida na página do produto, que é
+o que se quer.
+
+**"Sem preço" virou "sem vendedor".** A página canônica declara
+`AggregateOffer` — faixa de preços, sem `seller` —, e não ausência de
+preço. Página de produto sem preço nenhum perde o resultado rico do
+Google, que é metade do motivo de ela existir. Com uma loja, mínimo e
+máximo coincidem e a contagem é 1; com dez, vira comparação de preços,
+que é o produto do marketplace. A página de compra continua com `Offer` e
+`seller`, porque ali a oferta é de alguém.
 
 A terceira linha é a sacada. Se cada loja gerasse a sua página do mesmo
 produto, N lojas dariam N páginas quase idênticas competindo entre si — o
@@ -641,12 +668,11 @@ JSON-LD de `Pharmacy` e `WebSite` na home e `Product`/`Offer` no produto,
 e `/og/<ean>` servindo a foto da prévia — uma só, decidida no servidor,
 depois de o WhatsApp ter escolhido a imagem errada entre duas.
 
-**Divergência a resolver antes da Fase 4:** esta fase publicou a Drogaria
-Mais Barato em `/produto/<nome>-<ean>`, que a seção 8 reserva para a
-página canônica de busca, sem preço nem vendedor. Era a escolha certa com
-uma loja só. Com duas, ou as 6.765 URLs já indexadas continuam sendo da
-Mais Barato e as outras entram por `/loja/<slug>/...` (assimétrico), ou
-migra-se e perde-se o índice. Decidir antes de cadastrar a segunda.
+**Divergência resolvida no dia seguinte** (ver seção 8): as três rotas do
+marketplace entraram no ar antes de o Google indexar as URLs novas, que é
+a única janela em que essa migração é de graça. Os cards passaram a
+apontar para `/loja/<slug>/produto/...`; o sitemap continua publicando
+`/produto/<nome>-<ean>`, que é a canônica.
 
 ### Fase 1 (como foi escrita) — renderização no servidor, ainda com uma loja
 Pages Functions, título e `og:image` por produto, `sitemap.xml`,
