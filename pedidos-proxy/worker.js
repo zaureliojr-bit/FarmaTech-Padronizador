@@ -1285,7 +1285,7 @@ async function tratarExcluirBanner(request, env, loja, db) {
    ele a rota diz isso em português, e o painel continua aceitando
    endereço colado à mão — o recurso a mais não pode impedir o de
    sempre de funcionar. */
-const PASTAS = ["banner", "encarte"];
+const PASTAS = ["banner", "encarte", "marca"];
 const MAX_PDF_BYTES = 12 * 1024 * 1024;   // encarte de 8 páginas cabe nisso
 
 /* Upload genérico para o R2.
@@ -1466,6 +1466,7 @@ async function tratarLojaPublica(request, env) {
 
     let loja;
     let horario;
+    let visual = null;
 
     try {
         /* Sem slug, a loja ativa — hoje só existe uma, e exigir o slug
@@ -1489,6 +1490,17 @@ async function tratarLojaPublica(request, env) {
 
         horario = results || [];
 
+        /* Logotipo e cor. Em try próprio: a tabela é da Fase 3 e pode
+           não existir num banco antigo — e nesse caso a loja continua
+           abrindo com a marca padrão, que é melhor do que não abrir. */
+        try {
+            visual = await env.DB.prepare(
+                `SELECT logo, cor FROM lojas_visual WHERE slug = ?1`
+            ).bind(loja.slug).first();
+        } catch (erro) {
+            console.error("lojas_visual:", erro);
+        }
+
     } catch (erro) {
         /* Caso concreto, e o motivo deste catch existir: o worker novo
            publicado antes de alguém rodar o schema-lojas.sql no console
@@ -1506,7 +1518,7 @@ async function tratarLojaPublica(request, env) {
         }, 503);
     }
 
-    return json({ loja, horario }, 200, {
+    return json({ loja, horario, visual: visual || null }, 200, {
         "Cache-Control": "public, max-age=300"
     });
 
@@ -1747,6 +1759,121 @@ async function tratarCriarLoja(request, env, dono) {
             schema: "pedidos-proxy/schema.sql"
         }
     });
+
+}
+
+/* O logotipo da farmácia.
+
+   Chega como arquivo cru no corpo, vai para o R2 debaixo do prefixo dela
+   e o endereço fica gravado. Rota própria, e não o /arquivos genérico,
+   por um motivo concreto: o /arquivos grava no prefixo de QUEM
+   AUTENTICOU, e quem cadastra filial nova é o dono — autenticado em
+   outra loja. O logotipo da farmácia nova iria parar na pasta da antiga.
+
+   Quem pode: o dono, em qualquer filial; a loja, só na dela. */
+async function tratarLogoDaLoja(request, env, loja, dono, alvo) {
+
+    if (!dono && alvo !== loja.slug) {
+        return json({ erro: "Você só pode trocar o logotipo da sua própria loja." }, 403);
+    }
+
+    if (!env.BANNERS_BUCKET) {
+        return json({ erro: "O balde de arquivos não está ligado neste worker." }, 501);
+    }
+
+    const tipo = (request.headers.get("Content-Type") || "").split(";")[0].trim();
+
+    /* SVG fica de fora, e não é esquecimento: SVG é XML, aceita <script>
+       dentro, e este arquivo vai ser servido do nosso domínio e posto num
+       <img> em todas as páginas da loja. O ganho de nitidez não paga o
+       risco. */
+    if (!TIPOS_DE_IMAGEM.includes(tipo)) {
+        return json({ erro: "Formato não aceito. Use PNG, JPG, WebP ou AVIF." }, 415);
+    }
+
+    const bytes = await request.arrayBuffer();
+    if (!bytes.byteLength) return json({ erro: "Arquivo vazio." }, 400);
+    if (bytes.byteLength > MAX_BANNER_BYTES) {
+        return json({ erro: "Arquivo grande demais. O limite é 3 MB." }, 413);
+    }
+
+    const alvoLoja = await env.DB.prepare(
+        `SELECT l.slug, a.prefixo_r2 FROM lojas l
+         LEFT JOIN lojas_acesso a ON a.slug = l.slug WHERE l.slug = ?1`
+    ).bind(alvo).first();
+
+    if (!alvoLoja) return json({ erro: "Essa filial não está cadastrada." }, 404);
+
+    const extensao = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+                       "image/gif": "gif", "image/avif": "avif" }[tipo];
+
+    /* O nome tem a hora dentro: trocar o logotipo gera endereço novo, e
+       com isso o cache de um ano das imagens nunca precisa ser invalidado
+       — o endereço antigo só deixa de ser usado. */
+    const prefixo = prefixoDaLoja(alvoLoja);
+    const chave = `${prefixo}marca/logo-${Date.now()}.${extensao}`;
+
+    await env.BANNERS_BUCKET.put(chave, bytes, { httpMetadata: { contentType: tipo } });
+
+    const url = new URL(request.url).origin + "/arquivos/" + chave;
+
+    /* O logotipo anterior é apagado: senão o balde acumula um arquivo por
+       troca, para sempre, e ninguém sabe qual está em uso. */
+    const antes = await env.DB.prepare(
+        `SELECT logo FROM lojas_visual WHERE slug = ?1`
+    ).bind(alvo).first().catch(() => null);
+
+    await env.DB.prepare(
+        `INSERT INTO lojas_visual (slug, logo, trocado_em) VALUES (?1, ?2, ?3)
+         ON CONFLICT(slug) DO UPDATE SET logo = ?2, trocado_em = ?3`
+    ).bind(alvo, url, new Date().toISOString()).run();
+
+    if (antes?.logo && antes.logo !== url) {
+        const chaveAntiga = antes.logo.split("/arquivos/")[1];
+        if (chaveAntiga && chaveEhDaLoja(alvoLoja, chaveAntiga)) {
+            await env.BANNERS_BUCKET.delete(chaveAntiga).catch(() => {});
+        }
+    }
+
+    return json({ sucesso: true, logo: url });
+
+}
+
+/* A cor da farmácia.
+
+   Só a principal. As variações saem dela no navegador, por color-mix com
+   proporção fixa — a clara sempre quase branca, a escura sempre mais
+   escura que a principal. Deixar a loja escolher as quatro pareceria mais
+   flexível e seria pior: é assim que se publica texto azul-escuro sobre
+   fundo azul-escuro. */
+async function tratarCorDaLoja(request, env, loja, dono, alvo) {
+
+    if (!dono && alvo !== loja.slug) {
+        return json({ erro: "Você só pode trocar a cor da sua própria loja." }, 403);
+    }
+
+    const corpo = await request.json().catch(() => ({}));
+    const cor = String(corpo.cor || "").trim().toLowerCase();
+
+    /* Só #rrggbb. O valor vai para dentro de um <style> servido no nosso
+       domínio: qualquer coisa fora deste formato é texto de estranho
+       entrando em folha de estilo. */
+    if (cor && !/^#[0-9a-f]{6}$/.test(cor)) {
+        return json({ erro: "A cor precisa estar no formato #rrggbb." }, 400);
+    }
+
+    const existe = await env.DB.prepare(
+        `SELECT slug FROM lojas WHERE slug = ?1`
+    ).bind(alvo).first();
+
+    if (!existe) return json({ erro: "Essa filial não está cadastrada." }, 404);
+
+    await env.DB.prepare(
+        `INSERT INTO lojas_visual (slug, cor, trocado_em) VALUES (?1, ?2, ?3)
+         ON CONFLICT(slug) DO UPDATE SET cor = ?2, trocado_em = ?3`
+    ).bind(alvo, cor || null, new Date().toISOString()).run();
+
+    return json({ sucesso: true, cor: cor || null });
 
 }
 
@@ -2336,6 +2463,16 @@ export default {
             const conferir = rota.match(/^\/lojas\/([a-z0-9-]+)\/conferir$/);
             if (request.method === "GET" && conferir) {
                 return await tratarConferirLoja(request, env, porta.dono, conferir[1]);
+            }
+
+            const logo = rota.match(/^\/lojas\/([a-z0-9-]+)\/logo$/);
+            if (request.method === "POST" && logo) {
+                return await tratarLogoDaLoja(request, env, loja, porta.dono, logo[1]);
+            }
+
+            const cor = rota.match(/^\/lojas\/([a-z0-9-]+)\/cor$/);
+            if (request.method === "POST" && cor) {
+                return await tratarCorDaLoja(request, env, loja, porta.dono, cor[1]);
             }
 
             const ativar = rota.match(/^\/lojas\/([a-z0-9-]+)\/ativo$/);

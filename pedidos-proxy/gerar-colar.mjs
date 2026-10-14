@@ -24,7 +24,7 @@ import { DatabaseSync } from "node:sqlite";
 
 /* Na ordem em que se roda no console: o de lojas cria as tabelas que o
    de acesso pressupõe. A ordem também é a do teste aqui embaixo. */
-const SCHEMAS = ["schema-lojas.sql", "schema-acesso.sql"];
+const SCHEMAS = ["schema-lojas.sql", "schema-acesso.sql", "schema-visual.sql"];
 
 const CONFERIR = process.argv.includes("--conferir");
 
@@ -72,8 +72,10 @@ for (const [nome, achatar] of [["como arquivo", false], ["achatado", true]]) {
                 /* A tabela de acesso nasce vazia de propósito: loja sem
                    linha nela é a loja de hoje, que segue com a PAINEL_KEY
                    e com o banco de sempre. */
-                const acessos = db.prepare("SELECT COUNT(*) AS n FROM lojas_acesso").get().n;
-                if (acessos !== 0) problemas.push(`${nome}: lojas_acesso devia nascer vazia, veio com ${acessos}`);
+                for (const lateral of ["lojas_acesso", "lojas_visual"]) {
+                    const n = db.prepare(`SELECT COUNT(*) AS n FROM ${lateral}`).get().n;
+                    if (n !== 0) problemas.push(`${nome}: ${lateral} devia nascer vazia, veio com ${n}`);
+                }
             }
         }
     } catch (erro) {

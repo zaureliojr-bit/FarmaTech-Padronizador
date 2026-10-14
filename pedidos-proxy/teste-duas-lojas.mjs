@@ -115,6 +115,7 @@ const semComentario = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.
 compartilhado.exec(semComentario(operacional));
 compartilhado.exec(semComentario(ler("schema-lojas.sql")));
 compartilhado.exec(semComentario(ler("schema-acesso.sql")));
+compartilhado.exec(semComentario(ler("schema-visual.sql")));
 
 /* O banco da loja B tem só a operação. Nada de cadastro de lojas: ele
    nem sabe que outras farmácias existem. */
@@ -400,6 +401,7 @@ console.log("\n9. sem cadastro de lojas, ninguém fica trancado para fora");
     vazio.exec(semComentario(operacional));
     vazio.exec(semComentario(ler("schema-lojas.sql")).replace(/INSERT OR IGNORE[\s\S]*?;/g, ""));
     vazio.exec(semComentario(ler("schema-acesso.sql")));
+    vazio.exec(semComentario(ler("schema-visual.sql")));
     vazio.exec(`
         INSERT INTO pedidos (ref, criado_em, cliente, telefone, entrega, total, status)
         VALUES ('S-001', ${AGORA}, 'Alguém', '11900000000', 'Retirada', 10.0, 'novo')
@@ -832,6 +834,92 @@ console.log("\n16. cadastrar filial é só do dono");
 
     const pirata = compartilhado.prepare("SELECT COUNT(*) AS n FROM lojas WHERE slug='pirata'").get().n;
     conferir("e nenhuma filial foi criada por quem não podia", pirata === 0, String(pirata));
+}
+
+/* ---- 17. o logotipo e a cor de cada farmácia ------------------------ */
+console.log("\n17. a marca de cada filial");
+{
+    const comoDono = (caminho, opcoes = {}) => worker.fetch(new Request(
+        "https://exemplo.workers.dev" + caminho,
+        {
+            method: opcoes.metodo || "POST",
+            headers: {
+                "X-Painel-Key": SENHA_DONO,
+                "CF-Connecting-IP": "13.0.0." + Math.floor(Math.random() * 200 + 10),
+                ...(opcoes.tipo ? { "Content-Type": opcoes.tipo } : {}),
+                ...(opcoes.loja ? { "X-Painel-Loja": opcoes.loja } : {})
+            },
+            ...(opcoes.corpo === undefined ? {} : { body: opcoes.corpo })
+        }
+    ), env);
+
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+
+    limparTentativas();
+    const envio = await comoDono("/lojas/farma-centro/logo", { tipo: "image/png", corpo: png });
+    conferir("o dono manda o logotipo de qualquer filial", envio.status === 200, String(envio.status));
+
+    const resultado = await envio.json();
+    conferir("e o arquivo vai para a pasta DELA, não a de quem está autenticado",
+        /\/arquivos\/farma-centro\/marca\/logo-/.test(resultado.logo || ""), resultado.logo);
+    conferir("o arquivo está mesmo no balde",
+        [...balde.conteudo.keys()].some((k) => k.startsWith("farma-centro/marca/")),
+        [...balde.conteudo.keys()].join(","));
+
+    /* Trocar o logotipo apaga o anterior: senão o balde acumula um
+       arquivo por troca, para sempre, e ninguém sabe qual está em uso. */
+    const antigo = resultado.logo.split("/arquivos/")[1];
+    limparTentativas();
+    const troca = await comoDono("/lojas/farma-centro/logo", { tipo: "image/png", corpo: png });
+    const novoLogo = (await troca.json()).logo;
+    conferir("trocar gera endereço novo", novoLogo !== resultado.logo, novoLogo);
+    conferir("e apaga o anterior do balde",
+        balde.apagados.includes(antigo), balde.apagados.join(","));
+
+    /* SVG fica de fora de propósito: é XML, aceita <script> dentro, e
+       seria servido do nosso domínio dentro de um <img> em todas as
+       páginas da loja. */
+    limparTentativas();
+    const svg = await comoDono("/lojas/farma-centro/logo",
+        { tipo: "image/svg+xml", corpo: new TextEncoder().encode("<svg/>") });
+    conferir("recusa SVG", svg.status === 415, String(svg.status));
+
+    /* ---- a cor ---- */
+    limparTentativas();
+    const cor = await comoDono("/lojas/farma-centro/cor",
+        { tipo: "application/json", corpo: JSON.stringify({ cor: "#0a7d4b" }) });
+    conferir("grava a cor", cor.status === 200, String(cor.status));
+
+    for (const ruim of ["vermelho", "#fff", "red; } body { display:none", "#12345g"]) {
+        limparTentativas();
+        const r = await comoDono("/lojas/farma-centro/cor",
+            { tipo: "application/json", corpo: JSON.stringify({ cor: ruim }) });
+        conferir(`recusa cor fora do formato: ${JSON.stringify(ruim)}`, r.status === 400, String(r.status));
+    }
+
+    /* A rota pública devolve a marca para o site desenhar. */
+    const publico = await (await worker.fetch(
+        new Request("https://exemplo.workers.dev/loja?slug=farma-centro"), env)).json();
+    conferir("a rota pública entrega logotipo e cor",
+        publico.visual && publico.visual.cor === "#0a7d4b" && !!publico.visual.logo,
+        JSON.stringify(publico.visual));
+
+    const semMarca = await (await worker.fetch(
+        new Request("https://exemplo.workers.dev/loja?slug=mais-barato"), env)).json();
+    conferir("e devolve nulo para quem usa a marca padrão",
+        semMarca.visual === null, JSON.stringify(semMarca.visual));
+
+    /* ---- quem não é dono só mexe na própria ---- */
+    limparTentativas();
+    const alheia = await worker.fetch(new Request(
+        "https://exemplo.workers.dev/lojas/farma-centro/cor",
+        {
+            method: "POST",
+            headers: { "X-Painel-Key": SENHA_WORKER, "Content-Type": "application/json",
+                       "CF-Connecting-IP": "13.1.0.1" },
+            body: JSON.stringify({ cor: "#000000" })
+        }), env);
+    conferir("uma farmácia não troca a cor da outra", alheia.status === 403, String(alheia.status));
 }
 
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
