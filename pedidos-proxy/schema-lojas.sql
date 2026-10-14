@@ -11,13 +11,18 @@
 
    COMO RODAR
 
-   Cole no console de SQL do D1 (banco farmatech-pedidos) e execute.
+   NÃO cole este arquivo no console do D1. Cole o schema-lojas-colar.sql,
+   que é este mesmo, sem comentário nenhum.
 
-   Nenhum comentário aqui usa "--". O console do D1 achata o arquivo
-   inteiro numa linha só antes de enviar; com "--", a primeira ocorrência
-   comentaria todo o resto e o erro que aparece é "Requests without any
-   query are not supported", que não diz nada sobre a causa. Comentário
-   de bloco sobrevive ao achatamento.
+   O console do D1 não aceita comentário. Com "--" ele achata tudo numa
+   linha e a primeira ocorrência apaga o resto do arquivo ("Requests
+   without any query are not supported"). Escrevi este arquivo com
+   comentário de bloco supondo que esse tipo passaria — não passa: o
+   console separa o texto em pedaços e reclama do pedaço que só tem
+   comentário ("SQL code did not contain a statement"). Daí os dois arquivos: este,
+   que explica, e o -colar, que roda.
+
+   Quem mexer aqui roda `node gerar-colar.mjs` para refazer o outro.
 
    Rodar duas vezes não quebra nada: tudo é IF NOT EXISTS, e o seed usa
    INSERT OR IGNORE. */
