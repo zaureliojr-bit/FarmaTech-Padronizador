@@ -646,5 +646,45 @@ console.log("\n13. CORS: todo cabeçalho que o worker lê tem de ser permitido")
         resposta.status === 200 || resposta.status === 204, String(resposta.status));
 }
 
+/* ---- 14. filial cadastrada SEM banco próprio ------------------------ */
+console.log("\n14. filial nova sem banco próprio não cai no banco da primeira");
+{
+    /* O buraco que isto fecha, e que estava no ar: `banco` vazio quer
+       dizer "use o principal". Isso é certo para a farmácia que já
+       existia — é o que permitiu a Fase 3 subir sem mover dado. Para
+       qualquer OUTRA, é o vazamento inteiro de volta: a loja nova
+       gravaria pedido dentro do banco da primeira, e o painel dela
+       mostraria a fila da primeira. Com 200 em tudo.
+
+       É o erro mais fácil de cometer cadastrando filial na mão: basta
+       esquecer uma coluna do INSERT. */
+    compartilhado.exec(`
+        INSERT INTO lojas (slug, nome, ativo, criado_em)
+        VALUES ('sem-banco-proprio', 'Farmácia Esquecida', 1, '2099-03-01 00:00:00')
+    `);
+
+    limparTentativas();
+    const r = await pedir("/fila", { loja: "sem-banco-proprio", senha: SENHA_WORKER });
+
+    conferir("recusa em vez de atender no banco da primeira",
+        r.status === 503, String(r.status));
+
+    const corpo = await r.json().catch(() => ({}));
+    conferir("e explica o que falta cadastrar",
+        /banco/i.test(corpo.erro || ""), corpo.erro);
+
+    /* E o principal: nada da loja nova encostou no banco da primeira. */
+    const pedidosDaPrimeira = compartilhado.prepare(
+        "SELECT COUNT(*) AS n FROM pedidos WHERE ref LIKE 'A-%'").get().n;
+    conferir("os pedidos da primeira continuam intactos", pedidosDaPrimeira === 2, String(pedidosDaPrimeira));
+
+    /* A primeira continua usando o banco principal, que é o caso certo
+       de banco vazio — a correção não pode fechar essa porta. */
+    limparTentativas();
+    const primeira = await pedir("/fila", { loja: "mais-barato", senha: SENHA_WORKER });
+    conferir("a farmácia original segue entrando com banco vazio",
+        primeira.status === 200, String(primeira.status));
+}
+
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
 process.exit(falhas === 0 ? 0 : 1);

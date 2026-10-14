@@ -100,19 +100,47 @@ function senhaConfere(request, env) {
 
 /* O banco daquela farmácia.
 
-   Sem linha em lojas_acesso, ou com `banco` vazio, é o banco que o
-   worker já usa — o caso da loja que existe hoje, e o que permite esta
-   fase subir sem mover dado e sem ninguém ficar de fora do painel.
+   `banco` vazio quer dizer "o banco que o worker já usa". Isso é certo
+   para UMA farmácia só: a que existia antes da plataforma, e que por
+   isso tem os dados dela ali. É o que permitiu esta fase subir sem mover
+   um byte.
+
+   Para qualquer outra, banco vazio é o vazamento inteiro de volta: a
+   loja nova gravaria pedido dentro do banco da primeira, e o painel dela
+   mostraria a fila da primeira — com 200 em tudo, sem erro nenhum. E é o
+   erro mais fácil de cometer cadastrando filial na mão: basta esquecer
+   uma coluna do INSERT.
+
+   Então só a farmácia original tem direito ao banco vazio. Quem decide
+   qual é ela não é uma constante escrita aqui: é a consulta que
+   identifica a loja, que traz junto o slug da mais antiga ativa.
 
    Com `banco` preenchido, o binding TEM de existir. Cair no env.DB
-   quando o binding falta seria o pior dos mundos: a loja nova passaria a
-   gravar pedido no banco da loja antiga, em silêncio, e ninguém
-   descobriria até alguém estranhar um pedido alheio na fila. */
+   quando o binding falta seria o mesmo estrago por outro caminho. */
 function bancoDaLoja(env, loja) {
 
     const nome = (loja && loja.banco) || "";
 
-    if (!nome) return env.DB;
+    if (!nome) {
+        /* `primeira` vem da consulta de identificação. Quando ela não
+           vem — instalação sem cadastro de lojas, com a loja anônima —,
+           não há segunda farmácia para vazar, e o banco de sempre é a
+           resposta certa. */
+        const primeira = loja && loja.primeira;
+        const souEu = !loja || !loja.slug || !primeira || loja.slug === primeira;
+
+        if (!souEu) {
+            const erro = new Error(
+                `a loja "${loja.slug}" não tem banco de dados próprio cadastrado. ` +
+                `Crie um banco D1 para ela, ligue o binding no worker e grave o nome ` +
+                `dele na coluna "banco" da tabela lojas_acesso.`
+            );
+            erro.configuracao = true;
+            throw erro;
+        }
+
+        return env.DB;
+    }
 
     const db = env[nome];
 
@@ -236,7 +264,12 @@ async function lojaDeQuemPede(request, env) {
     const pedido = String(request.headers.get("X-Painel-Loja") || "")
         .toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 60);
 
-    const colunas = `l.slug, l.nome, a.hash, a.sal, a.banco, a.prefixo_r2`;
+    /* `primeira` é o slug da farmácia mais antiga ativa — a que existia
+       antes da plataforma. É ela, e só ela, que pode usar o banco
+       principal sem ter um próprio cadastrado. Vem na mesma consulta
+       para não custar uma segunda ida ao D1 em cada requisição. */
+    const colunas = `l.slug, l.nome, a.hash, a.sal, a.banco, a.prefixo_r2,
+                     (SELECT slug FROM lojas WHERE ativo = 1 ORDER BY criado_em LIMIT 1) AS primeira`;
 
     const sql = pedido
         ? `SELECT ${colunas}
@@ -277,7 +310,7 @@ async function lojaDeQuemPede(request, env) {
        existe leva 401. */
     if (pedido) return null;
 
-    return { slug: "", nome: "", hash: null, sal: null, banco: null, prefixo_r2: null };
+    return { slug: "", nome: "", hash: null, sal: null, banco: null, prefixo_r2: null, primeira: "" };
 
 }
 
@@ -300,11 +333,14 @@ async function lojaPublicaDaURL(request, env) {
     const pedido = String(new URL(request.url).searchParams.get("loja") || "")
         .toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 60);
 
+    const colunas = `l.slug, l.nome, a.banco,
+                     (SELECT slug FROM lojas WHERE ativo = 1 ORDER BY criado_em LIMIT 1) AS primeira`;
+
     const sql = pedido
-        ? `SELECT l.slug, l.nome, a.banco
+        ? `SELECT ${colunas}
              FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
             WHERE l.slug = ?1 AND l.ativo = 1`
-        : `SELECT l.slug, l.nome, a.banco
+        : `SELECT ${colunas}
              FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
             WHERE l.ativo = 1 ORDER BY l.criado_em LIMIT 1`;
 
@@ -326,7 +362,7 @@ async function lojaPublicaDaURL(request, env) {
        errado, e fingir que é outra loja seria pior. */
     if (!loja) {
         if (pedido) return { recusa: json({ erro: "Loja não encontrada." }, 404) };
-        return { loja: { slug: "", nome: "", banco: null }, db: env.DB };
+        return { loja: { slug: "", nome: "", banco: null, primeira: "" }, db: env.DB };
     }
 
     try {
