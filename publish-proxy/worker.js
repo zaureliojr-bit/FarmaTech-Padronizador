@@ -67,6 +67,33 @@ function mesclarPorEan(existentes, novos) {
 
 }
 
+// Pensado pra planilha só dos itens COM estoque: quem vem na planilha
+// atualiza normal; quem já estava publicado mas não veio agora fica
+// com estoque zerado e marcado "encomenda" (site pode oferecer
+// encomenda em vez de deixar comprar), sem sumir do catálogo como o
+// modo "substituir" faria. Quando o produto reaparecer numa planilha
+// futura, o "encomenda" some sozinho - o objeto novo vem por cima e
+// não tem esse campo.
+function mesclarMarcandoAusentesSemEstoque(existentes, novos) {
+
+    const eansNovos = new Set(novos.map((produto) => produto.ean));
+
+    const porEan = new Map(existentes.map((produto) => {
+
+        if (eansNovos.has(produto.ean) || produto.estoque <= 0) {
+            return [produto.ean, produto];
+        }
+
+        return [produto.ean, { ...produto, estoque: 0, encomenda: true }];
+
+    }));
+
+    novos.forEach((produto) => porEan.set(produto.ean, produto));
+
+    return [...porEan.values()];
+
+}
+
 export default {
 
     async fetch(request, env) {
@@ -94,10 +121,12 @@ export default {
         const produtos = corpo?.produtos;
 
         // "mesclar" (padrão): atualiza/acrescenta pelo EAN, mantém quem
-        // não veio na planilha atual. "substituir": apaga tudo que não
-        // estiver na lista enviada - só faz sentido numa reimportação do
-        // catálogo completo.
-        const modo = corpo?.modo === "substituir" ? "substituir" : "mesclar";
+        // não veio na planilha atual do jeito que estava. "encomenda":
+        // igual o mesclar, mas quem não veio fica com estoque zerado e
+        // marcado pra oferecer encomenda - pra planilha só dos itens com
+        // estoque. "substituir": apaga tudo que não estiver na lista
+        // enviada - só faz sentido numa reimportação do catálogo completo.
+        const modo = ["substituir", "encomenda"].includes(corpo?.modo) ? corpo.modo : "mesclar";
 
         if (!Array.isArray(produtos) || !produtos.length) {
             return jsonResponse({ erro: "Lista de produtos vazia ou inválida." }, 400);
@@ -144,9 +173,15 @@ export default {
 
         }
 
-        const produtosFinais = modo === "mesclar"
-            ? mesclarPorEan(produtosExistentes, produtos)
-            : produtos;
+        let produtosFinais;
+
+        if (modo === "substituir") {
+            produtosFinais = produtos;
+        } else if (modo === "encomenda") {
+            produtosFinais = mesclarMarcandoAusentesSemEstoque(produtosExistentes, produtos);
+        } else {
+            produtosFinais = mesclarPorEan(produtosExistentes, produtos);
+        }
 
         const conteudoJson = JSON.stringify({ produtos: produtosFinais }, null, 2);
 
@@ -156,9 +191,9 @@ export default {
             headers: { ...headersGitHub, "Content-Type": "application/json" },
 
             body: JSON.stringify({
-                message: modo === "mesclar"
-                    ? `Atualizar ${produtos.length} produto(s) via FarmaTech Padronizador`
-                    : `Publicar catálogo completo (${produtos.length} produtos) via FarmaTech Padronizador`,
+                message: modo === "substituir"
+                    ? `Publicar catálogo completo (${produtos.length} produtos) via FarmaTech Padronizador`
+                    : `Atualizar ${produtos.length} produto(s) via FarmaTech Padronizador`,
                 content: paraBase64Utf8(conteudoJson),
                 branch: BRANCH,
                 ...(shaAtual ? { sha: shaAtual } : {})

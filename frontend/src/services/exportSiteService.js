@@ -39,14 +39,24 @@ function montarProdutoSite(produto, imagensHospedadas) {
         imagem: resolverImagemSite(produto, imagensHospedadas)
     };
 
+    // Sem estoque na própria planilha = o site oferece "Encomendar"
+    // (WhatsApp) em vez de mostrar "Esgotado" sem alternativa - mesmo
+    // critério que o worker (publish-proxy) já usa pra quem some de
+    // uma planilha futura (ver mesclarMarcandoAusentesSemEstoque).
+    if (base.estoque <= 0) base.encomenda = true;
+
     // Vindos da CMED e da Portaria 344/1998. tarja é só informativo (mostra
     // "venda sob prescrição" no card, não bloqueia nada - tem antibiótico e
     // anticoncepcional que são tarja vermelha e vendem livre). Quem manda
-    // no carrinho é bloqueioPresencial/receitaRemota:
+    // no carrinho/checkout é:
     //   bloqueioPresencial - listas A/B, retenção sempre presencial, não
     //   entra no carrinho.
-    //   receitaRemota - listas C, entra no carrinho normal, mas o
-    //   checkout cobra confirmação do envio da receita antes de despachar.
+    //   confirmarReceita - antibiótico OU controlado de receita remota
+    //   (listas C): entra no carrinho normal, mas o checkout deve cobrar
+    //   confirmação do envio da receita antes de despachar. É ESTE campo
+    //   que o site precisa checar pra disparar a conferência por
+    //   WhatsApp - não a tarja/exigeReceita sozinha, que também é
+    //   verdadeira pra anticoncepcional e outros que vendem livre.
     // Só saem quando têm conteúdo, porque a maior parte do catálogo não é
     // medicamento e nunca vai ter nenhum destes campos.
     //
@@ -91,10 +101,14 @@ export async function gerarProdutosSite(produtos) {
 }
 
 // modo "mesclar" (padrão): atualiza/acrescenta pelo EAN, mantém no ar
-// quem não veio nesta planilha - seguro pra publicar uma planilha
-// parcial (só o que mudou) sem apagar o resto do catálogo. modo
-// "substituir": publica exatamente esta lista, apagando o que não
-// vier - só faz sentido junto de uma reimportação do catálogo inteiro.
+// quem não veio nesta planilha do jeito que estava - seguro pra
+// publicar uma planilha parcial (só o que mudou) sem apagar o resto do
+// catálogo. modo "encomenda": igual o mesclar, mas quem já estava
+// publicado e não veio agora fica com estoque zerado e marcado pra
+// oferecer encomenda no site - pensado pra planilha só dos itens que
+// têm estoque agora. modo "substituir": publica exatamente esta lista,
+// apagando o que não vier - só faz sentido junto de uma reimportação
+// do catálogo inteiro.
 export async function publicarNoSite(produtos, modo = "mesclar") {
 
     /* Publicar passa pelo porteiro (pedidos-proxy), e não mais direto no

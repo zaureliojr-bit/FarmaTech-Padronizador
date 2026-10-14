@@ -131,3 +131,38 @@ export async function salvarImagemHospedada(ean, urlOrigem, origem) {
     return dados;
 
 }
+
+/**
+ * Apaga a imagem hospedada de um produto (R2 + D1) - volta pro estado
+ * "sem imagem", sem apagar o produto nem nenhum outro dado dele.
+ */
+export async function excluirImagemHospedada(ean) {
+
+    if (!PORTEIRO_URL) {
+        throw new Error("Exclusão de imagem não configurada (falta VITE_PEDIDOS_PROXY_URL no .env).");
+    }
+
+    const credencial = cabecalhoPainel();
+
+    if (!credencial) {
+        throw new Error("Preciso da senha do painel para excluir a imagem.");
+    }
+
+    const resposta = await fetch(
+        `${PORTEIRO_URL}/catalogo/imagem/${encodeURIComponent(String(ean))}`, {
+
+        method: "DELETE",
+
+        headers: credencial
+
+    });
+
+    const dados = await resposta.json().catch(() => ({}));
+
+    if (!resposta.ok) {
+        throw new Error(dados.erro || `Falha ao excluir imagem (HTTP ${resposta.status})`);
+    }
+
+    return dados;
+
+}

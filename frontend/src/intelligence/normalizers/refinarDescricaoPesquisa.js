@@ -17,6 +17,7 @@
  */
 
 import { ABREVIACOES } from "../dictionary";
+import { primeiraLetraMaiuscula } from "../../utils/texto";
 
 export function refinarDescricaoPesquisa(produto) {
 
@@ -46,9 +47,7 @@ export function refinarDescricaoPesquisa(produto) {
     // Capitalizar palavras
     // =====================================================
 
-    descricao = descricao
-        .toLowerCase()
-        .replace(/\b\w/g, letra => letra.toUpperCase());
+    descricao = primeiraLetraMaiuscula(descricao);
 
     // =====================================================
     // Resultado

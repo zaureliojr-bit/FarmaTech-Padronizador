@@ -19,7 +19,7 @@
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Painel-Key",
     "Access-Control-Expose-Headers": "Retry-After",
     "Access-Control-Max-Age": "86400"
@@ -1448,6 +1448,38 @@ export default {
             if (request.method === "POST" && rota === "/catalogo/extracao/descartar") {
                 return await encaminhar(request, env, {
                     ...imagens(env), caminho: "/extracao", metodo: "DELETE"
+                });
+            }
+
+            // família de uma categoria, listas de referência (CMED e
+            // distribuidora) e produtos excluídos — tudo escrita no
+            // imagens-proxy, que antes o navegador fazia com a chave
+            if (request.method === "POST" && rota === "/catalogo/familia") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/familias" });
+            }
+
+            const referencia = rota.match(/^\/catalogo\/referencia\/([a-z0-9-]+)$/);
+            if (request.method === "POST" && referencia) {
+                return await encaminhar(request, env, {
+                    ...imagens(env), caminho: `/referencias/${referencia[1]}`
+                });
+            }
+
+            if (request.method === "POST" && rota === "/catalogo/excluido") {
+                return await encaminhar(request, env, { ...imagens(env), caminho: "/excluidos" });
+            }
+
+            const excluido = rota.match(/^\/catalogo\/excluido\/(.+)$/);
+            if (request.method === "DELETE" && excluido) {
+                return await encaminhar(request, env, {
+                    ...imagens(env), caminho: `/excluidos/${excluido[1]}`, metodo: "DELETE"
+                });
+            }
+
+            const imagemEan = rota.match(/^\/catalogo\/imagem\/([0-9]+)$/);
+            if (request.method === "DELETE" && imagemEan) {
+                return await encaminhar(request, env, {
+                    ...imagens(env), caminho: `/${imagemEan[1]}`, metodo: "DELETE"
                 });
             }
 

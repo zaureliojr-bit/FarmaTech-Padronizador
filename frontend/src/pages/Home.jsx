@@ -2,10 +2,15 @@ import { useState } from "react";
 
 import Header from "../components/Header/Header";
 import ImportBox from "../components/ImportBox/ImportBox";
+import NovaExtracaoBox from "../components/NovaExtracaoBox/NovaExtracaoBox";
 import ImportSummary from "../components/ImportSummary/ImportSummary";
 import CmedBox from "../components/CmedBox/CmedBox";
+import DistribuidorBox from "../components/DistribuidorBox/DistribuidorBox";
 import MigrarImagensBox from "../components/MigrarImagensBox/MigrarImagensBox";
 import BuscaLoteImagensBox from "../components/BuscaLoteImagensBox/BuscaLoteImagensBox";
+import BuscaLoteDescricoesBox from "../components/BuscaLoteDescricoesBox/BuscaLoteDescricoesBox";
+import TrocarImagensLoteBox from "../components/TrocarImagensLoteBox/TrocarImagensLoteBox";
+import AplicarImagemLoteBox from "../components/AplicarImagemLoteBox/AplicarImagemLoteBox";
 import Toolbar from "../components/Toolbar/Toolbar";
 import ProductTable from "../components/ProductTable/ProductTable";
 import Pagination from "../components/Pagination/Pagination";
@@ -59,6 +64,9 @@ function Home() {
 
         limparFiltros,
         atualizarProduto,
+        atualizarProdutosEmLote,
+        excluirProduto,
+        corrigirFamiliaCategoria,
 
         indiceCmed,
         relatorioCmed,
@@ -68,7 +76,12 @@ function Home() {
         corrigirClasseCmed,
         setCorrigirClasseCmed,
         corrigirLaboratorioCmed,
-        setCorrigirLaboratorioCmed
+        setCorrigirLaboratorioCmed,
+
+        indiceDistribuidor,
+        carregandoDistribuidor,
+        erroDistribuidor,
+        carregarListaDistribuidor
 
     } = useProdutos();
 
@@ -92,6 +105,11 @@ function Home() {
 
             <div className="page">
 
+            <NovaExtracaoBox
+                onImportar={setResultadoImportacao}
+                mostrarToast={mostrarToast}
+            />
+
             <ImportBox
                 onImportar={setResultadoImportacao}
             />
@@ -110,6 +128,14 @@ function Home() {
                 setCorrigirClasse={setCorrigirClasseCmed}
                 corrigirLaboratorio={corrigirLaboratorioCmed}
                 setCorrigirLaboratorio={setCorrigirLaboratorioCmed}
+                mostrarToast={mostrarToast}
+            />
+
+            <DistribuidorBox
+                indice={indiceDistribuidor}
+                carregando={carregandoDistribuidor}
+                erro={erroDistribuidor}
+                carregarLista={carregarListaDistribuidor}
                 mostrarToast={mostrarToast}
             />
 
@@ -136,6 +162,8 @@ function Home() {
 
                     <CategoriasNaoReconhecidasBox
                         produtos={produtos}
+                        corrigirFamilia={corrigirFamiliaCategoria}
+                        mostrarToast={mostrarToast}
                     />
 
                 )
@@ -189,7 +217,49 @@ function Home() {
 
                     <BuscaLoteImagensBox
                         produtos={produtosFiltrados}
-                        atualizarProduto={atualizarProduto}
+                        atualizarProdutosEmLote={atualizarProdutosEmLote}
+                        mostrarToast={mostrarToast}
+                    />
+
+                )
+
+            }
+
+            {
+
+                resultadoImportacao && (
+
+                    <TrocarImagensLoteBox
+                        produtos={produtosFiltrados}
+                        atualizarProdutosEmLote={atualizarProdutosEmLote}
+                        mostrarToast={mostrarToast}
+                    />
+
+                )
+
+            }
+
+            {
+
+                resultadoImportacao && (
+
+                    <AplicarImagemLoteBox
+                        produtos={produtosFiltrados}
+                        atualizarProdutosEmLote={atualizarProdutosEmLote}
+                        mostrarToast={mostrarToast}
+                    />
+
+                )
+
+            }
+
+            {
+
+                resultadoImportacao && (
+
+                    <BuscaLoteDescricoesBox
+                        produtos={produtosFiltrados}
+                        atualizarProdutosEmLote={atualizarProdutosEmLote}
                         mostrarToast={mostrarToast}
                     />
 
@@ -202,6 +272,7 @@ function Home() {
                 categorias={categorias}
                 classes={classes}
                 atualizarProduto={atualizarProduto}
+                excluirProduto={excluirProduto}
                 mostrarToast={mostrarToast}
             />
 

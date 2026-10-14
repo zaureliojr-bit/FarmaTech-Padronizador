@@ -76,3 +76,38 @@ As imagens baixadas são salvas no **IndexedDB do navegador** (não em um servid
 - [ ] Login
 - [ ] Multiempresa
 - [ ] API
+
+---
+
+## Ideia futura: rede de lojas (múltiplas filiais)
+
+Discutido em 2026-10 - não implementado ainda, fica registrado pra
+quando for a hora.
+
+Cenário: uma rede com várias farmácias, todas no mesmo banco Firebird
+(multi-filial, como o Farmax já suporta - colunas `ESTOQUE_N` /
+`PRECO_VENDA_N` por filial), com catálogo e preço unificados pro
+cliente (ele não escolhe loja, o pedido é atendido por quem tiver
+estoque).
+
+Duas peças, independentes mas complementares:
+
+1. **Extração somando as filiais** - `firebird-extrator/extrair.js`
+   passa a aceitar uma lista de filiais (`FB_FILIAIS=1,2,3,4` em vez
+   de `FB_FILIAL` único), soma o estoque das colunas de cada uma numa
+   consulta só, e usa o preço de uma filial de referência (assumindo
+   preço padronizado na rede). Resto da estrutura (imagens-proxy,
+   publish-proxy, padronizador, painel, site) não muda - continua
+   "um catálogo, um preço, um estoque por produto", só que agora esse
+   estoque é a soma das lojas.
+
+2. **CEP → loja mais próxima, no site** - o site já tem toda a
+   mecânica de frete pronta (ViaCEP + geocodificação via
+   Nominatim/OpenStreetMap + cálculo de distância, hoje comparando
+   com uma loja só via `LOJA_LAT`/`LOJA_LNG` fixos em `script.js`).
+   Pra várias lojas, troca por uma lista de lojas (coordenadas de
+   cada uma) e calcula a distância até todas, usando a mais próxima
+   pro frete. Decisão em aberto: se isso também deve aparecer pro
+   cliente (tipo "você será atendido pela unidade Centro") e/ou ir
+   junto no pedido pro painel, pra quem for separar já saber de qual
+   loja puxar o estoque.

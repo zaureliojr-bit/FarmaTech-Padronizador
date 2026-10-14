@@ -19,37 +19,23 @@
 // importar - preço/estoque/código continuam de fora de propósito, são
 // dados que têm que ficar por loja, nunca compartilhados.
 //
-// Guarda também a EXTRAÇÃO DO PDV: a planilha que sai do Firebird do
-// balcão espera aqui até o painel buscá-la e padronizar. Ver a seção
-// "EXTRAÇÃO DO PDV", mais abaixo - o cuidado principal é que ela traz a
-// coluna de preço de custo, então baixar pede a chave.
+// E recebe a planilha que o extrator do Firebird (firebird-extrator/)
+// gera no PC da loja - o script manda ela pra cá logo depois de gerar,
+// e o painel, ao abrir, pergunta se tem algo novo esperando (rotas
+// /extracao*) pra avisar com um botão, em vez de precisar arrastar o
+// arquivo manualmente toda vez.
 //
 // Bindings necessários (Configurações -> Bindings, no painel):
 //   R2 bucket        -> nome da variável: IMAGENS_BUCKET
 //   D1 database       -> nome da variável: DB (rode schema.sql nela antes)
 // Secret necessário (Configurações -> Variáveis e Secrets):
 //   IMAGENS_KEY        -> senha inventada, autoriza salvar imagem/correção nova
-//
-// ATENÇÃO sobre a IMAGENS_KEY: hoje ela chega ao navegador, porque o
-// frontend a recebe em VITE_IMAGENS_KEY e o Vite embute toda variável
-// VITE_ no bundle em tempo de build. Ou seja: ela está legível em texto
-// no importador-automatico.js servido publicamente, e trocá-la só a
-// torna pública de novo no build seguinte. Enquanto o navegador precisar
-// dela para escrever, trate-a como senha conhecida - o conserto é mover
-// a escrita para trás de uma rota autenticada pelo login do painel, como
-// o pedidos-proxy já faz. Ver o README.
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Imagens-Key"
 };
-
-function temChave(request, env) {
-
-    return !!env.IMAGENS_KEY && request.headers.get("X-Imagens-Key") === env.IMAGENS_KEY;
-
-}
 
 // D1 recusa consulta com mais de 100 parâmetros amarrados (limite da
 // plataforma) - um IN (...) com mais EANs que isso falha a query
@@ -133,6 +119,20 @@ async function tratarServirImagem(ean, env) {
 
 }
 
+async function tratarExcluir(ean, request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.IMAGENS_BUCKET.delete(ean);
+
+    await env.DB.prepare(`DELETE FROM imagens WHERE ean = ?1`).bind(ean).run();
+
+    return json({ sucesso: true });
+
+}
+
 async function tratarLote(request, env) {
 
     const url = new URL(request.url);
@@ -168,168 +168,6 @@ async function tratarLote(request, env) {
 
 }
 
-/* ===================== EXTRAÇÃO DO PDV =====================
-
-   O catálogo nasce num Firebird, dentro do computador do balcão. Alguém
-   exporta uma planilha e ela precisa chegar ao painel, que roda no
-   navegador e faz a padronização. Este worker é o ponto de encontro: o
-   balcão envia, o painel busca.
-
-   Uma extração pendente por vez, de propósito. Se acumulasse fila, o
-   painel teria de decidir qual importar — e importar a errada
-   republica o catálogo inteiro com preço velho.
-
-   Guardado no R2 com `head()` para o status, em vez de uma linha no D1:
-   o que o painel precisa saber (existe? qual nome? que tamanho? de
-   quando?) o próprio R2 já responde, e uma tabela a mais seria um
-   estado a mais para sair de sincronia com o arquivo.
-
-   A chave tem prefixo "_" porque o resto do balde é indexado por EAN, e
-   EAN é só dígito — então nada aqui colide com imagem de produto, e o
-   servidor de imagem (mais abaixo) recusa qualquer chave com "_" na
-   frente, para esta planilha nunca sair por aquela porta.
-*/
-
-const CHAVE_EXTRACAO = "_extracao/pendente";
-
-// xlsx do PDV com 7 mil produtos dá uns 3 MB; 20 cobre uma rede grande
-// sem virar porta para entupir o balde.
-const MAX_EXTRACAO_BYTES = 20 * 1024 * 1024;
-
-async function tratarExtracaoStatus(env) {
-
-    const cabeca = await env.IMAGENS_BUCKET.head(CHAVE_EXTRACAO).catch(() => null);
-
-    if (!cabeca) return json({ pendente: false });
-
-    /* Só metadado: nome, tamanho e quando chegou. O conteúdo sai pela
-       rota de baixo, que pede chave. Isto fica aberto porque o painel
-       pergunta "tem coisa nova?" a cada poucos minutos e a resposta não
-       diz nada sobre preço nem sobre produto. */
-    return json({
-        pendente: true,
-        nomeArquivo: cabeca.customMetadata?.nome || "extracao.xlsx",
-        tamanho: cabeca.size,
-        enviadoEm: Number(cabeca.customMetadata?.enviadoEm) || cabeca.uploaded?.getTime?.() || 0
-    });
-
-}
-
-async function tratarExtracaoArquivo(request, env) {
-
-    /* PEDE CHAVE, e isto não é opcional.
-
-       A planilha do PDV traz a coluna "Preço Custo" de cada produto. O
-       produtos.json publicado remove esse campo justamente porque
-       margem não é dado de vitrine — servir a planilha crua sem chave
-       desfaz esse cuidado e entrega a margem de toda a loja a quem
-       souber o endereço.
-
-       Quem chama é o painel, que já tem a chave para marcar a extração
-       como importada. */
-    if (!temChave(request, env)) {
-        return json({ erro: "Chave inválida." }, 401);
-    }
-
-    const objeto = await env.IMAGENS_BUCKET.get(CHAVE_EXTRACAO);
-
-    if (!objeto) return json({ erro: "Nenhuma extração pendente." }, 404);
-
-    return new Response(objeto.body, {
-        headers: {
-            "Content-Type": objeto.httpMetadata?.contentType
-                || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            // nunca em cache: é dado de custo, e cada extração é outra
-            "Cache-Control": "no-store",
-            ...CORS_HEADERS
-        }
-    });
-
-}
-
-async function tratarEnviarExtracao(request, env) {
-
-    if (!temChave(request, env)) {
-        return json({ erro: "Chave inválida." }, 401);
-    }
-
-    /* Aceita as duas formas que um enviador pode usar: multipart, como
-       um formulário de navegador manda, ou o corpo cru com o nome em
-       "?nome=", como o upload de banner do pedidos-proxy faz. Aceitar as
-       duas evita que trocar o programa do balcão exija mexer no worker. */
-    const tipo = request.headers.get("content-type") || "";
-    let bytes;
-    let nome = new URL(request.url).searchParams.get("nome") || "";
-
-    if (tipo.includes("multipart/form-data")) {
-        const form = await request.formData().catch(() => null);
-        const arquivo = form?.get("arquivo") || form?.get("file");
-        if (!arquivo || typeof arquivo === "string") {
-            return json({ erro: "Envie o arquivo no campo 'arquivo'." }, 400);
-        }
-        bytes = await arquivo.arrayBuffer();
-        nome = nome || arquivo.name || "";
-    } else {
-        bytes = await request.arrayBuffer();
-    }
-
-    if (!bytes || !bytes.byteLength) {
-        return json({ erro: "Corpo vazio." }, 400);
-    }
-
-    if (bytes.byteLength > MAX_EXTRACAO_BYTES) {
-        return json({ erro: "Extração acima do limite." }, 413);
-    }
-
-    /* O nome é só rótulo para o painel mostrar, mas vem de fora: tira
-       caminho e deixa o que é seguro guardar em metadado. */
-    nome = String(nome).split(/[\\/]/).pop().replace(/[^\w.-]/g, "_").slice(0, 80)
-        || "extracao.xlsx";
-
-    const enviadoEm = Date.now();
-
-    await env.IMAGENS_BUCKET.put(CHAVE_EXTRACAO, bytes, {
-        httpMetadata: {
-            contentType: tipo.includes("multipart") || !tipo
-                ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                : tipo
-        },
-        customMetadata: { nome, enviadoEm: String(enviadoEm) }
-    });
-
-    return json({ sucesso: true, nomeArquivo: nome, tamanho: bytes.byteLength, enviadoEm });
-
-}
-
-async function tratarExtracaoImportada(request, env) {
-
-    if (!temChave(request, env)) {
-        return json({ erro: "Chave inválida." }, 401);
-    }
-
-    /* Apaga, não marca. Uma planilha "já importada" que ficasse no balde
-       seria a tabela de custo da loja parada à espera de alguém achar o
-       endereço, sem servir mais para nada. Importou, sai. */
-    await env.IMAGENS_BUCKET.delete(CHAVE_EXTRACAO).catch(() => {});
-
-    return json({ sucesso: true });
-
-}
-
-async function tratarDescartarExtracao(request, env) {
-
-    if (!temChave(request, env)) {
-        return json({ erro: "Chave inválida." }, 401);
-    }
-
-    // mesma coisa que importada, mas dito por quem desistiu: serve para
-    // tirar do ar uma extração errada sem ter de importá-la antes
-    await env.IMAGENS_BUCKET.delete(CHAVE_EXTRACAO).catch(() => {});
-
-    return json({ sucesso: true });
-
-}
-
 async function tratarSalvarCorrecao(request, env) {
 
     if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
@@ -361,6 +199,329 @@ async function tratarSalvarCorrecao(request, env) {
     ).run();
 
     return json({ sucesso: true });
+
+}
+
+async function tratarSalvarFamilia(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const { categoria, familiaId } = await request.json().catch(() => ({}));
+
+    if (!categoria || !familiaId) {
+        return json({ erro: "'categoria' e 'familiaId' são obrigatórios." }, 400);
+    }
+
+    // Mesma normalização do familias.js (maiúscula, espaços colapsados) -
+    // sem isso "Perfumaria" e "PERFUMARIA" virariam entradas diferentes
+    // e o front-end não acharia a correspondência na hora de comparar.
+    const chave = categoria.trim().toUpperCase().replace(/\s+/g, " ");
+
+    await env.DB.prepare(
+        `INSERT INTO familias_categoria (categoria, familia_id, atualizado_em)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(categoria) DO UPDATE SET
+            familia_id = excluded.familia_id,
+            atualizado_em = excluded.atualizado_em`
+    ).bind(chave, familiaId, Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+/* ===================== EXTRAÇÃO DO FIREBIRD ===================== */
+//
+// O extrator (firebird-extrator/) roda no PC da loja, gera o .xlsx e
+// manda pra cá logo em seguida - o painel, ao abrir, pergunta se tem
+// algo novo esperando e avisa a loja com um botão, em vez de precisar
+// arrastar o arquivo manualmente toda vez.
+
+const CHAVE_ARQUIVO_EXTRACAO = "extracoes/pendente.xlsx";
+
+/* O que NÃO pode sair pela rota curinga de imagem.
+
+   O balde é indexado por EAN, que é só dígito — então qualquer chave
+   com barra é de outra coisa: a extração do PDV (com preço de custo) e
+   as listas de referência. Barrar pelo formato, e não por uma lista de
+   prefixos, cobre também o que vier a ser guardado aí amanhã. */
+function chaveReservada(nome) {
+
+    return String(nome || "").includes("/");
+
+}
+
+async function tratarReceberExtracao(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const url = new URL(request.url);
+    const nomeArquivo = (url.searchParams.get("nome") || "produtos_extraidos.xlsx").slice(0, 200);
+
+    const bytes = await request.arrayBuffer();
+
+    if (!bytes.byteLength) {
+        return json({ erro: "Arquivo vazio." }, 400);
+    }
+
+    await env.IMAGENS_BUCKET.put(CHAVE_ARQUIVO_EXTRACAO, bytes, {
+        httpMetadata: {
+            contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        }
+    });
+
+    await env.DB.prepare(
+        `INSERT INTO extracoes (nome_arquivo, tamanho, enviado_em)
+         VALUES (?1, ?2, ?3)`
+    ).bind(nomeArquivo, bytes.byteLength, Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarStatusExtracao(env) {
+
+    const pendente = await env.DB.prepare(
+        `SELECT id, nome_arquivo, tamanho, enviado_em FROM extracoes
+          WHERE importado_em IS NULL
+          ORDER BY id DESC LIMIT 1`
+    ).first();
+
+    if (!pendente) return json({ pendente: false });
+
+    return json({
+        pendente: true,
+        nomeArquivo: pendente.nome_arquivo,
+        tamanho: pendente.tamanho,
+        enviadoEm: pendente.enviado_em
+    });
+
+}
+
+async function tratarArquivoExtracao(request, env) {
+
+    /* PEDE CHAVE, e isto não é opcional.
+
+       A planilha do PDV traz a coluna "Preço Custo" de cada produto. O
+       produtos.json publicado remove esse campo justamente porque
+       margem não é dado de vitrine - servir a planilha crua sem chave
+       desfaz esse cuidado e entrega a margem da loja inteira a quem
+       souber o endereço. Esta rota já ficou aberta em produção, e a
+       planilha de 2,7 MB esteve baixável por qualquer um.
+
+       Quem baixa é o painel, que já tem a chave para marcar como
+       importada - então exigir aqui não custa nada a ele. */
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const objeto = await env.IMAGENS_BUCKET.get(CHAVE_ARQUIVO_EXTRACAO);
+
+    if (!objeto) return json({ erro: "Nenhuma extração disponível." }, 404);
+
+    return new Response(objeto.body, {
+        headers: {
+            "Content-Type": objeto.httpMetadata?.contentType || "application/octet-stream",
+            // nunca em cache: é dado de custo, e cada extração é outra
+            "Cache-Control": "no-store",
+            ...CORS_HEADERS
+        }
+    });
+
+}
+
+async function tratarMarcarImportada(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.DB.prepare(
+        `UPDATE extracoes SET importado_em = ?1 WHERE importado_em IS NULL`
+    ).bind(Date.now()).run();
+
+    /* Apaga o arquivo, e não só marca a data.
+
+       Marcar sozinho deixava a planilha no balde para sempre: a tabela
+       de custo da loja parada à espera de alguém achar o endereço, sem
+       servir mais para nada, já que o status passa a dizer "nada
+       pendente". A linha no D1 continua, que é o histórico; o que sai é
+       o arquivo. */
+    await env.IMAGENS_BUCKET.delete(CHAVE_ARQUIVO_EXTRACAO).catch(() => {});
+
+    return json({ sucesso: true });
+
+}
+
+/* Descarta uma extração errada sem ter de importá-la antes. */
+async function tratarDescartarExtracao(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.DB.prepare(
+        `UPDATE extracoes SET importado_em = ?1 WHERE importado_em IS NULL`
+    ).bind(Date.now()).run();
+
+    await env.IMAGENS_BUCKET.delete(CHAVE_ARQUIVO_EXTRACAO).catch(() => {});
+
+    return json({ sucesso: true });
+
+}
+
+/* ===================== LISTAS DE REFERÊNCIA (CMED/distribuidora) ===================== */
+//
+// Até aqui, a lista da CMED e a da distribuidora só viviam no
+// IndexedDB de quem usava o padronizador - um site em outro domínio
+// (ex.: o painel da loja) não enxerga esse IndexedDB (armazenamento de
+// navegador é isolado por origem). Guardando aqui, qualquer site
+// consegue buscar a última versão, sem depender de reimportar a
+// planilha manualmente em cada lugar que precisar dela.
+
+// Nomes aceitos - trava a chave num conjunto pequeno de propósito,
+// pra não virar um balde genérico de qualquer coisa que alguém queira
+// guardar (a rota tem a mesma IMAGENS_KEY das outras, então travar o
+// nome limita o estrago de uma chave vazada).
+const CHAVES_REFERENCIA_VALIDAS = new Set(["cmed", "distribuidor"]);
+
+function caminhoReferencia(chave) {
+
+    return `referencias/${chave}.json`;
+
+}
+
+async function tratarSalvarReferencia(chave, request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    if (!CHAVES_REFERENCIA_VALIDAS.has(chave)) {
+        return json({ erro: "Referência desconhecida." }, 400);
+    }
+
+    const bytes = await request.arrayBuffer();
+
+    if (!bytes.byteLength) {
+        return json({ erro: "Arquivo vazio." }, 400);
+    }
+
+    await env.IMAGENS_BUCKET.put(caminhoReferencia(chave), bytes, {
+        httpMetadata: { contentType: "application/json" }
+    });
+
+    await env.DB.prepare(
+        `INSERT INTO referencias (chave, tamanho, atualizado_em)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(chave) DO UPDATE SET
+            tamanho = excluded.tamanho,
+            atualizado_em = excluded.atualizado_em`
+    ).bind(chave, bytes.byteLength, Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarServirReferencia(chave, env) {
+
+    if (!CHAVES_REFERENCIA_VALIDAS.has(chave)) {
+        return json({ erro: "Referência desconhecida." }, 400);
+    }
+
+    const objeto = await env.IMAGENS_BUCKET.get(caminhoReferencia(chave));
+
+    if (!objeto) return json({ erro: "Referência ainda não enviada." }, 404);
+
+    return new Response(objeto.body, {
+        headers: {
+            "Content-Type": "application/json",
+            // 1h de cache - a lista só muda quando alguém sobe uma nova
+            // (mensalmente, no caso da CMED), não precisa buscar a cada
+            // carregamento de página.
+            "Cache-Control": "public, max-age=3600",
+            ...CORS_HEADERS
+        }
+    });
+
+}
+
+/* ===================== PRODUTOS EXCLUÍDOS (lixo do PDV) ===================== */
+//
+// Taxa de entrega, item de teste do sistema, cadastro duplicado -
+// essas linhas voltam em toda extração nova do PDV porque continuam
+// lá, cadastradas por engano. Marcar o código uma vez aqui faz o
+// padronizador (e a publicação automática pelo painel) ignorar
+// sozinho em toda importação futura, sem precisar excluir de novo.
+
+async function tratarExcluirProduto(request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    const { codigo, motivo } = await request.json().catch(() => ({}));
+
+    if (!codigo) {
+        return json({ erro: "'codigo' é obrigatório." }, 400);
+    }
+
+    await env.DB.prepare(
+        `INSERT INTO produtos_excluidos (codigo, motivo, excluido_em)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(codigo) DO UPDATE SET
+            motivo = excluded.motivo,
+            excluido_em = excluded.excluido_em`
+    ).bind(String(codigo), motivo || "", Date.now()).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarRestaurarProduto(codigo, request, env) {
+
+    if (request.headers.get("X-Imagens-Key") !== env.IMAGENS_KEY) {
+        return json({ erro: "Chave inválida." }, 401);
+    }
+
+    await env.DB.prepare(`DELETE FROM produtos_excluidos WHERE codigo = ?1`).bind(codigo).run();
+
+    return json({ sucesso: true });
+
+}
+
+async function tratarListarExcluidos(env) {
+
+    const { results } = await env.DB.prepare(
+        `SELECT codigo, motivo, excluido_em FROM produtos_excluidos`
+    ).all();
+
+    const mapa = {};
+
+    (results || []).forEach((linha) => {
+        mapa[linha.codigo] = { motivo: linha.motivo || "", excluidoEm: linha.excluido_em };
+    });
+
+    return json(mapa);
+
+}
+
+async function tratarListarFamilias(env) {
+
+    const { results } = await env.DB.prepare(
+        `SELECT categoria, familia_id FROM familias_categoria`
+    ).all();
+
+    const mapa = {};
+
+    (results || []).forEach((linha) => {
+        mapa[linha.categoria] = linha.familia_id;
+    });
+
+    return json(mapa);
 
 }
 
@@ -427,43 +588,81 @@ export default {
             return tratarLoteCorrecoes(request, env);
         }
 
-        // Extração do PDV. O status é aberto (só diz se há coisa nova);
-        // baixar, enviar, marcar importada e descartar pedem a chave.
-        if (request.method === "GET" && caminho === "/extracao") {
-            return tratarExtracaoStatus(env);
+        if (request.method === "POST" && caminho === "/familias") {
+            return tratarSalvarFamilia(request, env);
         }
 
-        if (request.method === "GET" && caminho === "/extracao/arquivo") {
-            return tratarExtracaoArquivo(request, env);
+        if (request.method === "GET" && caminho === "/familias") {
+            return tratarListarFamilias(env);
         }
 
         if (request.method === "POST" && caminho === "/extracao") {
-            return tratarEnviarExtracao(request, env);
+            return tratarReceberExtracao(request, env);
+        }
+
+        if (request.method === "GET" && caminho === "/extracao") {
+            return tratarStatusExtracao(env);
+        }
+
+        if (request.method === "GET" && caminho === "/extracao/arquivo") {
+            return tratarArquivoExtracao(request, env);
         }
 
         if (request.method === "POST" && caminho === "/extracao/importado") {
-            return tratarExtracaoImportada(request, env);
+            return tratarMarcarImportada(request, env);
         }
 
         if (request.method === "DELETE" && caminho === "/extracao") {
             return tratarDescartarExtracao(request, env);
         }
 
+        const referencia = caminho.match(/^\/referencias\/([a-z0-9-]+)$/);
+        if (referencia && request.method === "POST") {
+            return tratarSalvarReferencia(referencia[1], request, env);
+        }
+        if (referencia && request.method === "GET") {
+            return tratarServirReferencia(referencia[1], env);
+        }
+
+        if (request.method === "POST" && caminho === "/excluidos") {
+            return tratarExcluirProduto(request, env);
+        }
+
+        if (request.method === "GET" && caminho === "/excluidos") {
+            return tratarListarExcluidos(env);
+        }
+
+        const excluido = caminho.match(/^\/excluidos\/(.+)$/);
+        if (excluido && request.method === "DELETE") {
+            return tratarRestaurarProduto(decodeURIComponent(excluido[1]), request, env);
+        }
+
         if (request.method === "GET" && caminho.length > 1) {
             const ean = decodeURIComponent(caminho.slice(1));
 
-            /* O balde guarda imagem por EAN e, com prefixo "_", coisa
-               que não é imagem — hoje a extração do PDV. Como esta rota
-               é o curinga que serve qualquer chave do balde, sem esta
-               recusa um GET /_extracao/pendente entregaria a planilha de
-               custo por aqui, passando por fora da chave que a rota
+            /* O balde guarda imagem por EAN e, sob prefixo, coisa que
+               não é imagem: a extração do PDV e as listas de
+               referência. Como esta rota é o curinga que serve QUALQUER
+               chave do balde, sem esta recusa um GET
+               /extracoes/pendente.xlsx entregaria a planilha de custo
+               por aqui, passando por fora da chave que a rota
                /extracao/arquivo exige. EAN é só dígito, então nada
-               legítimo começa com "_". */
-            if (ean.startsWith("_")) {
+               legítimo tem barra no nome. */
+            if (chaveReservada(ean)) {
                 return json({ erro: "Imagem não encontrada." }, 404);
             }
 
             return tratarServirImagem(ean, env);
+        }
+
+        if (request.method === "DELETE" && caminho.length > 1) {
+            const ean = decodeURIComponent(caminho.slice(1));
+
+            if (chaveReservada(ean)) {
+                return json({ erro: "Imagem não encontrada." }, 404);
+            }
+
+            return tratarExcluir(ean, request, env);
         }
 
         return json({ erro: "Rota não encontrada." }, 404);

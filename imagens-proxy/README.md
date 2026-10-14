@@ -54,8 +54,10 @@ sai com a chave (ver abaixo), e ela é apagada assim que é importada.
    `schema.sql` deste diretório → **Executar**. Isso cria as tabelas
    `imagens` e `correcoes` (só precisa fazer uma vez).
 
-> **Já tem o banco criado de antes (só com a tabela `imagens`)?** Não
-> precisa recriar nada - abra o Console dele e rode só a parte nova:
+> **Já tem o banco criado de antes?** Não precisa recriar nada - abra o
+> Console dele e roda só a(s) tabela(s) que ainda não existem (todo
+> `CREATE TABLE` do `schema.sql` tem `IF NOT EXISTS`, então rodar o
+> arquivo inteiro de novo também é seguro):
 > ```sql
 > CREATE TABLE IF NOT EXISTS correcoes (
 >     ean TEXT PRIMARY KEY,
@@ -63,6 +65,20 @@ sai com a chave (ver abaixo), e ela é apagada assim que é importada.
 >     classe TEXT,
 >     categoria TEXT,
 >     atualizado_em INTEGER NOT NULL
+> );
+>
+> CREATE TABLE IF NOT EXISTS extracoes (
+>     id INTEGER PRIMARY KEY AUTOINCREMENT,
+>     nome_arquivo TEXT NOT NULL,
+>     tamanho INTEGER NOT NULL,
+>     enviado_em INTEGER NOT NULL,
+>     importado_em INTEGER
+> );
+>
+> CREATE TABLE IF NOT EXISTS produtos_excluidos (
+>     codigo TEXT PRIMARY KEY,
+>     motivo TEXT,
+>     excluido_em INTEGER NOT NULL
 > );
 > ```
 
@@ -145,6 +161,18 @@ Buscar uma imagem já salva (deve dar 404 antes de salvar a primeira vez):
 ```
 https://farmatech-imagens-proxy.<seu-usuario>.workers.dev/7891234567895
 ```
+
+## Extração do Firebird chegando direto no painel
+
+O `firebird-extrator/` (pasta na raiz do projeto) pode mandar a
+planilha que ele gera direto pra este worker (rotas `/extracao*`) -
+o painel, ao abrir, vê que tem algo novo esperando e avisa com um
+botão "Importar agora", sem precisar arrastar o arquivo manualmente.
+Usa o mesmo bucket R2, banco D1 e `IMAGENS_KEY` de tudo aqui em cima -
+não precisa criar nada novo no Cloudflare além de rodar a tabela
+`extracoes` do `schema.sql` (ver acima). Configuração de quem vai
+enviar fica no `.env` do extrator (`UPLOAD_URL` / `UPLOAD_KEY`) - ver
+`firebird-extrator/README.md`.
 
 ## Migração das imagens antigas
 
