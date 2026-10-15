@@ -1,4 +1,4 @@
-# Extrator Firebird → FarmaTech Padronizador
+# Extrator Firebird → DrogaLink Padronizador
 
 Script que conecta direto no banco Firebird do Farmax, roda a consulta
 já validada (`PRODUTOS` cruzada com `LABORATORIOS`/`GRUPOS`/`CLASSES`)

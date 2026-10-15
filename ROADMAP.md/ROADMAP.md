@@ -1,4 +1,4 @@
-# 🏥 FarmaTech Padronizador
+# 🏥 DrogaLink Padronizador
 
 ## Objetivo
 

@@ -1,4 +1,4 @@
-# 🏥 FarmaTech Padronizador
+# 🏥 DrogaLink Padronizador
 
 Sistema para padronização automática de produtos farmacêuticos através do código EAN.
 

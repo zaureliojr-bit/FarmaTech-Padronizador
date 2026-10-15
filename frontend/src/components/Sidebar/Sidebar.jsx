@@ -10,7 +10,7 @@ function Sidebar() {
 
             <div className="logo">
 
-                <h2>🏥 FarmaTech</h2>
+                <h2>🏥 DrogaLink</h2>
 
                 <span>Padronizador</span>
 

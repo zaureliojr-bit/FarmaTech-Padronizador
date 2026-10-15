@@ -1,7 +1,7 @@
 # Publish Proxy
 
 Worker do Cloudflare que recebe o catálogo já padronizado pelo
-FarmaTech Padronizador e publica direto no repositório GitHub
+DrogaLink Padronizador e publica direto no repositório GitHub
 `zaureliojr-bit/Produtos`, atualizando `produtos.json` (o arquivo
 que o site "Drogaria Mais Barato" lê via `raw.githubusercontent.com`).
 

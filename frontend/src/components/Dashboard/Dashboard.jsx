@@ -17,7 +17,7 @@ function Dashboard() {
 
             <h1>Dashboard</h1>
 
-            <p>Bem-vindo ao FarmaTech Padronizador.</p>
+            <p>Bem-vindo ao DrogaLink Padronizador.</p>
 
             <div className="cards-grid">
 

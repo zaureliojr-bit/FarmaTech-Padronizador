@@ -14,7 +14,7 @@ function Header(){
 
                     <div>
 
-                        <h1>FarmaTech</h1>
+                        <h1>DrogaLink</h1>
 
                         <span className="header-subtitle">Padronizador de Catálogo</span>
 

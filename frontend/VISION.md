@@ -1,10 +1,10 @@
-"Cada linha de código deve aproximar o FarmaTech da sua missão: transformar dados brutos em um catálogo inteligente, organizado e pronto para publicação."
-# FarmaTech
-"O sucesso da primeira versão do FarmaTech não será medido pela quantidade de funcionalidades, mas pela quantidade de trabalho manual que ela eliminar."
+"Cada linha de código deve aproximar o DrogaLink da sua missão: transformar dados brutos em um catálogo inteligente, organizado e pronto para publicação."
+# DrogaLink
+"O sucesso da primeira versão do DrogaLink não será medido pela quantidade de funcionalidades, mas pela quantidade de trabalho manual que ela eliminar."
 
 ## Visão
 
-O FarmaTech existe para transformar dados brutos de fornecedores em um catálogo inteligente, padronizado e pronto para publicação.
+O DrogaLink existe para transformar dados brutos de fornecedores em um catálogo inteligente, padronizado e pronto para publicação.
 
 Nosso objetivo não é apenas importar produtos.
 
@@ -36,7 +36,7 @@ Nunca o contrário.
 
 Desenvolvimento em Camadas
 
-O FarmaTech será construído em cinco camadas.
+O DrogaLink será construído em cinco camadas.
                  Interface
 
                      ▲
@@ -55,11 +55,11 @@ O FarmaTech será construído em cinco camadas.
 
                  Dados
 
-                 "O verdadeiro produto do FarmaTech não é o código que escrevemos, mas o conhecimento que acumulamos e transformamos em automação inteligente."
+                 "O verdadeiro produto do DrogaLink não é o código que escrevemos, mas o conhecimento que acumulamos e transformamos em automação inteligente."
                  
                  Todo módulo deve ser compreendido em menos de cinco minutos por alguém que nunca o viu antes.
 
-                 Todo novo conhecimento aprendido pelo FarmaTech
+                 Todo novo conhecimento aprendido pelo DrogaLink
 deve ser reutilizável.
 
 O objetivo não é resolver um produto.
