@@ -14,6 +14,39 @@ const REPO_NAME = "Produtos";
 const ARQUIVO = "produtos.json";
 const BRANCH = "main";
 
+/* UM CATÁLOGO POR FARMÁCIA
+
+   Até aqui era um arquivo só, e cada publicação sobrescrevia o catálogo
+   do site inteiro. Com mais de uma farmácia isso é o fim da linha: a
+   filial nova mostraria o preço e o estoque da primeira, e publicar pela
+   segunda apagaria o catálogo da primeira.
+
+     produtos.json                 a farmácia que já existia
+     produtos-<slug>.json          cada filial nova
+
+   A primeira continua no nome antigo de propósito: o site dela aponta
+   para lá, o endereço está em cache em navegador de cliente, e mover
+   arquivo para ganhar simetria é trocar risco por estética.
+
+   O SLUG VEM DO PORTEIRO, NUNCA DO NAVEGADOR
+
+   Quem chama esta rota é o pedidos-proxy, que conferiu a senha e sabe
+   qual farmácia está autenticada. O slug chega daquele worker — e por
+   isso o padronizador não precisou mudar nenhuma linha para passar a
+   publicar no catálogo certo.
+
+   Mesmo assim ele é validado aqui. Este valor vira NOME DE ARQUIVO numa
+   chamada à API do GitHub: um "../" dentro dele escreveria fora da
+   pasta, e confiar em quem chama é exatamente o que não se faz com
+   caminho de arquivo. */
+function arquivoDaLoja(slug) {
+
+    const limpo = String(slug || "").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 60);
+
+    return limpo ? `produtos-${limpo}.json` : ARQUIVO;
+
+}
+
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -132,7 +165,9 @@ export default {
             return jsonResponse({ erro: "Lista de produtos vazia ou inválida." }, 400);
         }
 
-        const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${ARQUIVO}`;
+        const arquivo = arquivoDaLoja(new URL(request.url).searchParams.get("loja"));
+
+        const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${arquivo}`;
 
         const headersGitHub = {
             "Authorization": `Bearer ${env.GITHUB_TOKEN}`,
@@ -191,9 +226,12 @@ export default {
             headers: { ...headersGitHub, "Content-Type": "application/json" },
 
             body: JSON.stringify({
-                message: modo === "substituir"
-                    ? `Publicar catálogo completo (${produtos.length} produtos) via FarmaTech Padronizador`
-                    : `Atualizar ${produtos.length} produto(s) via FarmaTech Padronizador`,
+                /* O nome do arquivo vai na mensagem do commit: com uma
+                   farmácia só dava para saber qual catálogo mudou pelo
+                   contexto, com dez não dá. */
+                message: (modo === "substituir"
+                    ? `Publicar catálogo completo (${produtos.length} produtos)`
+                    : `Atualizar ${produtos.length} produto(s)`) + ` em ${arquivo} via FarmaTech Padronizador`,
                 content: paraBase64Utf8(conteudoJson),
                 branch: BRANCH,
                 ...(shaAtual ? { sha: shaAtual } : {})
@@ -206,7 +244,12 @@ export default {
             return jsonResponse({ erro: `Falha ao publicar: ${erro}` }, 502);
         }
 
-        return jsonResponse({ ok: true, total: produtosFinais.length, enviados: produtos.length, modo });
+        /* Devolve em QUAL arquivo publicou. Sem isso, "publicou com
+           sucesso" não diz se foi no catálogo da farmácia certa — e esse
+           é o erro que ninguém percebe até um cliente estranhar o preço. */
+        return jsonResponse({
+            ok: true, total: produtosFinais.length, enviados: produtos.length, modo, arquivo
+        });
 
     }
 

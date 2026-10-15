@@ -741,7 +741,44 @@ Escolhendo banco por loja, esta fase encolhe muito: não há chave
 primária para recriar nem 23 handlers para auditar. Era a fase mais
 longa e mais perigosa do desenho original.
 
-### Fase 4 — segunda loja de verdade
+### Fase 4 — EM ANDAMENTO: um catálogo por farmácia
+
+Era o que faltava para vender a plataforma a uma farmácia de **outro
+dono**. Com um `produtos.json` só, a filial nova mostraria o preço e o
+estoque da primeira — e publicar pela segunda apagaria o catálogo da
+primeira, num commit.
+
+    produtos.json             a farmácia que já existia
+    produtos-<slug>.json      cada filial nova
+
+A primeira continua no nome antigo de propósito: o site dela aponta para
+lá e o endereço está em cache em navegador de cliente. Mover arquivo para
+ganhar simetria é trocar risco por estética.
+
+**O padronizador não mudou uma linha.** Ele continua chamando
+`/catalogo/publicar`, e quem sabe de que farmácia se trata é o porteiro,
+que conferiu a senha. O slug vai de lá para o publish-proxy, que decide o
+nome do arquivo — e valida, porque aquele valor vira nome de arquivo numa
+chamada à API do GitHub.
+
+No site, o endereço do catálogo vem numa `<meta>` escrita pelo servidor, e
+não da API: o `script.js` baixa 2,6 MB na primeira pintura e não pode
+esperar o cadastro responder. Sem a `<meta>`, vale o catálogo da casa — é
+o que mantém a home e a página canônica funcionando sem mudança.
+
+O endereço do catálogo é **derivado** do slug, e não guardado em coluna —
+ao contrário do banco de dados. A diferença é o que acontece quando dá
+errado: binding apontando para o banco da outra loja responde 200 e
+mostra dado alheio, em silêncio; catálogo apontando para arquivo
+inexistente responde 404 e o site diz "não consegui carregar os produtos"
+na cara de todo mundo. Erro silencioso merece coluna explícita; erro
+barulhento não merece mais um campo para alguém esquecer de preencher.
+
+**Ainda falta nesta fase:** a fila de extração por loja (a planilha que o
+extrator sobe do PC da farmácia), e cadastrar uma filial de verdade em
+piloto.
+
+### Fase 4 (como foi escrita) — segunda loja de verdade
 Cadastrar uma loja da rede, de preferência uma, em piloto. A segunda
 loja é que revela o que o desenho esqueceu.
 

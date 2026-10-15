@@ -1443,6 +1443,11 @@ async function tratarArquivoDeBanner(request, env, db, prefixo, nome) {
 
 const MAX_PROMOCOES_POR_LOTE = 500;
 
+/* Onde moram os catálogos publicados. Um arquivo por farmácia, no mesmo
+   repositório — ver o comentário em publish-proxy/worker.js. */
+const CATALOGO_BASE =
+    "https://raw.githubusercontent.com/zaureliojr-bit/Produtos/refs/heads/main/";
+
 /* =====================================================================
    A LOJA
    =====================================================================
@@ -1467,6 +1472,7 @@ async function tratarLojaPublica(request, env) {
     let loja;
     let horario;
     let visual = null;
+    let primeira = "";
 
     try {
         /* Sem slug, a loja ativa — hoje só existe uma, e exigir o slug
@@ -1480,6 +1486,13 @@ async function tratarLojaPublica(request, env) {
             : await env.DB.prepare(
                 `SELECT * FROM lojas WHERE ativo = 1 ORDER BY criado_em LIMIT 1`
             ).first();
+
+        /* Qual é a farmácia original — a única cujo catálogo continua em
+           produtos.json, sem sufixo. */
+        const maisAntiga = await env.DB.prepare(
+            `SELECT slug FROM lojas WHERE ativo = 1 ORDER BY criado_em LIMIT 1`
+        ).first();
+        primeira = maisAntiga?.slug || "";
 
         if (!loja) return json({ erro: "Loja não encontrada." }, 404);
 
@@ -1518,7 +1531,24 @@ async function tratarLojaPublica(request, env) {
         }, 503);
     }
 
-    return json({ loja, horario, visual: visual || null }, 200, {
+    /* Onde fica o catálogo desta farmácia.
+
+       Derivado do slug, e não guardado numa coluna — ao contrário do
+       banco de dados, que é escrito à mão. A diferença é o que acontece
+       quando dá errado: binding apontando para o banco da outra loja
+       responde 200 e mostra dado alheio, em silêncio. Catálogo apontando
+       para arquivo que não existe responde 404, e o site diz "não
+       consegui carregar os produtos" na cara de todo mundo.
+
+       Erro silencioso merece coluna explícita. Erro barulhento não
+       merece mais um campo para alguém esquecer de preencher. */
+    const daPrimeira = !loja.slug || !primeira || loja.slug === primeira;
+
+    const catalogo = daPrimeira
+        ? CATALOGO_BASE + "produtos.json"
+        : `${CATALOGO_BASE}produtos-${loja.slug}.json`;
+
+    return json({ loja, horario, visual: visual || null, catalogo }, 200, {
         "Cache-Control": "public, max-age=300"
     });
 
@@ -2571,8 +2601,23 @@ export default {
                 return await encaminhar(request, env, { ...imagens(env), caminho: "/correcoes" });
             }
 
+            /* Publicar o catálogo: o porteiro diz ao publish-proxy QUAL
+               farmácia está publicando, e é ele que decide o nome do
+               arquivo — produtos.json para a primeira, produtos-<slug>
+               para as filiais.
+
+               O slug vem de quem provou a senha, nunca de parâmetro. É
+               isso que faz o padronizador publicar no catálogo certo sem
+               ter mudado uma linha: ele continua chamando /catalogo/
+               publicar, e quem sabe de que loja se trata é este worker.
+
+               Vazio para a farmácia original, de propósito: o catálogo
+               dela continua em produtos.json, onde o site dela aponta e
+               onde o endereço está em cache no navegador de cliente. */
             if (request.method === "POST" && rota === "/catalogo/publicar") {
-                return await encaminhar(request, env, { ...publicacao(env), caminho: "/" });
+                const daPrimeira = !loja.slug || !loja.primeira || loja.slug === loja.primeira;
+                const qual = daPrimeira ? "" : `?loja=${encodeURIComponent(loja.slug)}`;
+                return await encaminhar(request, env, { ...publicacao(env), caminho: "/" + qual });
             }
 
             // a extração do PDV, que traz preço de custo e por isso não

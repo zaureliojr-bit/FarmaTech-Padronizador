@@ -1003,5 +1003,81 @@ console.log("\n19. a listagem traz logotipo e cor");
         JSON.stringify(primeira && { logo: primeira.logo, cor: primeira.cor }));
 }
 
+/* ---- 20. um catálogo por farmácia ------------------------------------ */
+console.log("\n20. cada farmácia publica no catálogo dela");
+{
+    /* O problema: até aqui o produtos.json era um só. A filial nova
+       mostraria o preço e o estoque da primeira — e publicar pela segunda
+       apagaria o catálogo da primeira. É o que impedia vender a plataforma
+       para farmácia de outro dono. */
+
+    const primeira = await (await worker.fetch(
+        new Request("https://exemplo.workers.dev/loja?slug=mais-barato"), env)).json();
+    conferir("a farmácia original continua em produtos.json",
+        /\/produtos\.json$/.test(primeira.catalogo || ""), primeira.catalogo);
+
+    const filial = await (await worker.fetch(
+        new Request("https://exemplo.workers.dev/loja?slug=farma-centro"), env)).json();
+    conferir("a filial tem o arquivo dela",
+        /\/produtos-farma-centro\.json$/.test(filial.catalogo || ""), filial.catalogo);
+
+    conferir("e os dois endereços são diferentes",
+        primeira.catalogo !== filial.catalogo);
+
+    /* O porteiro diz ao publish-proxy qual farmácia está publicando. O
+       padronizador não mudou uma linha: ele chama /catalogo/publicar como
+       sempre, e quem sabe de que loja se trata é o worker. */
+    const chamadas = [];
+    const servicoDePublicacao = {
+        async fetch(pedido) {
+            chamadas.push(pedido.url);
+            return new Response(JSON.stringify({ ok: true }), {
+                status: 200, headers: { "Content-Type": "application/json" }
+            });
+        }
+    };
+
+    const envPublica = {
+        ...env,
+        PUBLISH_SERVICE: servicoDePublicacao,
+        PUBLISH_WORKER_URL: "https://publicar.exemplo.dev",
+        PUBLISH_KEY: "chave-de-publicar"
+    };
+
+    const publicar = (senha, loja) => worker.fetch(new Request(
+        "https://exemplo.workers.dev/catalogo/publicar",
+        {
+            method: "POST",
+            headers: {
+                "X-Painel-Key": senha,
+                "Content-Type": "application/json",
+                "CF-Connecting-IP": "15.0.0." + Math.floor(Math.random() * 200 + 10),
+                ...(loja ? { "X-Painel-Loja": loja } : {})
+            },
+            body: JSON.stringify({ produtos: [{ ean: "789", descricao: "x" }] })
+        }
+    ), envPublica);
+
+    limparTentativas();
+    await publicar(SENHA_WORKER, "mais-barato");
+    conferir("publicando pela original, NÃO manda loja nenhuma",
+        chamadas.length === 1 && !/[?&]loja=/.test(chamadas[0]), chamadas[0]);
+
+    chamadas.length = 0;
+    limparTentativas();
+    await publicar(SENHA_DONO, "farma-centro");
+    conferir("publicando pela filial, manda o slug dela",
+        chamadas.length === 1 && /[?&]loja=farma-centro/.test(chamadas[0]), chamadas[0]);
+
+    /* O slug vai de quem PROVOU A SENHA. Mandar o slug de outra farmácia
+       sem a senha dela não publica no catálogo dela — para antes, no
+       portão. */
+    chamadas.length = 0;
+    limparTentativas();
+    const atravessar = await publicar(SENHA_WORKER, "farma-centro");
+    conferir("não dá para publicar no catálogo alheio", atravessar.status === 401, String(atravessar.status));
+    conferir("e nada foi encaminhado", chamadas.length === 0, chamadas.join(","));
+}
+
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
 process.exit(falhas === 0 ? 0 : 1);
