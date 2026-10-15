@@ -1636,11 +1636,18 @@ async function tratarListarLojas(request, env, dono) {
         return json({ erro: "Só o dono da plataforma vê a lista de lojas." }, 403);
     }
 
+    /* A marca entra na listagem para a tela poder mostrar o logotipo de
+       cada filial sem uma consulta por linha. O LEFT JOIN é tolerante:
+       filial sem marca própria vem com os campos nulos, que é o caso
+       certo de quem usa a identidade da casa. */
     const { results } = await env.DB.prepare(
         `SELECT l.slug, l.nome, l.cidade, l.uf, l.ativo, l.criado_em,
                 CASE WHEN a.hash IS NOT NULL AND a.hash <> '' THEN 1 ELSE 0 END AS tem_senha,
-                a.trocada_em, a.banco, a.prefixo_r2
-           FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
+                a.trocada_em, a.banco, a.prefixo_r2,
+                v.logo, v.cor
+           FROM lojas l
+           LEFT JOIN lojas_acesso a ON a.slug = l.slug
+           LEFT JOIN lojas_visual v ON v.slug = l.slug
           ORDER BY l.criado_em`
     ).all();
 
@@ -1807,11 +1814,17 @@ async function tratarLogoDaLoja(request, env, loja, dono, alvo) {
     const extensao = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
                        "image/gif": "gif", "image/avif": "avif" }[tipo];
 
-    /* O nome tem a hora dentro: trocar o logotipo gera endereço novo, e
-       com isso o cache de um ano das imagens nunca precisa ser invalidado
-       — o endereço antigo só deixa de ser usado. */
+    /* O nome tem a hora E um sorteio, como as outras rotas de arquivo
+       deste worker. A hora sozinha parecia bastar e não basta: dois
+       envios no mesmo milissegundo gerariam o MESMO endereço, e aí o
+       cache de um ano continuaria servindo a imagem velha — exatamente
+       o que o nome mutável existe para evitar.
+
+       Pessoa nenhuma clica duas vezes no mesmo milissegundo. Um script
+       de migração subindo o logotipo de trinta filiais, sim — e foi um
+       teste que rodou rápido demais que mostrou isso. */
     const prefixo = prefixoDaLoja(alvoLoja);
-    const chave = `${prefixo}marca/logo-${Date.now()}.${extensao}`;
+    const chave = `${prefixo}marca/logo-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${extensao}`;
 
     await env.BANNERS_BUCKET.put(chave, bytes, { httpMetadata: { contentType: tipo } });
 
@@ -1836,6 +1849,48 @@ async function tratarLogoDaLoja(request, env, loja, dono, alvo) {
     }
 
     return json({ sucesso: true, logo: url });
+
+}
+
+/* Tira o logotipo da farmácia, e ela volta a usar o da casa.
+
+   Apaga o arquivo do balde junto. Deixar o arquivo e só esquecer o
+   endereço acumularia logotipo de cliente antigo no R2 para sempre — e
+   logotipo de ex-cliente guardado é coisa que ninguém quer ter de
+   explicar depois.
+
+   Quem pode: o dono, em qualquer filial; a loja, só na dela. */
+async function tratarApagarLogo(request, env, loja, dono, alvo) {
+
+    if (!dono && alvo !== loja.slug) {
+        return json({ erro: "Você só pode mexer no logotipo da sua própria loja." }, 403);
+    }
+
+    const alvoLoja = await env.DB.prepare(
+        `SELECT l.slug, a.prefixo_r2 FROM lojas l
+         LEFT JOIN lojas_acesso a ON a.slug = l.slug WHERE l.slug = ?1`
+    ).bind(alvo).first();
+
+    if (!alvoLoja) return json({ erro: "Essa filial não está cadastrada." }, 404);
+
+    const atual = await env.DB.prepare(
+        `SELECT logo FROM lojas_visual WHERE slug = ?1`
+    ).bind(alvo).first().catch(() => null);
+
+    if (atual?.logo && env.BANNERS_BUCKET) {
+        const chave = atual.logo.split("/arquivos/")[1];
+        /* A conferência de prefixo vale como segunda parede: o endereço
+           veio do nosso banco, mas apagar é irreversível. */
+        if (chave && chaveEhDaLoja(alvoLoja, chave)) {
+            await env.BANNERS_BUCKET.delete(chave).catch(() => {});
+        }
+    }
+
+    await env.DB.prepare(
+        `UPDATE lojas_visual SET logo = NULL, trocado_em = ?2 WHERE slug = ?1`
+    ).bind(alvo, new Date().toISOString()).run();
+
+    return json({ sucesso: true, logo: null });
 
 }
 
@@ -2468,6 +2523,9 @@ export default {
             const logo = rota.match(/^\/lojas\/([a-z0-9-]+)\/logo$/);
             if (request.method === "POST" && logo) {
                 return await tratarLogoDaLoja(request, env, loja, porta.dono, logo[1]);
+            }
+            if (request.method === "DELETE" && logo) {
+                return await tratarApagarLogo(request, env, loja, porta.dono, logo[1]);
             }
 
             const cor = rota.match(/^\/lojas\/([a-z0-9-]+)\/cor$/);

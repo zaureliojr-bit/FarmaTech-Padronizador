@@ -868,11 +868,20 @@ console.log("\n17. a marca de cada filial");
 
     /* Trocar o logotipo apaga o anterior: senão o balde acumula um
        arquivo por troca, para sempre, e ninguém sabe qual está em uso. */
+    /* Dois envios seguidos, sem espera nenhuma entre eles — de propósito.
+
+       Na primeira versão o nome era só logo-<hora-em-ms>, e este teste
+       falhava uma vez a cada seis: quando as duas gravações caíam no
+       mesmo milissegundo, o endereço saía idêntico. Pessoa nenhuma
+       clica duas vezes no mesmo milissegundo, mas um script subindo o
+       logotipo de trinta filiais, sim — e aí o cache de um ano
+       continuaria servindo a imagem velha. */
     const antigo = resultado.logo.split("/arquivos/")[1];
     limparTentativas();
     const troca = await comoDono("/lojas/farma-centro/logo", { tipo: "image/png", corpo: png });
     const novoLogo = (await troca.json()).logo;
-    conferir("trocar gera endereço novo", novoLogo !== resultado.logo, novoLogo);
+    conferir("trocar gera endereço novo, mesmo no mesmo milissegundo",
+        novoLogo !== resultado.logo, novoLogo);
     conferir("e apaga o anterior do balde",
         balde.apagados.includes(antigo), balde.apagados.join(","));
 
@@ -920,6 +929,78 @@ console.log("\n17. a marca de cada filial");
             body: JSON.stringify({ cor: "#000000" })
         }), env);
     conferir("uma farmácia não troca a cor da outra", alheia.status === 403, String(alheia.status));
+}
+
+/* ---- 18. tirar o logotipo -------------------------------------------- */
+console.log("\n18. tirar o logotipo faz a filial voltar à marca da casa");
+{
+    const comChave = (caminho, metodo, chave, loja) => worker.fetch(new Request(
+        "https://exemplo.workers.dev" + caminho,
+        {
+            method: metodo,
+            headers: {
+                "X-Painel-Key": chave,
+                "CF-Connecting-IP": "14.0.0." + Math.floor(Math.random() * 200 + 10),
+                ...(loja ? { "X-Painel-Loja": loja } : {})
+            }
+        }
+    ), env);
+
+    /* A farma-centro ficou com logotipo na seção 17. */
+    const antes = await (await worker.fetch(
+        new Request("https://exemplo.workers.dev/loja?slug=farma-centro"), env)).json();
+    const chaveDoArquivo = (antes.visual.logo || "").split("/arquivos/")[1];
+    conferir("ela tem logotipo antes", !!chaveDoArquivo, antes.visual.logo);
+    conferir("e o arquivo está no balde", balde.conteudo.has(chaveDoArquivo));
+
+    limparTentativas();
+    const apagou = await comChave("/lojas/farma-centro/logo", "DELETE", SENHA_DONO);
+    conferir("o dono tira o logotipo", apagou.status === 200, String(apagou.status));
+
+    const depois = await (await worker.fetch(
+        new Request("https://exemplo.workers.dev/loja?slug=farma-centro"), env)).json();
+    conferir("a rota pública passa a devolver logotipo nulo",
+        !depois.visual.logo, JSON.stringify(depois.visual));
+
+    /* O arquivo some do balde junto. Deixá-lo lá acumularia logotipo de
+       cliente antigo para sempre — e logotipo de ex-cliente guardado é
+       coisa que ninguém quer ter de explicar depois. */
+    conferir("e o arquivo sai do balde", !balde.conteudo.has(chaveDoArquivo),
+        [...balde.conteudo.keys()].join(","));
+
+    /* A cor continua: são duas coisas, e tirar uma não tira a outra. */
+    conferir("mas a cor continua", depois.visual.cor === "#0a7d4b", JSON.stringify(depois.visual));
+
+    /* Tirar duas vezes não quebra: quem clica de novo não leva erro. */
+    limparTentativas();
+    const outraVez = await comChave("/lojas/farma-centro/logo", "DELETE", SENHA_DONO);
+    conferir("tirar de novo é inofensivo", outraVez.status === 200, String(outraVez.status));
+
+    limparTentativas();
+    const alheia = await comChave("/lojas/farma-centro/logo", "DELETE", SENHA_WORKER);
+    conferir("uma farmácia não tira o logotipo da outra", alheia.status === 403, String(alheia.status));
+
+    limparTentativas();
+    const inexistente = await comChave("/lojas/nao-existe-essa/logo", "DELETE", SENHA_DONO);
+    conferir("filial que não existe dá 404", inexistente.status === 404, String(inexistente.status));
+}
+
+/* ---- 19. a listagem mostra a marca de cada uma ---------------------- */
+console.log("\n19. a listagem traz logotipo e cor");
+{
+    limparTentativas();
+    const lista = await (await worker.fetch(new Request("https://exemplo.workers.dev/lojas", {
+        headers: { "X-Painel-Key": SENHA_DONO, "CF-Connecting-IP": "14.1.0.1" }
+    }), env)).json();
+
+    const centro = (lista.lojas || []).find((l) => l.slug === "farma-centro");
+    conferir("a filial com cor própria aparece com ela",
+        centro && centro.cor === "#0a7d4b", JSON.stringify(centro && centro.cor));
+
+    const primeira = (lista.lojas || []).find((l) => l.slug === "mais-barato");
+    conferir("e quem usa a marca da casa vem com os campos nulos",
+        primeira && !primeira.logo && !primeira.cor,
+        JSON.stringify(primeira && { logo: primeira.logo, cor: primeira.cor }));
 }
 
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
