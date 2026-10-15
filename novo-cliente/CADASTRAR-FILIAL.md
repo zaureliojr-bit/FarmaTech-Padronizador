@@ -26,13 +26,16 @@ errado faria a filial nova mostrar os pedidos da primeira.
 
 ## O caminho manual, passo a passo
 
-Seis passos. Nenhum deles cria site novo nem copia arquivo: a filial nova
+Sete passos. Nenhum deles cria site novo nem copia arquivo: a filial nova
 entra como linha de banco, e o site e o painel passam a atendê-la.
 
 > **Antes de começar**, escolha o *apelido* dela — o `slug`. Só letra
 > minúscula, número e hífen. Ele vai no endereço da vitrine
-> (`/loja/<slug>`), no nome do banco e no prefixo dos arquivos. Trocar
-> depois é trabalhoso, então vale pensar dez segundos agora.
+> (`/loja/<slug>`), **no domínio dela**
+> (`<slug>.drogalink.com.br`), no nome do banco e no prefixo dos
+> arquivos. Trocar depois é trabalhoso — e, depois que a farmácia
+> imprimir o endereço no saco de remédio, é trabalhoso para ela
+> também. Vale pensar dez segundos agora.
 
 ---
 
@@ -157,6 +160,49 @@ UPDATE lojas SET ativo = 1 WHERE slug = 'farma-centro';
 
 E, ainda na aba Filiais, cadastre a senha dela.
 
+## 7. O domínio dela
+
+É o que se vende: a farmácia ganha um endereço com o nome dela, e o
+cliente dela nunca vê o nome da plataforma.
+
+Pages → **drogaria-site** → Custom domains → *Set up a domain*:
+
+```
+farma-centro.drogalink.com.br
+```
+
+Como o `drogalink.com.br` está na mesma conta Cloudflare, o DNS é criado
+sozinho e o certificado sai em alguns minutos.
+
+**Um por filial, à mão.** A Pages não aceita domínio curinga
+(`*.drogalink.com.br`) — conferido na documentação. A alternativa seria
+pôr um Worker na frente do site, cobrado por requisição, para economizar
+dois cliques por cliente; não paga.
+
+Para isso funcionar, o projeto precisa saber qual é o domínio da
+plataforma. Uma vez só, não por filial — Pages → Settings → **Variables
+and Secrets**:
+
+- **`DOMINIO_PLATAFORMA`** = `drogalink.com.br`
+
+Sem essa variável o padrão já é `drogalink.com.br`, mas deixe-a escrita:
+o dia em que a marca mudar, é o único lugar a mexer.
+
+O que responde no domínio dela:
+
+| Endereço | Página |
+|---|---|
+| `farma-centro.drogalink.com.br/` | a vitrine **dela** |
+| `.../produto/dipirona-7891106000888` | o preço **dela** |
+| `.../carrinho.html`, encarte, CSS | iguais |
+
+E as páginas dela são canônicas de si mesmas. Apontar a canônica para a
+plataforma empurraria para o nosso domínio tudo que a farmácia construir
+no Google — o contrário de dar um endereço a ela.
+
+Quando ela quiser o domínio próprio (`farmaciadocentro.com.br`), é o
+mesmo passo com outro nome: o site já está pronto para receber.
+
 ---
 
 ## Conferir se ficou de pé
@@ -169,7 +215,12 @@ Deve responder com os dados e os horários dela. E a vitrine:
 
 ```
 https://drogaria-site.pages.dev/loja/farma-centro
+https://farma-centro.drogalink.com.br/
 ```
+
+Os dois mostram a mesma vitrine. No segundo, o `rel=canonical` da página
+tem de ser o endereço **dela** — se apontar para `drogaria-site.pages.dev`,
+a variável `DOMINIO_PLATAFORMA` não está valendo.
 
 No painel, entre com a sua chave de dono, abra Filiais e clique em
 **Operar nesta**. A fila, os banners, as promoções e os encartes que
@@ -181,11 +232,14 @@ banco errado.
 
 ## O que ainda falta para a filial funcionar inteira
 
-O catálogo de produtos **ainda é um só**, compartilhado — o
-`produtos.json` que o padronizador publica. Preço e estoque da filial
-nova serão os da Mais Barato até a fila de extração passar a ser por
-loja, que é o que ficou pendente da Fase 3 e é trabalho da Fase 4.
+O catálogo dela já é **o dela**: a vitrine e a página de produto no
+domínio da filial leem `produtos-farma-centro.json`, e o padronizador
+publica nesse arquivo quando a extração é daquela loja. Enquanto esse
+arquivo não existir, ela cai no `produtos.json` da casa — o que é o
+comportamento desejado para uma filial da mesma rede, com a mesma tabela
+de preços, e **não** é para uma farmácia de outro dono.
 
-Para uma filial da mesma rede, com a mesma tabela de preços, isso pode
-até ser o comportamento desejado. Para uma farmácia de outro dono, não é
-— e vale saber disso antes de vender.
+O que falta é a ponta de cima: **a fila de extração ainda é uma só**.
+Quem roda o extrator no PC da farmácia publica no catálogo da loja
+configurada no `.env` daquele PC. Ligar a fila à loja no banco é o que
+ficou pendente da Fase 4 — e é o passo que exige mexer em cada PC.
