@@ -63,6 +63,53 @@ const CONSULTA = `
     ORDER BY P.CD_PRODUTO
 `;
 
+// ---------------------------------------------------------------------
+// A segunda consulta: estoque e giro
+// ---------------------------------------------------------------------
+//
+// É a MESMA tabela da de cima, com uma diferença de uma linha - e essa
+// linha é o problema inteiro. A consulta do catálogo termina com
+// ESTOQUE > 0, porque não se mostra no site o que não dá pra vender.
+//
+// Só que ruptura É o produto com estoque zero. A consulta que alimenta
+// o site descarta, por definição, tudo que a análise de ruptura precisa
+// ver. Por isso são duas consultas e não um ajuste naquela: mexer lá
+// encheria a vitrine de produto esgotado.
+//
+// Traz menos colunas de propósito: nome de laboratório e categoria não
+// entram em conta nenhuma de giro, e são o grosso dos bytes de 6.800
+// linhas saindo pela internet de uma farmácia.
+//
+// FB_COLUNA_MINIMO e FB_COLUNA_VALIDADE ficam vazias por padrão. Nem
+// toda instalação do Farmax tem essas colunas, e pedir uma coluna que
+// não existe derruba a consulta INTEIRA - levando junto o estoque, que
+// é o que importa. Quem souber que tem, preenche no .env e ganha o
+// ponto de reposição e o encalhe perto do vencimento.
+const COLUNA_MINIMO = (process.env.FB_COLUNA_MINIMO || "").trim();
+const COLUNA_VALIDADE = (process.env.FB_COLUNA_VALIDADE || "").trim();
+
+function colunaOpcional(nome, apelido) {
+    // Só nome de coluna: isto entra direto no SQL, e nome de coluna não
+    // dá pra passar como parâmetro no Firebird.
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(nome)) return `NULL AS ${apelido}`;
+    return `P.${nome} AS ${apelido}`;
+}
+
+const CONSULTA_ESTOQUE = `
+    SELECT
+        P.CODIGO_BARRAS_1               AS EAN,
+        P.CD_PRODUTO                    AS CODIGO,
+        P.DESCRICAO                     AS DESCRICAO,
+        P.${sufixo("ESTOQUE")}          AS ESTOQUE,
+        P.${sufixo("CUSTO_UNITARIO")}   AS CUSTO,
+        P.${sufixo("PRECO_VENDA")}      AS PRECO,
+        ${colunaOpcional(COLUNA_MINIMO, "MINIMO")},
+        ${colunaOpcional(COLUNA_VALIDADE, "VALIDADE")}
+    FROM PRODUTOS P
+    WHERE P.STATUS = 'A'
+    ORDER BY P.CD_PRODUTO
+`;
+
 // Nomes de coluna que o padronizador já reconhece sozinho
 // (ver frontend/src/utils/camposPadrao.js) - não precisa mexer em
 // nada do lado do padronizador, só subir o arquivo que sai daqui.
@@ -132,6 +179,98 @@ async function enviarParaPainel(caminhoArquivo) {
 
 }
 
+// Manda a fotografia do estoque pro pedidos-proxy, que guarda no banco
+// DA FARMÁCIA e calcula giro comparando com a fotografia de ontem.
+//
+// A data vai junto, e é a data LOCAL daqui. Uma extração às 22h em
+// Cuiabá é do dia 14 pra quem trabalha na farmácia e seria do dia 15 em
+// UTC - o relatório tem que bater com o calendário de quem lê.
+async function enviarEstoque(linhas) {
+
+    const url = (process.env.ESTOQUE_URL || "").trim().replace(/\/+$/, "");
+
+    if (!url) {
+        console.log("ESTOQUE_URL não configurado no .env - não mandei a fotografia de estoque (o catálogo não depende disso).");
+        return;
+    }
+
+    const chave = (process.env.ESTOQUE_KEY || "").trim();
+    const loja = (process.env.ESTOQUE_LOJA || "").trim();
+
+    const agora = new Date();
+    const dia = [
+        agora.getFullYear(),
+        String(agora.getMonth() + 1).padStart(2, "0"),
+        String(agora.getDate()).padStart(2, "0")
+    ].join("-");
+
+    const comoData = (v) => {
+        if (!v) return null;
+        const d = v instanceof Date ? v : new Date(v);
+        return isNaN(d) ? null : d.toISOString().slice(0, 10);
+    };
+
+    const produtos = linhas.map((l) => ({
+        ean: String(l.EAN || "").trim(),
+        codigo: l.CODIGO,
+        descricao: l.DESCRICAO,
+        estoque: l.ESTOQUE,
+        custo: l.CUSTO,
+        preco: l.PRECO,
+        minimo: l.MINIMO,
+        validade: comoData(l.VALIDADE)
+    }));
+
+    // Em pedaços porque o worker recusa envio grande demais - e porque
+    // um erro de rede no meio de 6.800 produtos custa um pedaço, não a
+    // extração inteira. Cada pedaço é atômico do lado de lá.
+    const TAMANHO = 1000;
+    let enviados = 0;
+    let movimentos = 0;
+
+    for (let i = 0; i < produtos.length; i += TAMANHO) {
+
+        const pedaco = produtos.slice(i, i + TAMANHO);
+
+        try {
+
+            const resposta = await fetch(`${url}/estoque`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Painel-Key": chave,
+                    ...(loja ? { "X-Painel-Loja": loja } : {})
+                },
+                body: JSON.stringify({ dia, produtos: pedaco })
+            });
+
+            if (!resposta.ok) {
+                const corpo = await resposta.text().catch(() => "");
+                console.error(`Estoque: o worker recusou o pedaço ${i / TAMANHO + 1} (HTTP ${resposta.status}): ${corpo}`);
+                return;
+            }
+
+            const dados = await resposta.json().catch(() => ({}));
+            enviados += dados.gravados || 0;
+            movimentos += dados.movimentos || 0;
+
+        } catch (erroRede) {
+            console.error("Estoque: não consegui falar com o worker:", erroRede.message);
+            return;
+        }
+
+    }
+
+    console.log(`Estoque do dia ${dia} enviado: ${enviados} produtos, ${movimentos} com movimento desde a última extração.`);
+
+    if (movimentos === 0 && enviados > 0) {
+        // Primeira extração da vida: não há "ontem" pra comparar, e é
+        // esperado. Dito aqui pra ninguém achar que não funcionou.
+        console.log("Nenhum movimento ainda - se esta foi a primeira extração, é o esperado: o giro começa a aparecer amanhã.");
+    }
+
+}
+
 Firebird.attach(OPCOES, (erro, db) => {
 
     if (erro) {
@@ -145,6 +284,28 @@ Firebird.attach(OPCOES, (erro, db) => {
     // node-firebird 2.x exige o array de parâmetros (mesmo vazio) -
     // sem ele, versões antigas aceitavam só consulta+callback.
     db.query(CONSULTA, [], async (erroConsulta, linhas) => {
+
+        // A consulta de estoque roda ANTES do detach, na mesma conexão:
+        // abrir uma segunda conexão custaria outra autenticação no
+        // Firebird e, em instalação com licença limitada de usuários,
+        // pode simplesmente ser recusada.
+        //
+        // O resultado dela é guardado e usado lá embaixo, depois que o
+        // .xlsx estiver salvo. A ordem importa: o catálogo é o que a
+        // farmácia contratou, e uma falha no estoque - que é extra -
+        // não pode impedir a planilha de ser gerada.
+        const estoque = await new Promise((resolver) => {
+            db.query(CONSULTA_ESTOQUE, [], (erroEstoque, linhasEstoque) => {
+                if (erroEstoque) {
+                    console.error("Não consegui ler o estoque:", erroEstoque.message);
+                    if (COLUNA_MINIMO || COLUNA_VALIDADE) {
+                        console.error("Confere FB_COLUNA_MINIMO e FB_COLUNA_VALIDADE no .env - se a coluna não existir nesta instalação, deixe vazio.");
+                    }
+                    return resolver(null);
+                }
+                resolver(linhasEstoque || []);
+            });
+        });
 
         db.detach();
 
@@ -173,6 +334,8 @@ Firebird.attach(OPCOES, (erro, db) => {
         console.log("Já pode subir esse arquivo direto no FarmaTech Padronizador.");
 
         await enviarParaPainel(saida);
+
+        if (estoque && estoque.length) await enviarEstoque(estoque);
 
     });
 

@@ -962,6 +962,301 @@ function janela(url) {
 
 }
 
+/* =====================================================================
+   ESTOQUE — a fotografia diária que vem do PC da farmácia
+   =====================================================================
+
+   Quem manda é o agente que roda lá dentro, no mesmo PC e na mesma
+   tarefa agendada que já extrai o catálogo. O Firebird do Farmax não é
+   acessível pela internet; é por isso que isto é um envio, e não uma
+   consulta nossa.
+
+   A diferença para a extração do catálogo é uma linha de SQL, e é a
+   linha inteira do problema: a consulta do catálogo termina com
+   ESTOQUE > 0, porque não se mostra no site o que não dá para vender.
+   Só que ruptura É o produto com estoque zero. A consulta que alimenta
+   o site descarta, por definição, tudo que esta tela precisa ver.
+
+   Por isso são duas consultas, e não um ajuste naquela. */
+
+const MAX_ITENS_ESTOQUE = 1000;
+
+/* Lote grande vira lote menor: SQLite tem limite de parâmetros por
+   instrução, e 1.000 EANs numa cláusula IN já é bastante. O agente
+   manda 6.800 produtos em alguns pedidos; aqui cada um é atômico. */
+function emPedacos(lista, tamanho) {
+    const pedacos = [];
+    for (let i = 0; i < lista.length; i += tamanho) pedacos.push(lista.slice(i, i + tamanho));
+    return pedacos;
+}
+
+function numeroOuNulo(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
+
+async function tratarEstoqueEnviar(request, env, loja, db) {
+
+    let corpo;
+    try { corpo = await request.json(); }
+    catch { return json({ erro: "Corpo não é JSON." }, 400); }
+
+    /* A data é a LOCAL da farmácia, mandada por quem está lá. Uma
+       extração às 22h em Cuiabá é do dia 14 para a dona da farmácia e
+       seria do dia 15 em UTC — o relatório tem de bater com o calendário
+       de quem lê. */
+    const dia = String(corpo.dia || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) {
+        return json({ erro: "Informe 'dia' no formato AAAA-MM-DD, na data local da farmácia." }, 400);
+    }
+
+    const itens = Array.isArray(corpo.produtos) ? corpo.produtos : null;
+    if (!itens) return json({ erro: "Informe 'produtos' como lista." }, 400);
+    if (itens.length > MAX_ITENS_ESTOQUE) {
+        return json({ erro: `No máximo ${MAX_ITENS_ESTOQUE} produtos por envio.` }, 413);
+    }
+
+    /* EAN é a chave. Produto sem EAN existe no Farmax (manipulado,
+       produto interno), mas não dá para cruzar com venda do site nem
+       com catálogo — entra na conta de ninguém, então é descartado aqui
+       em vez de virar linha órfã. */
+    const limpos = [];
+    const vistos = new Set();
+    for (const p of itens) {
+        const ean = String((p && p.ean) || "").replace(/\D/g, "");
+        if (!ean || ean.length > 14) continue;
+        if (vistos.has(ean)) continue;
+        vistos.add(ean);
+
+        const estoque = numeroOuNulo(p.estoque);
+        if (estoque === null) continue;
+
+        limpos.push({
+            ean,
+            codigo: String(p.codigo || "").slice(0, 30) || null,
+            descricao: String(p.descricao || "").slice(0, 200) || null,
+            estoque,
+            custo: numeroOuNulo(p.custo),
+            preco: numeroOuNulo(p.preco),
+            minimo: numeroOuNulo(p.minimo),
+            validade: /^\d{4}-\d{2}-\d{2}$/.test(String(p.validade || "")) ? String(p.validade) : null
+        });
+    }
+
+    if (!limpos.length) return json({ ok: true, gravados: 0, movimentos: 0 });
+
+    const agora = Date.now();
+    let movimentos = 0;
+
+    for (const pedaco of emPedacos(limpos, 500)) {
+        const eans = pedaco.map((p) => p.ean);
+        const marcas = eans.map(() => "?").join(",");
+
+        /* O estoque de antes vem de duas fontes, e a ordem importa.
+
+           Se já existe linha de HOJE em estoque_mov, o "antes" dela é o
+           começo do dia — e é esse que vale. Usar a foto atual faria a
+           segunda extração do dia comparar com a primeira, e a venda do
+           dia apareceria picada em pedaços que somam errado quando a
+           linha é substituída. */
+        const [{ results: fotos = [] }, { results: movsDeHoje = [] }] = await db.batch([
+            db.prepare(`SELECT ean, estoque FROM estoque_foto WHERE ean IN (${marcas})`).bind(...eans),
+            db.prepare(`SELECT ean, estoque_antes FROM estoque_mov WHERE dia = ? AND ean IN (${marcas})`)
+              .bind(dia, ...eans)
+        ]);
+
+        const estoqueAnterior = new Map();
+        for (const f of fotos) estoqueAnterior.set(f.ean, f.estoque);
+        for (const m of movsDeHoje) {
+            if (m.estoque_antes !== null) estoqueAnterior.set(m.ean, m.estoque_antes);
+        }
+
+        const comandos = [];
+        for (const p of pedaco) {
+            comandos.push(
+                db.prepare(`INSERT INTO estoque_foto
+                                (ean, codigo, descricao, estoque, custo, preco, minimo, validade, visto_em)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT (ean) DO UPDATE SET
+                                codigo = excluded.codigo, descricao = excluded.descricao,
+                                estoque = excluded.estoque, custo = excluded.custo,
+                                preco = excluded.preco, minimo = excluded.minimo,
+                                validade = excluded.validade, visto_em = excluded.visto_em`)
+                  .bind(p.ean, p.codigo, p.descricao, p.estoque, p.custo,
+                        p.preco, p.minimo, p.validade, agora)
+            );
+
+            /* Produto visto pela primeira vez não gera movimento: não há
+               "antes", e tratar a primeira fotografia como entrada
+               inventaria uma compra de 6.800 itens no dia da instalação,
+               estragando a média de giro do primeiro mês inteiro. */
+            if (!estoqueAnterior.has(p.ean)) continue;
+
+            const antes = estoqueAnterior.get(p.ean);
+            if (antes === p.estoque) continue;
+
+            const variacao = p.estoque - antes;
+            comandos.push(
+                db.prepare(`INSERT INTO estoque_mov
+                                (ean, dia, estoque_antes, estoque_depois, saida, entrada)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            ON CONFLICT (ean, dia) DO UPDATE SET
+                                estoque_depois = excluded.estoque_depois,
+                                saida = excluded.saida, entrada = excluded.entrada`)
+                  .bind(p.ean, dia, antes, p.estoque,
+                        variacao < 0 ? -variacao : 0,
+                        variacao > 0 ? variacao : 0)
+            );
+            movimentos++;
+        }
+
+        await db.batch(comandos);
+    }
+
+    return json({ ok: true, dia, gravados: limpos.length, movimentos });
+}
+
+/* A tela de estoque: o que rompeu, o que vai romper, o que está parado.
+
+   Tudo sai de duas tabelas e de uma conta só — DIAS DE COBERTURA:
+
+       estoque ÷ média de saída por dia
+
+   É a métrica que responde as três perguntas com o mesmo número. Zero é
+   ruptura; abaixo de uma semana é alerta; sem saída nenhuma é encalhe.
+
+   Ordenado por DINHEIRO, nunca por quantidade: 200 unidades de algo de
+   R$ 2 importa menos que 8 de algo de R$ 190, e uma lista ordenada por
+   quantidade enterra o caro embaixo do barato. */
+
+const DIAS_GIRO = 30;
+const DIAS_PARADO = 60;
+const COBERTURA_ALERTA = 7;
+
+async function tratarEstoqueAnalise(request, env, loja, db) {
+
+    const url = new URL(request.url);
+    const limite = Math.min(
+        Math.max(parseInt(url.searchParams.get("limite") || "50", 10) || 50, 1), 200
+    );
+
+    const hoje = new Date();
+    const diaMenos = (n) => new Date(hoje.getTime() - n * 86400000).toISOString().slice(0, 10);
+    const desdeGiro = diaMenos(DIAS_GIRO);
+    const desdeParado = diaMenos(DIAS_PARADO);
+
+    /* A saída média por dia de cada produto, no período de giro. O
+       denominador é o período inteiro, e não a quantidade de dias com
+       movimento: quem vendeu 3 unidades num dia e ficou 29 parado vende
+       0,1 por dia, não 3.
+
+       Vem como WITH, e não como subconsulta no meio do FROM, por causa
+       da ORDEM DOS PARÂMETROS. Embutida, o "?" dela cai entre os do
+       SELECT e os do WHERE, e ligar os valores passa a exigir contar
+       interrogações salteadas no texto. Foi exatamente o erro que o
+       teste pegou aqui: a consulta rodava, não dava erro nenhum, e
+       simplesmente não achava os produtos prestes a acabar. No topo, a
+       ordem dos valores é a ordem de leitura. */
+    const giro = `
+        WITH giro AS (
+            SELECT ean, SUM(saida) AS saiu
+              FROM estoque_mov
+             WHERE dia >= ? AND saida > 0
+             GROUP BY ean
+        )
+    `;
+
+    const [rompidos, vaoRomper, parados, totais] = await db.batch([
+
+        /* Rompeu: está zerado E vinha girando. O "vinha girando" é o que
+           separa ruptura de produto que a farmácia simplesmente não
+           trabalha — sem ele, a lista viria com milhares de itens que
+           nunca tiveram estoque e nunca farão falta. */
+        db.prepare(`${giro}
+            SELECT f.ean, f.descricao, f.preco, f.custo,
+                   g.saiu AS saiu_no_periodo,
+                   ROUND(g.saiu * 1.0 / ?, 2) AS media_dia,
+                   ROUND(g.saiu * COALESCE(f.preco, 0) / ?, 2) AS venda_perdida_dia
+              FROM estoque_foto f
+              JOIN giro g ON g.ean = f.ean
+             WHERE f.estoque <= 0
+             ORDER BY venda_perdida_dia DESC
+             LIMIT ?
+        `).bind(desdeGiro, DIAS_GIRO, DIAS_GIRO, limite),
+
+        /* Vai romper: ainda tem, mas acaba dentro da semana.
+           COBERTURA_ALERTA em dias, e não "estoque < mínimo", porque
+           mínimo nem sempre está cadastrado — e quando está, costuma ser
+           um número antigo que ninguém revisou. */
+        db.prepare(`${giro}
+            SELECT f.ean, f.descricao, f.estoque, f.preco, f.minimo,
+                   ROUND(g.saiu * 1.0 / ?, 2) AS media_dia,
+                   ROUND(f.estoque / (g.saiu * 1.0 / ?), 1) AS dias_cobertura
+              FROM estoque_foto f
+              JOIN giro g ON g.ean = f.ean
+             WHERE f.estoque > 0
+               AND f.estoque / (g.saiu * 1.0 / ?) < ?
+             ORDER BY dias_cobertura ASC
+             LIMIT ?
+        `).bind(desdeGiro, DIAS_GIRO, DIAS_GIRO, DIAS_GIRO, COBERTURA_ALERTA, limite),
+
+        /* Parado: tem estoque e não saiu NADA no período longo.
+           NOT EXISTS, e não LEFT JOIN com saiu IS NULL, porque o que
+           interessa é a ausência de movimento — a tabela de movimento
+           não tem linha para quem não se mexeu, e é essa ausência que
+           responde a pergunta. */
+        db.prepare(`
+            SELECT f.ean, f.descricao, f.estoque, f.custo, f.validade,
+                   ROUND(f.estoque * COALESCE(f.custo, 0), 2) AS dinheiro_parado
+              FROM estoque_foto f
+             WHERE f.estoque > 0
+               AND NOT EXISTS (
+                     SELECT 1 FROM estoque_mov m
+                      WHERE m.ean = f.ean AND m.dia >= ? AND m.saida > 0
+                   )
+             ORDER BY dinheiro_parado DESC
+             LIMIT ?
+        `).bind(desdeParado, limite),
+
+        /* O total parado é a frase que faz o dono agir, e tem de ser o
+           total DE VERDADE — não a soma da lista de cima, que está
+           cortada no limite. */
+        db.prepare(`
+            SELECT COUNT(*) AS itens,
+                   ROUND(SUM(f.estoque * COALESCE(f.custo, 0)), 2) AS dinheiro,
+                   (SELECT COUNT(*) FROM estoque_foto WHERE estoque <= 0) AS zerados,
+                   (SELECT MAX(visto_em) FROM estoque_foto) AS atualizado_em
+              FROM estoque_foto f
+             WHERE f.estoque > 0
+               AND NOT EXISTS (
+                     SELECT 1 FROM estoque_mov m
+                      WHERE m.ean = f.ean AND m.dia >= ? AND m.saida > 0
+                   )
+        `).bind(desdeParado)
+    ]);
+
+    const resumo = (totais.results && totais.results[0]) || {};
+
+    return json({
+        loja,
+        /* Dito na resposta, e não só na tela: quem consumir isto por
+           outro caminho precisa saber que a saída é ESTIMADA pela
+           diferença entre fotografias, e que compra e perda entram na
+           mesma conta. Vira exato quando o Farmax abrir a tabela de
+           vendas. */
+        origem: "diferença entre fotografias diárias de estoque",
+        exato: false,
+        periodo: { giro: DIAS_GIRO, parado: DIAS_PARADO, alerta_dias: COBERTURA_ALERTA },
+        atualizado_em: resumo.atualizado_em || null,
+        parado_total: { itens: resumo.itens || 0, dinheiro: resumo.dinheiro || 0 },
+        zerados: resumo.zerados || 0,
+        rompidos: rompidos.results || [],
+        vaoRomper: vaoRomper.results || [],
+        parados: parados.results || []
+    });
+}
+
 async function tratarResumo(request, env, loja, db) {
 
     const url = new URL(request.url);
@@ -2567,6 +2862,13 @@ export default {
             if (request.method === "POST" && ativar) {
                 return await tratarAtivarLoja(request, env, porta.dono, ativar[1]);
             }
+
+            /* Estoque: o agente da farmácia envia, o painel lê. Os dois
+               passam pelo mesmo portão acima, então o envio já chega
+               amarrado à loja que provou a senha — não há "?loja=" aqui
+               para alguém apontar para o estoque da concorrente. */
+            if (request.method === "POST" && rota === "/estoque")         return await tratarEstoqueEnviar(request, env, loja, db);
+            if (request.method === "GET"  && rota === "/estoque/analise") return await tratarEstoqueAnalise(request, env, loja, db);
 
             if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env, loja, db);
             if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env, loja, db);

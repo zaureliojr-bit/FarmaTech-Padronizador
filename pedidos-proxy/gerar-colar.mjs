@@ -22,17 +22,83 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
-/* Na ordem em que se roda no console: o de lojas cria as tabelas que o
-   de acesso pressupõe. A ordem também é a do teste aqui embaixo. */
-const SCHEMAS = ["schema-lojas.sql", "schema-acesso.sql", "schema-visual.sql"];
+/* Dois bancos, e por isso dois grupos.
+
+   O principal guarda o cadastro de quem são as farmácias. O de operação
+   é o de CADA farmácia, um por loja — é o isolamento que impede uma
+   consulta esquecida de mostrar o pedido (ou o encalhe) de uma loja para
+   a outra.
+
+   Rodar os dois grupos no mesmo banco de mentira passaria, porque os
+   nomes das tabelas não se chocam. Mas esconderia o erro que importa:
+   um schema de operação que, sem perceber, dependesse de uma tabela que
+   só existe no principal. Separados, isso falha aqui em vez de falhar no
+   console da Cloudflare com a filial nova esperando.
+
+   Dentro de cada grupo, a ordem é a de rodar: o de lojas cria as tabelas
+   que o de acesso pressupõe. */
+const GRUPOS = {
+    principal: ["schema-lojas.sql", "schema-acesso.sql", "schema-visual.sql"],
+    operacao: ["schema.sql", "schema-estoque.sql"]
+};
+
+const SCHEMAS = [...GRUPOS.principal, ...GRUPOS.operacao];
 
 const CONFERIR = process.argv.includes("--conferir");
 
+/* Varre caractere a caractere, e não com expressão regular, por um
+   motivo só: comentário no FIM da linha.
+
+       estoque REAL NOT NULL,   -- quanto tem hoje
+
+   Tirar isso com /--.*$/ funciona até o dia em que um valor de texto
+   contiver dois hifens — 'Entrega -- combinar', um nome de bairro, um
+   recado. Aí a regra cortaria no meio da string e geraria um SQL
+   quebrado que só falha no console da Cloudflare, longe daqui.
+
+   Então o estado "estou dentro de aspas" é lido de verdade. Dentro de
+   aspas, nada é comentário; fora delas, -- vai até o fim da linha e
+   um bloco vai até o fecha. */
 function semComentario(sql) {
-    return sql
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/^\s*--.*$/gm, "")
-        .replace(/\n\s*\n/g, "\n")
+    let fora = "";
+    let emTexto = false;
+
+    for (let i = 0; i < sql.length; i++) {
+        const c = sql[i];
+
+        if (emTexto) {
+            fora += c;
+            /* '' dentro de string é uma aspa escapada, não o fim dela. */
+            if (c === "'") {
+                if (sql[i + 1] === "'") { fora += sql[++i]; }
+                else emTexto = false;
+            }
+            continue;
+        }
+
+        if (c === "'") { emTexto = true; fora += c; continue; }
+
+        if (c === "-" && sql[i + 1] === "-") {
+            while (i < sql.length && sql[i] !== "\n") i++;
+            fora += "\n";
+            continue;
+        }
+
+        if (c === "/" && sql[i + 1] === "*") {
+            i += 2;
+            while (i < sql.length && !(sql[i] === "*" && sql[i + 1] === "/")) i++;
+            i++;
+            continue;
+        }
+
+        fora += c;
+    }
+
+    return fora
+        .split("\n")
+        .map((linha) => linha.replace(/\s+$/, ""))
+        .filter((linha) => linha.trim() !== "")
+        .join("\n")
         .trim() + "\n";
 }
 
@@ -44,7 +110,11 @@ for (const arquivo of SCHEMAS) {
     const limpo = semComentario(original);
     limpos.set(arquivo, limpo);
 
-    if (/--|\/\*/.test(limpo)) problemas.push(`${arquivo}: sobrou comentário`);
+    /* Limpar o que já está limpo tem de não mudar nada. Vale mais que
+       procurar "--" no resultado: um valor de texto pode conter dois
+       hifens legitimamente, e aí a procura acusaria um problema que não
+       existe. */
+    if (semComentario(limpo) !== limpo) problemas.push(`${arquivo}: sobrou comentário`);
 
     const pedacos = limpo.split(";").map((p) => p.trim()).filter(Boolean);
     if (pedacos.some((p) => !/[a-zA-Z]/.test(p))) {
@@ -56,14 +126,15 @@ for (const arquivo of SCHEMAS) {
    linha — que é o que o console faz antes de enviar — e duas vezes, porque
    colar de novo tem de ser inofensivo. */
 for (const [nome, achatar] of [["como arquivo", false], ["achatado", true]]) {
+  for (const [grupo, arquivos] of Object.entries(GRUPOS)) {
     try {
         const db = new DatabaseSync(":memory:");
         for (const volta of [1, 2]) {
-            for (const arquivo of SCHEMAS) {
+            for (const arquivo of arquivos) {
                 const sql = limpos.get(arquivo);
                 db.exec(achatar ? sql.replace(/\r?\n/g, " ") : sql);
             }
-            if (volta === 1) {
+            if (volta === 1 && grupo === "principal") {
                 const lojas = db.prepare("SELECT COUNT(*) AS n FROM lojas").get().n;
                 const horarios = db.prepare("SELECT COUNT(*) AS n FROM lojas_horario").get().n;
                 if (lojas !== 1 || horarios !== 7) {
@@ -77,10 +148,23 @@ for (const [nome, achatar] of [["como arquivo", false], ["achatado", true]]) {
                     if (n !== 0) problemas.push(`${nome}: ${lateral} devia nascer vazia, veio com ${n}`);
                 }
             }
+
+            /* O banco de uma farmácia nova nasce sem pedido, sem busca e
+               sem estoque. Se algum dia um schema vier com linha de
+               exemplo dentro, a filial recém-criada abriria o painel
+               mostrando venda que não houve. */
+            if (volta === 1 && grupo === "operacao") {
+                for (const tabela of ["pedidos", "pedido_itens", "buscas",
+                                      "estoque_foto", "estoque_mov"]) {
+                    const n = db.prepare(`SELECT COUNT(*) AS n FROM ${tabela}`).get().n;
+                    if (n !== 0) problemas.push(`${nome}: ${tabela} devia nascer vazia, veio com ${n}`);
+                }
+            }
         }
     } catch (erro) {
-        problemas.push(`${nome}: ${erro.message}`);
+        problemas.push(`${nome}/${grupo}: ${erro.message}`);
     }
+  }
 }
 
 if (problemas.length) {
