@@ -1,12 +1,12 @@
 /**
  * =====================================================
- * FarmaTech Intelligence
+ * DrogaLink Intelligence
  * Produto Inteligente
  * =====================================================
  *
  * Responsabilidade:
  * Criar o objeto base utilizado por toda a inteligência
- * do FarmaTech.
+ * do DrogaLink.
  *
  * Nenhum módulo altera o produto original.
  * Cada etapa apenas enriquece esse objeto.

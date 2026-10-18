@@ -1,6 +1,6 @@
 /**
  * =====================================================
- * FarmaTech Intelligence
+ * DrogaLink Intelligence
  * Substâncias de Controle Especial (Portaria SVS/MS 344/1998)
  * =====================================================
  *

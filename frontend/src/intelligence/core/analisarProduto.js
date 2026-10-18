@@ -1,11 +1,11 @@
 /**
  * =====================================================
- * FarmaTech Intelligence
+ * DrogaLink Intelligence
  * Pipeline Inteligente
  * =====================================================
  *
  * Responsabilidade:
- * Coordenar todas as etapas da Inteligência do FarmaTech.
+ * Coordenar todas as etapas da Inteligência do DrogaLink.
  *
  * Nenhuma regra de negócio deve ficar neste arquivo.
  * Cada etapa delega sua responsabilidade para um módulo
@@ -121,7 +121,7 @@ export function analisarProduto(produtoImportado) {
     if (DEBUG && produto.codigo === "001496") {
 
         console.log("====================================");
-        console.log("FarmaTech Intelligence");
+        console.log("DrogaLink Intelligence");
         console.log("====================================");
 
         console.log("Código:");

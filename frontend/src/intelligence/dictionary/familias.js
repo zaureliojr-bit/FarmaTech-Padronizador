@@ -1,6 +1,6 @@
 /**
  * =====================================================
- * FarmaTech Intelligence
+ * DrogaLink Intelligence
  * Famílias de Categoria
  * =====================================================
  *

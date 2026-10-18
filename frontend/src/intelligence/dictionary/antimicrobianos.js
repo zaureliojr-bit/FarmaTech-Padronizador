@@ -1,6 +1,6 @@
 /**
  * =====================================================
- * FarmaTech Intelligence
+ * DrogaLink Intelligence
  * Antimicrobianos (RDC 20/2011)
  * =====================================================
  *

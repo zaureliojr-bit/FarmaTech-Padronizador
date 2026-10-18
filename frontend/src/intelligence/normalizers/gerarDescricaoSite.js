@@ -1,6 +1,6 @@
 /**
  * =====================================================
- * FarmaTech Intelligence
+ * DrogaLink Intelligence
  * Gerador de Descrição para Site
  * =====================================================
  *

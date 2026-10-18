@@ -1,6 +1,6 @@
 /**
  * =====================================================
- * FarmaTech Intelligence
+ * DrogaLink Intelligence
  * Controle Especial (Portaria 344/1998)
  * =====================================================
  *
