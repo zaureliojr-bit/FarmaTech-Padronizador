@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import Header from "../components/Header/Header";
 import ImportBox from "../components/ImportBox/ImportBox";
 import NovaExtracaoBox from "../components/NovaExtracaoBox/NovaExtracaoBox";
 import ImportSummary from "../components/ImportSummary/ImportSummary";
@@ -99,6 +100,8 @@ function Home() {
     return (
 
         <>
+
+            <Header />
 
             <div className="page">
 
