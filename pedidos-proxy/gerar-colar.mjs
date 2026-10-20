@@ -39,7 +39,7 @@ import { DatabaseSync } from "node:sqlite";
    que o de acesso pressupõe. */
 const GRUPOS = {
     principal: ["schema-lojas.sql", "schema-acesso.sql", "schema-visual.sql"],
-    operacao: ["schema.sql", "schema-estoque.sql"]
+    operacao: ["schema.sql", "schema-estoque.sql", "schema-reativacao.sql"]
 };
 
 const SCHEMAS = [...GRUPOS.principal, ...GRUPOS.operacao];
@@ -155,7 +155,8 @@ for (const [nome, achatar] of [["como arquivo", false], ["achatado", true]]) {
                mostrando venda que não houve. */
             if (volta === 1 && grupo === "operacao") {
                 for (const tabela of ["pedidos", "pedido_itens", "buscas",
-                                      "estoque_foto", "estoque_mov"]) {
+                                      "estoque_foto", "estoque_mov",
+                                      "reativacao_fila", "reativacao_bloqueio"]) {
                     const n = db.prepare(`SELECT COUNT(*) AS n FROM ${tabela}`).get().n;
                     if (n !== 0) problemas.push(`${nome}: ${tabela} devia nascer vazia, veio com ${n}`);
                 }

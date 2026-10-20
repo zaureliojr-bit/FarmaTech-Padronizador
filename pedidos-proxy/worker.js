@@ -1257,6 +1257,281 @@ async function tratarEstoqueAnalise(request, env, loja, db) {
     });
 }
 
+/* =====================================================================
+   REATIVAÇÃO — a fila que o agente de envio consome
+   =====================================================================
+
+   Enquanto a campanha era um clique por vez, a lista podia viver no
+   navegador. Com um agente enviando, não pode: ele é outro programa, em
+   outra máquina, e precisa saber o que já saiu. Duas mensagens iguais,
+   do mesmo número, com o nome trocado, é o que faz alguém bloquear a
+   farmácia.
+
+   São quatro rotas, e o desenho é deliberadamente burro — o agente puxa,
+   confirma e avisa de quem pediu para parar:
+
+       POST /reativacao/fila       o painel carrega a campanha
+       GET  /reativacao/proximos   o agente pega o próximo lote
+       POST /reativacao/resultado  o agente diz o que aconteceu
+       POST /reativacao/parar      alguém pediu para não receber mais
+
+   SOBRE ENVIAR EM MASSA PELO WHATSAPP
+
+   Vale estar escrito onde quem mexe vai ler: biblioteca não oficial
+   (Baileys e parentes) funciona até o dia em que a Meta banir o número,
+   e aí a farmácia perde o canal que mais vende junto com o histórico de
+   conversa dos clientes. O caminho que sobrevive é a API oficial, que
+   exige modelo aprovado e aceite prévio.
+
+   Este worker não escolhe por você — ele entrega a fila. Mas o
+   /proximos tem um teto por chamada e devolve o ritmo sugerido, porque
+   o jeito mais rápido de queimar um número é despejar mil mensagens em
+   dez minutos. */
+
+const MAX_FILA = 2000;
+const MAX_LOTE_AGENTE = 50;
+const TENTATIVAS_ATE_DESISTIR = 3;
+
+/* Quanto tempo uma linha pode ficar "enviando" antes de voltar para a
+   fila. O agente que cai no meio do lote deixa linhas presas; sem isto,
+   elas nunca mais seriam oferecidas e a campanha terminaria pela
+   metade, sem ninguém perceber. */
+const MINUTOS_PRESO = 15;
+
+function telefoneDaFila(valor) {
+
+    const digitos = String(valor || "").replace(/\D/g, "");
+
+    /* 55 + DDD + 9 dígitos. Aceitar menos deixaria entrar na fila um
+       número que o agente tentaria mandar e falharia, gastando uma
+       tentativa por nada. */
+    if (digitos.length < 12 || digitos.length > 13) return "";
+    if (!digitos.startsWith("55")) return "";
+
+    return digitos;
+
+}
+
+async function tratarReativacaoCarregar(request, env, loja, db) {
+
+    let corpo;
+    try { corpo = await request.json(); }
+    catch { return json({ erro: "Corpo não é JSON." }, 400); }
+
+    const itens = Array.isArray(corpo.contatos) ? corpo.contatos : null;
+    if (!itens) return json({ erro: "Informe 'contatos' como lista." }, 400);
+    if (itens.length > MAX_FILA) {
+        return json({ erro: `No máximo ${MAX_FILA} contatos por campanha.` }, 413);
+    }
+
+    /* A fila antiga sai inteira. Campanha é de um momento: deixar
+       sobras da anterior faria o agente mandar uma mensagem de outubro
+       em novembro, com "faz 183 dias" que já não é verdade.
+
+       O bloqueio NÃO sai — ele vale para sempre, e é o que impede quem
+       pediu para parar de voltar na campanha seguinte. */
+    const bloqueados = new Set(
+        ((await db.prepare("SELECT telefone FROM reativacao_bloqueio").all()).results || [])
+            .map((b) => b.telefone)
+    );
+
+    const agora = Date.now();
+    const comandos = [db.prepare("DELETE FROM reativacao_fila")];
+    const vistos = new Set();
+    let bloqueadosFora = 0;
+
+    for (const item of itens) {
+
+        const telefone = telefoneDaFila(item && item.telefone);
+        if (!telefone || vistos.has(telefone)) continue;
+
+        if (bloqueados.has(telefone)) { bloqueadosFora++; continue; }
+
+        const mensagem = String((item && item.mensagem) || "").slice(0, 1000);
+        if (!mensagem.trim()) continue;
+
+        vistos.add(telefone);
+
+        comandos.push(
+            db.prepare(`INSERT INTO reativacao_fila
+                            (telefone, nome, dias, mensagem, situacao, criado_em)
+                        VALUES (?, ?, ?, ?, 'espera', ?)`)
+              .bind(telefone, String(item.nome || "").slice(0, 120),
+                    parseInt(item.dias, 10) || 0, mensagem, agora)
+        );
+
+    }
+
+    await db.batch(comandos);
+
+    return json({
+        ok: true,
+        naFila: vistos.size,
+        bloqueadosFora,
+        /* Dito na resposta para a tela poder mostrar: a loja precisa
+           saber que a fila tem menos gente do que a lista dela, e por
+           quê. Silêncio aqui vira "sumiram clientes". */
+        recado: bloqueadosFora
+            ? `${bloqueadosFora} contato(s) do "não perturbe" ficaram de fora.`
+            : ""
+    });
+
+}
+
+/* O agente pega o próximo lote. Esta é a única rota que ENTREGA texto
+   de mensagem, então o teto por chamada importa: com ele, um agente mal
+   configurado em laço gasta a fila devagar em vez de despejar tudo. */
+async function tratarReativacaoProximos(request, env, loja, db) {
+
+    const url = new URL(request.url);
+    const limite = Math.min(
+        Math.max(parseInt(url.searchParams.get("limite") || "10", 10) || 10, 1),
+        MAX_LOTE_AGENTE
+    );
+
+    const agora = Date.now();
+
+    /* Devolve para a fila o que ficou preso: agente que caiu no meio do
+       lote deixa linhas em 'enviando' para sempre. Mas só até um
+       limite de tentativas — uma linha que foi pega três vezes e nunca
+       voltou tem algo de errado nela, e insistir é girar no mesmo item
+       enquanto o resto da campanha espera. */
+    await db.prepare(
+        `UPDATE reativacao_fila
+            SET situacao = CASE WHEN tentativas >= ? THEN 'falhou' ELSE 'espera' END,
+                erro = CASE WHEN tentativas >= ? THEN 'sem resposta do agente' ELSE erro END
+          WHERE situacao = 'enviando' AND pego_em < ?`
+    ).bind(TENTATIVAS_ATE_DESISTIR, TENTATIVAS_ATE_DESISTIR,
+           agora - MINUTOS_PRESO * 60000).run();
+
+    const { results = [] } = await db.prepare(
+        `SELECT telefone, nome, dias, mensagem
+           FROM reativacao_fila
+          WHERE situacao = 'espera'
+          ORDER BY criado_em
+          LIMIT ?`
+    ).bind(limite).all();
+
+    if (results.length) {
+        const marcas = results.map(() => "?").join(",");
+        await db.prepare(
+            `UPDATE reativacao_fila
+                SET situacao = 'enviando', pego_em = ?, tentativas = tentativas + 1
+              WHERE telefone IN (${marcas})`
+        ).bind(agora, ...results.map((r) => r.telefone)).run();
+    }
+
+    const resumo = await db.prepare(
+        `SELECT situacao, COUNT(*) AS n FROM reativacao_fila GROUP BY situacao`
+    ).all();
+
+    const conta = {};
+    for (const linha of resumo.results || []) conta[linha.situacao] = linha.n;
+
+    return json({
+        loja,
+        contatos: results,
+        restam: conta.espera || 0,
+        resumo: conta,
+        /* O ritmo vai na resposta, e não só na documentação: quem
+           escreve o fluxo no n8n lê isto antes de ler qualquer manual.
+           Despejar mil mensagens em dez minutos é o jeito mais rápido
+           de queimar o número da farmácia. */
+        ritmoSugerido: {
+            segundosEntreMensagens: 20,
+            porHora: 150,
+            porque: "ritmo humano; rajada é o que faz a Meta banir o número"
+        }
+    });
+
+}
+
+async function tratarReativacaoResultado(request, env, loja, db) {
+
+    let corpo;
+    try { corpo = await request.json(); }
+    catch { return json({ erro: "Corpo não é JSON." }, 400); }
+
+    const itens = Array.isArray(corpo.resultados) ? corpo.resultados : null;
+    if (!itens) return json({ erro: "Informe 'resultados' como lista." }, 400);
+    if (itens.length > MAX_LOTE_AGENTE) {
+        return json({ erro: `No máximo ${MAX_LOTE_AGENTE} resultados por vez.` }, 413);
+    }
+
+    const agora = Date.now();
+    const comandos = [];
+    let confirmados = 0;
+
+    for (const item of itens) {
+
+        const telefone = telefoneDaFila(item && item.telefone);
+        if (!telefone) continue;
+
+        const deuCerto = item.enviado === true;
+
+        comandos.push(
+            db.prepare(`UPDATE reativacao_fila
+                           SET situacao = ?, enviado_em = ?, erro = ?
+                         WHERE telefone = ?`)
+              .bind(deuCerto ? "enviado" : "falhou",
+                    deuCerto ? agora : null,
+                    deuCerto ? null : String(item.erro || "").slice(0, 200),
+                    telefone)
+        );
+
+        confirmados++;
+
+    }
+
+    if (comandos.length) await db.batch(comandos);
+
+    return json({ ok: true, confirmados });
+
+}
+
+/* Quem pediu para parar. Chamada pelo agente quando o cliente responde
+   "sair", e pelo painel quando alguém clica em "não perturbe".
+
+   O bloqueio entra ANTES de tirar da fila, e nos dois casos: se a linha
+   sumisse primeiro e o INSERT falhasse, a pessoa voltaria na campanha
+   seguinte — insistindo depois de um não. */
+async function tratarReativacaoParar(request, env, loja, db) {
+
+    let corpo;
+    try { corpo = await request.json(); }
+    catch { return json({ erro: "Corpo não é JSON." }, 400); }
+
+    const telefone = telefoneDaFila(corpo && corpo.telefone);
+    if (!telefone) return json({ erro: "Telefone inválido." }, 400);
+
+    const motivo = String((corpo && corpo.motivo) || "pediu").slice(0, 40);
+
+    await db.batch([
+        db.prepare(`INSERT INTO reativacao_bloqueio (telefone, motivo, criado_em)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (telefone) DO UPDATE SET motivo = excluded.motivo`)
+          .bind(telefone, motivo, Date.now()),
+        db.prepare("DELETE FROM reativacao_fila WHERE telefone = ?").bind(telefone)
+    ]);
+
+    const { results = [] } = await db.prepare(
+        "SELECT COUNT(*) AS n FROM reativacao_bloqueio"
+    ).all();
+
+    return json({ ok: true, telefone, bloqueados: (results[0] && results[0].n) || 0 });
+
+}
+
+async function tratarReativacaoBloqueados(request, env, loja, db) {
+
+    const { results = [] } = await db.prepare(
+        "SELECT telefone, motivo, criado_em FROM reativacao_bloqueio ORDER BY criado_em DESC"
+    ).all();
+
+    return json({ bloqueados: results });
+
+}
+
 async function tratarResumo(request, env, loja, db) {
 
     const url = new URL(request.url);
@@ -2869,6 +3144,17 @@ export default {
                para alguém apontar para o estoque da concorrente. */
             if (request.method === "POST" && rota === "/estoque")         return await tratarEstoqueEnviar(request, env, loja, db);
             if (request.method === "GET"  && rota === "/estoque/analise") return await tratarEstoqueAnalise(request, env, loja, db);
+
+            /* Reativação. O agente de envio passa pelo MESMO portão do
+               painel: ele entra com a senha daquela farmácia, e por isso
+               a fila que ele enxerga é a dela e só a dela. Não há
+               "?loja=" aqui para apontar para a carteira de clientes da
+               concorrente. */
+            if (request.method === "POST" && rota === "/reativacao/fila")       return await tratarReativacaoCarregar(request, env, loja, db);
+            if (request.method === "GET"  && rota === "/reativacao/proximos")   return await tratarReativacaoProximos(request, env, loja, db);
+            if (request.method === "POST" && rota === "/reativacao/resultado")  return await tratarReativacaoResultado(request, env, loja, db);
+            if (request.method === "POST" && rota === "/reativacao/parar")      return await tratarReativacaoParar(request, env, loja, db);
+            if (request.method === "GET"  && rota === "/reativacao/bloqueados") return await tratarReativacaoBloqueados(request, env, loja, db);
 
             if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env, loja, db);
             if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env, loja, db);
