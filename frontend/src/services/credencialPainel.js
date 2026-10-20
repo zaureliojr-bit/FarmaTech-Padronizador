@@ -16,7 +16,26 @@
 // A senha fica só nesta aba (sessionStorage), igual ao painel: fechou,
 // sai. Não é "lembrar de mim" de propósito - é a chave do faturamento.
 
+import { montarCabecalho, limparSlug } from "./cabecalhoPorteiro";
+
 const CHAVE_GUARDADA = "painelKey";
+
+/* A FILIAL em que o painel está operando.
+   =======================================
+
+   O padronizador falava com o porteiro mandando só a senha. Sem a
+   filial, o porteiro cai na farmácia ORIGINAL — então, com o painel
+   aberto numa filial, importar a extração e publicar o catálogo
+   escrevia na loja errada, calado.
+
+   Para o dono da plataforma era pior: a chave dele abre qualquer
+   farmácia, então nada dava 401 e a publicação simplesmente ia para o
+   catálogo de outra loja. Quem operava a filial via "catálogo
+   atualizado" e o site dela continuava igual.
+
+   É exatamente o erro que o banco-por-loja existe para impedir, entrando
+   pela porta do cabeçalho que ninguém mandou. */
+const CHAVE_LOJA = "painelLoja";
 
 /* O padronizador roda dentro de um quadro no painel (aba Catálogo), e
    o painel já tem a senha digitada. Em vez de pedir de novo, ele manda
@@ -30,6 +49,7 @@ const ORIGENS_CONFIAVEIS = (import.meta.env.VITE_ORIGENS_PAINEL
     .filter(Boolean);
 
 let senhaEmMemoria = "";
+let lojaEmMemoria = "";
 
 function lerGuardada() {
 
@@ -57,7 +77,45 @@ export function definirSenhaPainel(senha) {
 
 }
 
+/* Vazio é a farmácia original, e não "qualquer uma": é o que o porteiro
+   entende por ausência do cabeçalho, e é o caso de quem tem uma loja só.
+
+   O apelido é limpo com a mesma regra do painel e do worker — minúscula,
+   número e hífen. Três lugares com a mesma regra é repetição; três
+   lugares com regras diferentes é uma filial que entra no painel e não
+   entra no padronizador. */
+export function definirLojaPainel(slug) {
+
+    lojaEmMemoria = limparSlug(slug);
+
+    try {
+        if (lojaEmMemoria) sessionStorage.setItem(CHAVE_LOJA, lojaEmMemoria);
+        else sessionStorage.removeItem(CHAVE_LOJA);
+    } catch {
+        /* sem armazenamento, vale só enquanto a página viver */
+    }
+
+    return lojaEmMemoria;
+
+}
+
+export function obterLojaPainel() {
+
+    if (lojaEmMemoria) return lojaEmMemoria;
+
+    try {
+        lojaEmMemoria = sessionStorage.getItem(CHAVE_LOJA) || "";
+    } catch {
+        lojaEmMemoria = "";
+    }
+
+    return lojaEmMemoria;
+
+}
+
 export function esquecerSenhaPainel() {
+
+    definirLojaPainel("");
 
     return definirSenhaPainel("");
 
@@ -110,6 +168,16 @@ export function ouvirSenhaDoPainel() {
 
         if (dado && dado.tipo === "senha-painel" && dado.senha) {
             definirSenhaPainel(dado.senha);
+            /* A filial vem no MESMO recado da senha, de propósito: as
+               duas juntas ou nenhuma. Em mensagens separadas haveria um
+               instante com a senha da filial e a loja da anterior — e é
+               nesse instante que uma publicação escreveria no lugar
+               errado.
+
+               `loja` ausente significa farmácia original, e aí a função
+               limpa o que havia: um painel que voltou para a principal
+               não pode deixar a filial velha grudada aqui. */
+            definirLojaPainel(dado.loja);
         }
 
     });
@@ -134,7 +202,7 @@ export function cabecalhoPainel({ pedir = true } = {}) {
 
     const senha = obterSenhaPainel({ pedir });
 
-    return senha ? { "X-Painel-Key": senha } : null;
+    return montarCabecalho(senha, obterLojaPainel());
 
 }
 
