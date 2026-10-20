@@ -15,7 +15,7 @@
 
 export const ABREVIACOES = {
 
-    FR: "Fralda",
+    FR: "Frasco",
 
     CONF: "Confort",
 
