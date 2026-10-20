@@ -41,12 +41,42 @@ const CHAVE_LOJA = "painelLoja";
    o painel já tem a senha digitada. Em vez de pedir de novo, ele manda
    por postMessage e nós aceitamos - mas SÓ de uma origem conhecida.
    Sem essa conferência, qualquer página que abrisse o padronizador num
-   quadro poderia injetar uma senha, ou pior, ficar ouvindo a nossa. */
+   quadro poderia injetar uma senha, ou pior, ficar ouvindo a nossa.
+
+   Cada filial ganha um subdomínio PRÓPRIO (ex.: mais-barato.drogalink.
+   com.br), criado sozinho pelo cadastro de loja nova - uma lista fixa
+   de origens (VITE_ORIGENS_PAINEL) nunca ia acompanhar isso, teria que
+   crescer a cada farmácia nova. Por isso aceita também qualquer
+   subdomínio do domínio da plataforma (mesma ideia do DOMINIO_
+   PLATAFORMA do painel.html) - a lista fixa continua existindo, pros
+   domínios "de fora" desse padrão (drogaria-site.pages.dev). */
+const DOMINIO_PLATAFORMA = (import.meta.env.VITE_DOMINIO_PLATAFORMA || "drogalink.com.br")
+    .trim()
+    .toLowerCase();
+
 const ORIGENS_CONFIAVEIS = (import.meta.env.VITE_ORIGENS_PAINEL
     || "https://drogaria-site.pages.dev")
     .split(",")
     .map((o) => o.trim().replace(/\/+$/, ""))
     .filter(Boolean);
+
+function origemConfiavel(origem) {
+
+    if (ORIGENS_CONFIAVEIS.includes(origem)) return true;
+
+    try {
+
+        const host = new URL(origem).hostname.toLowerCase();
+
+        return !!DOMINIO_PLATAFORMA && (host === DOMINIO_PLATAFORMA || host.endsWith("." + DOMINIO_PLATAFORMA));
+
+    } catch {
+
+        return false;
+
+    }
+
+}
 
 let senhaEmMemoria = "";
 let lojaEmMemoria = "";
@@ -162,7 +192,7 @@ export function ouvirSenhaDoPainel() {
 
         const origem = String(evento.origin || "").replace(/\/+$/, "");
 
-        if (!ORIGENS_CONFIAVEIS.includes(origem)) return;
+        if (!origemConfiavel(origem)) return;
 
         const dado = evento.data;
 
@@ -183,12 +213,18 @@ export function ouvirSenhaDoPainel() {
     });
 
     /* Avisa o painel que já estamos de pé e podemos receber a senha. O
-       painel pode ter mandado antes de nós existirmos. */
+       painel pode ter mandado antes de nós existirmos.
+
+       "*" como origem de destino, de propósito: com subdomínio por
+       filial (mais-barato.drogalink.com.br, <slug>.drogalink.com.br...)
+       não dá pra saber de antemão o endereço exato do pai pra mandar
+       só pra ele. Não tem problema de segurança nisso - o aviso em si
+       não carrega senha nem nada sensível, só "estou pronto". Quem
+       carrega a senha é a resposta, e essa sim só é aceita de uma
+       origem confiável (origemConfiavel, acima). */
     try {
         if (window.parent && window.parent !== window) {
-            for (const origem of ORIGENS_CONFIAVEIS) {
-                window.parent.postMessage({ tipo: "padronizador-pronto" }, origem);
-            }
+            window.parent.postMessage({ tipo: "padronizador-pronto" }, "*");
         }
     } catch {
         /* sem quadro pai, ou bloqueado: segue pelo prompt */
