@@ -16,6 +16,7 @@ import { definirOverridesCategoria } from "../intelligence/dictionary/familias";
 import { buscarFamiliasOverride } from "../services/familiasOverrideService";
 import { buscarReferencia } from "../services/referenciasService";
 import { publicarNoSite } from "../services/exportSiteService";
+import { salvarImagemHospedada } from "../services/imagemHostingService";
 import {
     buscarExtracaoPendente,
     baixarArquivoExtracao,
@@ -78,5 +79,19 @@ export async function importarEPublicarExtracao({ modo = "mesclar" } = {}) {
         usouCmed: !!indiceCmed,
         usouDistribuidor: !!indiceDistribuidor
     };
+
+}
+
+/**
+ * Salva/troca a imagem de um produto pelo EAN - usado pelo painel da
+ * loja (aba Catálogo), que não tem acesso ao padronizador em si, só a
+ * este bundle. Mesma chamada que o botão "usar este link" do
+ * padronizador já faz (ver imagemHostingService.js): passa pelo
+ * porteiro (pedidos-proxy) com a senha do painel, já em sessionStorage
+ * nesta mesma origem - nada de chave fixa embutida no pacote.
+ */
+export async function salvarImagemManual(ean, url) {
+
+    return salvarImagemHospedada(ean, url, "manual-painel");
 
 }
