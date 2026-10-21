@@ -181,8 +181,35 @@ export default {
             "User-Agent": "farmatech-publish-proxy"
         };
 
-        // Precisa do conteúdo atual (pra mesclar) e do sha (pra poder
-        // sobrescrever) - as duas coisas vêm da mesma chamada.
+        /* Precisa do conteúdo atual (pra mesclar) e do sha (pra poder
+           sobrescrever) - as duas coisas vêm da mesma chamada.
+
+           ATENÇÃO AO LIMITE DE 1 MB, que já custou caro uma vez.
+
+           A Contents API do GitHub NÃO devolve o conteúdo de arquivos
+           acima de 1 MB: vem a ficha do arquivo (nome, tamanho, sha) com
+           content vazio. O produtos.json desta farmácia tem 2,7 MB, ou
+           seja, ele SEMPRE caiu nesse caso.
+
+           O que havia aqui engolia isso em silêncio: o JSON.parse de ""
+           dava erro, o catch tratava como "ainda não há nada publicado" e
+           a publicação seguia com a lista vazia. Com isso:
+
+             - todo "mesclar" vinha se comportando como "substituir".
+               Ninguém notou porque o padronizador sempre manda o catálogo
+               inteiro - mas publicar uma planilha parcial teria apagado o
+               resto, sem erro nenhum na tela;
+
+             - e o "remover", que tira itens da lista lida, tirou de uma
+               lista vazia e publicou um catálogo VAZIO. Foi o que
+               aconteceu em 21/10/2026: um clique em "Apagar" tirou 6.793
+               produtos do ar, duas vezes.
+
+           A correção é ler o conteúdo pela API de blobs quando ele não
+           vier na primeira resposta - ela serve arquivo grande - e, se
+           ainda assim não der para ler, FALHAR. Publicar sobre uma
+           leitura que não aconteceu é o que transforma um erro de rede em
+           perda de catálogo. */
         const atual = await fetch(`${apiUrl}?ref=${BRANCH}`, { headers: headersGitHub });
 
         if (!atual.ok && atual.status !== 404) {
@@ -199,30 +226,58 @@ export default {
 
             shaAtual = dadosAtual.sha;
 
+            let texto = "";
+
+            if (dadosAtual.content && dadosAtual.encoding === "base64") {
+
+                texto = deBase64Utf8(dadosAtual.content);
+
+            } else if (shaAtual) {
+
+                /* O caminho de todo catálogo de verdade: acima de 1 MB.
+                   A API de blobs entrega o arquivo inteiro pelo sha que a
+                   resposta anterior já trouxe. */
+                const blob = await fetch(
+                    `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/git/blobs/${shaAtual}`,
+                    { headers: { ...headersGitHub, "Accept": "application/vnd.github.raw" } }
+                );
+
+                if (!blob.ok) {
+                    const erro = await blob.text();
+                    return jsonResponse(
+                        { erro: `O arquivo existe mas não consegui ler o conteúdo: ${erro}` }, 502);
+                }
+
+                texto = await blob.text();
+
+            }
+
             try {
 
-                const jsonAtual = JSON.parse(deBase64Utf8(dadosAtual.content));
+                const jsonAtual = JSON.parse(texto);
 
-                if (Array.isArray(jsonAtual.produtos)) produtosExistentes = jsonAtual.produtos;
+                if (!Array.isArray(jsonAtual.produtos)) throw new Error("sem lista de produtos");
 
-            } catch {
+                produtosExistentes = jsonAtual.produtos;
 
-                // produtos.json corrompido ou em formato inesperado - segue
-                // como se não houvesse nada publicado ainda, em vez de falhar.
+            } catch (erro) {
+
+                /* Antes isto seguia como se não houvesse nada publicado.
+                   Um arquivo ilegível é uma PERGUNTA sem resposta, não um
+                   "está vazio" - e a diferença entre as duas leituras é o
+                   catálogo inteiro da farmácia. */
+                return jsonResponse({
+                    erro: "O catálogo publicado está ilegível, e eu não publico por cima do que não consegui ler."
+                }, 502);
 
             }
 
         }
 
-        /* Remover é destrutivo e não tem volta pelo painel, então ele é o
-           único modo que EXIGE ter lido o arquivo atual.
-
-           Sem esta linha, uma falha de leitura (GitHub fora do ar, token
-           vencido, arquivo renomeado) cairia no caminho normal com
-           produtosExistentes vazio, e o "apagar um produto" publicaria um
-           catálogo vazio - a loja inteira fora do ar por um clique que
-           pedia para tirar uma taxa de entrega da vitrine. */
-        if (modo === "remover" && !atual.ok) {
+        /* Remover é destrutivo e não tem volta pelo painel. Ele exige ter
+           lido um catálogo COM produtos: tirar um item de uma lista vazia
+           dá uma lista vazia, e publicar isso apaga a loja. */
+        if (modo === "remover" && (!atual.ok || !produtosExistentes.length)) {
             return jsonResponse(
                 { erro: "Não consegui ler o catálogo atual, então não apaguei nada." }, 502);
         }

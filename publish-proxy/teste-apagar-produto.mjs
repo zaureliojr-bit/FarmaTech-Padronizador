@@ -37,16 +37,32 @@ const CATALOGO = {
 };
 
 /* GitHub de mentira. `leitura` decide o que a busca do arquivo atual
-   responde — é por ali que entram os casos de falha. */
-function fingirGitHub({ leitura = "ok", conteudo = CATALOGO } = {}) {
+   responde — é por ali que entram os casos de falha.
+
+   "grande" é o caso REAL, e por muito tempo o único: acima de 1 MB a
+   Contents API devolve a ficha do arquivo com content vazio, e o
+   conteúdo só vem pela API de blobs. O produtos.json desta farmácia
+   tem 2,7 MB — ou seja, produção é sempre este caminho. */
+function fingirGitHub({ leitura = "ok", conteudo = CATALOGO, blob = "ok" } = {}) {
 
     const escritas = [];
 
     globalThis.fetch = async (url, opcoes = {}) => {
 
         const metodo = opcoes.method || "GET";
+        const endereco = String(url);
 
         if (metodo === "GET") {
+
+            /* A API de blobs, que é de onde vem todo catálogo de
+               verdade. */
+            if (endereco.includes("/git/blobs/")) {
+
+                if (blob !== "ok") return new Response("sem permissão", { status: 403 });
+
+                return new Response(JSON.stringify(conteudo), { status: 200 });
+
+            }
 
             if (leitura === "404") {
                 return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
@@ -56,8 +72,25 @@ function fingirGitHub({ leitura = "ok", conteudo = CATALOGO } = {}) {
                 return new Response("boom", { status: 500 });
             }
 
+            if (leitura === "grande") {
+                /* Exatamente o que o GitHub responde para arquivo acima
+                   de 1 MB: ficha completa, conteúdo vazio. */
+                return new Response(JSON.stringify({
+                    sha: "sha-atual", size: 2698682, content: "", encoding: "none"
+                }), { status: 200 });
+            }
+
+            if (leitura === "ilegivel") {
+                return new Response(JSON.stringify({
+                    sha: "sha-atual",
+                    content: Buffer.from("isto não é json", "utf8").toString("base64"),
+                    encoding: "base64"
+                }), { status: 200 });
+            }
+
             return new Response(JSON.stringify({
                 sha: "sha-atual",
+                encoding: "base64",
                 content: Buffer.from(JSON.stringify(conteudo), "utf8").toString("base64")
             }), { status: 200 });
 
@@ -168,6 +201,68 @@ console.log("\n5. publicar normal não foi afetado");
     conferir("mesclar continua acrescentando",
         lista.length === 4 && lista.some((p) => p.codigo === "009"),
         JSON.stringify(lista.map((p) => p.codigo)));
+}
+
+/* ---- 6. o catálogo de verdade, que passa de 1 MB -------------------- */
+console.log("\n6. o arquivo grande — o caso que apagou a loja de verdade");
+{
+    /* 21/10/2026, 17:53: um clique em "Apagar" publicou um catálogo
+       vazio no lugar de 6.793 produtos. Não foi a regra de remoção que
+       errou — foi a LEITURA. Acima de 1 MB a Contents API devolve
+       content vazio, o parse falhava, o catch tratava como "não há nada
+       publicado" e a remoção tirou um item de uma lista vazia.
+
+       É a seção mais importante deste arquivo: ela roda o caminho que
+       produção roda todo dia, e que nenhum teste cobria. */
+    const escritas = fingirGitHub({ leitura: "grande" });
+
+    const r = await chamar({ modo: "remover", produtos: [{ ean: "7891234567891", codigo: "002" }] });
+
+    conferir("responde ok", r.status === 200, String(r.status));
+
+    const lista = publicado(escritas);
+
+    conferir("o catálogo NÃO foi esvaziado", lista.length === 2, String(lista.length));
+    conferir("saiu só o pedido", !lista.some((p) => p.codigo === "002"),
+        JSON.stringify(lista.map((p) => p.codigo)));
+
+    /* E o outro lado do mesmo defeito: com a leitura vindo vazia, todo
+       "mesclar" se comportava como "substituir". Publicar uma planilha
+       parcial apagava o resto do catálogo, sem erro nenhum na tela. */
+    const escritasMescla = fingirGitHub({ leitura: "grande" });
+
+    await chamar({ produtos: [{ ean: "7891234567899", codigo: "009", descricao: "Novo" }] });
+
+    const comMescla = publicado(escritasMescla);
+
+    conferir("mesclar com arquivo grande mantém quem já estava",
+        comMescla.length === 4, JSON.stringify(comMescla.map((p) => p.codigo)));
+}
+
+/* ---- 7. quando nem o blob dá -------------------------------------- */
+console.log("\n7. não dá para ler: não se publica");
+{
+    for (const caso of [
+        { nome: "blob recusado", opcoes: { leitura: "grande", blob: "403" } },
+        { nome: "arquivo ilegível", opcoes: { leitura: "ilegivel" } }
+    ]) {
+
+        const escritas = fingirGitHub(caso.opcoes);
+
+        const r = await chamar({ modo: "remover", produtos: [{ codigo: "002" }] });
+
+        conferir(`${caso.nome}: não publica`, escritas.length === 0, String(escritas.length));
+        conferir(`${caso.nome}: avisa`, r.status >= 400, String(r.status));
+
+        /* Vale para publicar também: antes, um arquivo ilegível virava
+           "está vazio" e a publicação seguia por cima. */
+        const outras = fingirGitHub(caso.opcoes);
+        const normal = await chamar({ produtos: [{ ean: "789", codigo: "009", descricao: "Novo" }] });
+
+        conferir(`${caso.nome}: nem publicando normal`, outras.length === 0, String(outras.length));
+        conferir(`${caso.nome}: e o erro aparece`, normal.status >= 400, String(normal.status));
+
+    }
 }
 
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
