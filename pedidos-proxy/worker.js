@@ -1544,7 +1544,15 @@ async function tratarResumo(request, env, loja, db) {
         agoraSP.getUTCFullYear(), agoraSP.getUTCMonth(), agoraSP.getUTCDate()
     ) + 3 * 3600000;
 
-    const [hoje, periodo, porDia, topProdutos, recentes, aguardando,
+    /* A janela anterior, do mesmo tamanho, imediatamente antes desta.
+
+       Sem ela, "R$ 1.010,28 em 30 dias" não responde à única pergunta
+       que a dona da farmácia faz ao abrir esta tela: está melhor ou
+       pior? Um número sozinho não diz nada — e, sem comparação, a tela
+       vira enfeite que ninguém abre duas vezes. */
+    const anteriorDesde = desde - dias * 86400000;
+
+    const [hoje, periodo, anterior, porDia, topProdutos, recentes, aguardando,
            maisProcurados, naoEncontrados] = await db.batch([
 
         db.prepare(
@@ -1557,6 +1565,12 @@ async function tratarResumo(request, env, loja, db) {
                     COALESCE(AVG(total),0) AS ticket
                FROM pedidos WHERE criado_em >= ?1`
         ).bind(desde),
+
+        db.prepare(
+            `SELECT COUNT(*) AS pedidos, COALESCE(SUM(total),0) AS faturamento,
+                    COALESCE(AVG(total),0) AS ticket
+               FROM pedidos WHERE criado_em >= ?1 AND criado_em < ?2`
+        ).bind(anteriorDesde, desde),
 
         db.prepare(
             `SELECT date((criado_em - 10800000)/1000, 'unixepoch') AS dia,
@@ -1613,6 +1627,7 @@ async function tratarResumo(request, env, loja, db) {
         dias,
         hoje: hoje.results[0] || { pedidos: 0, faturamento: 0 },
         periodo: periodo.results[0] || { pedidos: 0, faturamento: 0, ticket: 0 },
+        anterior: anterior.results[0] || { pedidos: 0, faturamento: 0, ticket: 0 },
         porDia: porDia.results || [],
         topProdutos: topProdutos.results || [],
         recentes: recentes.results || [],
