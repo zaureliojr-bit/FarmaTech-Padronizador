@@ -159,7 +159,13 @@ export default {
         // marcado pra oferecer encomenda - pra planilha só dos itens com
         // estoque. "substituir": apaga tudo que não estiver na lista
         // enviada - só faz sentido numa reimportação do catálogo completo.
-        const modo = ["substituir", "encomenda"].includes(corpo?.modo) ? corpo.modo : "mesclar";
+        // "remover": a lista enviada não é o catálogo, é quem SAI dele.
+        // Serve ao botão "Apagar" do painel, que precisa tirar o item do
+        // site agora - taxa de entrega cadastrada como produto, item de
+        // teste, cadastro duplicado. Publicar a lista inteira só para
+        // remover um item seria mandar 3 MB e arriscar o catálogo
+        // inteiro num clique de limpeza.
+        const modo = ["substituir", "encomenda", "remover"].includes(corpo?.modo) ? corpo.modo : "mesclar";
 
         if (!Array.isArray(produtos) || !produtos.length) {
             return jsonResponse({ erro: "Lista de produtos vazia ou inválida." }, 400);
@@ -208,9 +214,45 @@ export default {
 
         }
 
+        /* Remover é destrutivo e não tem volta pelo painel, então ele é o
+           único modo que EXIGE ter lido o arquivo atual.
+
+           Sem esta linha, uma falha de leitura (GitHub fora do ar, token
+           vencido, arquivo renomeado) cairia no caminho normal com
+           produtosExistentes vazio, e o "apagar um produto" publicaria um
+           catálogo vazio - a loja inteira fora do ar por um clique que
+           pedia para tirar uma taxa de entrega da vitrine. */
+        if (modo === "remover" && !atual.ok) {
+            return jsonResponse(
+                { erro: "Não consegui ler o catálogo atual, então não apaguei nada." }, 502);
+        }
+
         let produtosFinais;
 
-        if (modo === "substituir") {
+        if (modo === "remover") {
+
+            /* Pelos dois, EAN e código: o painel tem os dois à mão, e há
+               produto no catálogo com EAN vazio (item interno da loja),
+               que só o código identifica. */
+            const eans = new Set(produtos
+                .map((p) => String(p?.ean ?? "").trim()).filter(Boolean));
+
+            const codigos = new Set(produtos
+                .map((p) => String(p?.codigo ?? "").trim()).filter(Boolean));
+
+            produtosFinais = produtosExistentes.filter((p) =>
+                !(eans.size && eans.has(String(p?.ean ?? "").trim())) &&
+                !(codigos.size && codigos.has(String(p?.codigo ?? "").trim())));
+
+            /* Esvaziar o catálogo nunca é o que um "apagar produto"
+               quis dizer. Se a conta deu nisso, alguma coisa está
+               errada - e é melhor não publicar. */
+            if (produtosExistentes.length && !produtosFinais.length) {
+                return jsonResponse(
+                    { erro: "Isso apagaria o catálogo inteiro. Não publiquei." }, 400);
+            }
+
+        } else if (modo === "substituir") {
             produtosFinais = produtos;
         } else if (modo === "encomenda") {
             produtosFinais = mesclarMarcandoAusentesSemEstoque(produtosExistentes, produtos);
@@ -231,7 +273,9 @@ export default {
                    contexto, com dez não dá. */
                 message: (modo === "substituir"
                     ? `Publicar catálogo completo (${produtos.length} produtos)`
-                    : `Atualizar ${produtos.length} produto(s)`) + ` em ${arquivo} via FarmaTech Padronizador`,
+                    : modo === "remover"
+                        ? `Apagar ${produtos.length} produto(s)`
+                        : `Atualizar ${produtos.length} produto(s)`) + ` em ${arquivo} via FarmaTech Padronizador`,
                 content: paraBase64Utf8(conteudoJson),
                 branch: BRANCH,
                 ...(shaAtual ? { sha: shaAtual } : {})

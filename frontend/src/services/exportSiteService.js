@@ -109,6 +109,71 @@ export async function gerarProdutosSite(produtos) {
 // têm estoque agora. modo "substituir": publica exatamente esta lista,
 // apagando o que não vier - só faz sentido junto de uma reimportação
 // do catálogo inteiro.
+/* Tira produtos do catálogo publicado, agora.
+   =========================
+
+   Usado pelo botão "Apagar" do painel. A lista aqui não é o catálogo
+   novo: é quem SAI dele. Por isso não passa pelo gerarProdutosSite —
+   não há produto para montar, só identificadores.
+
+   Vai o EAN e o código, os dois: há item no catálogo com EAN vazio
+   (cadastro interno da loja), e nesses só o código identifica.
+
+   Isto é metade do apagar. A outra metade é marcar a exclusão
+   definitiva (produtosExcluidosService), senão o produto volta na
+   próxima importação se ainda existir no PDV. Quem junta as duas é o
+   apagarProdutoCatalogo do bundle headless. */
+export async function removerDoSite(itens) {
+
+    if (!PORTEIRO_URL) {
+        throw new Error("Publicação não configurada: falta VITE_PEDIDOS_PROXY_URL no .env.");
+    }
+
+    const credencial = cabecalhoPainel();
+
+    if (!credencial) {
+        throw new Error("Preciso da senha do painel para apagar do site.");
+    }
+
+    const lista = (Array.isArray(itens) ? itens : [itens])
+        .map((item) => ({
+            ean: String(item?.ean ?? "").trim(),
+            codigo: String(item?.codigo ?? "").trim()
+        }))
+        .filter((item) => item.ean || item.codigo);
+
+    if (!lista.length) {
+        throw new Error("Sem EAN nem código: não sei qual produto apagar.");
+    }
+
+    const resposta = await fetch(`${PORTEIRO_URL}/catalogo/publicar`, {
+
+        method: "POST",
+
+        headers: {
+            "Content-Type": "application/json",
+            ...credencial
+        },
+
+        body: JSON.stringify({ produtos: lista, modo: "remover" })
+
+    });
+
+    if (resposta.status === 401) {
+        esquecerSenhaPainel();
+        throw new Error("Senha do painel incorreta.");
+    }
+
+    const dados = await resposta.json().catch(() => ({}));
+
+    if (!resposta.ok) {
+        throw new Error(dados.erro || `Falha ao apagar do site (HTTP ${resposta.status})`);
+    }
+
+    return dados;
+
+}
+
 export async function publicarNoSite(produtos, modo = "mesclar") {
 
     /* Publicar passa pelo porteiro (pedidos-proxy), e não mais direto no

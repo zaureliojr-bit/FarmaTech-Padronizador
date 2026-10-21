@@ -15,8 +15,9 @@ import { analisarProduto } from "../intelligence/core";
 import { definirOverridesCategoria } from "../intelligence/dictionary/familias";
 import { buscarFamiliasOverride } from "../services/familiasOverrideService";
 import { buscarReferencia } from "../services/referenciasService";
-import { publicarNoSite } from "../services/exportSiteService";
+import { publicarNoSite, removerDoSite } from "../services/exportSiteService";
 import { salvarImagemHospedada } from "../services/imagemHostingService";
+import { excluirProdutoDefinitivamente } from "../services/produtosExcluidosService";
 import {
     buscarExtracaoPendente,
     baixarArquivoExtracao,
@@ -93,5 +94,42 @@ export async function importarEPublicarExtracao({ modo = "mesclar" } = {}) {
 export async function salvarImagemManual(ean, url) {
 
     return salvarImagemHospedada(ean, url, "manual-painel");
+
+}
+
+/**
+ * Apaga um produto do catálogo - usado pelo botão "Apagar" do painel
+ * da loja (aba Catálogo).
+ *
+ * São DUAS coisas, e fazer só uma delas não resolve:
+ *
+ *   1. tirar do site agora (removerDoSite). É o que o cliente vê;
+ *   2. marcar a exclusão definitiva (excluirProdutoDefinitivamente),
+ *      senão o produto volta sozinho na próxima importação, porque ele
+ *      continua existindo no PDV da farmácia. É o caso típico: taxa de
+ *      entrega cadastrada como produto, item de teste do sistema,
+ *      cadastro duplicado.
+ *
+ * Nesta ordem de propósito. Se a segunda falhar, o produto já saiu da
+ * vitrine e volta na próxima importação - chato, e a pessoa apaga de
+ * novo. Na ordem inversa, uma falha deixaria o produto no ar e marcado
+ * como excluído, que é o estado em que ninguém entende mais nada: ele
+ * está na vitrine e não dá para apagar de novo.
+ */
+export async function apagarProdutoCatalogo(ean, codigo, motivo) {
+
+    const doSite = await removerDoSite([{ ean, codigo }]);
+
+    /* O código é o que a importação compara (ver importador.js). Sem
+       ele não há como impedir o retorno, e dizer "apagado" seria
+       mentira na próxima extração. */
+    if (!String(codigo ?? "").trim()) {
+        throw new Error(
+            "Tirei do site, mas este produto não tem código: ele volta na próxima importação.");
+    }
+
+    await excluirProdutoDefinitivamente(codigo, motivo || "Apagado pelo painel");
+
+    return doSite;
 
 }
