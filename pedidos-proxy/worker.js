@@ -1574,13 +1574,13 @@ async function tratarResumo(request, env, loja, db) {
               WHERE p.criado_em >= ?1
               GROUP BY COALESCE(NULLIF(i.ean,''), i.descricao)
               ORDER BY unidades DESC
-              LIMIT 20`
+              LIMIT 10`
         ).bind(desde),
 
         db.prepare(
             `SELECT ref, criado_em, cliente, telefone, entrega, pagamento,
                     total, tem_receita, status
-               FROM pedidos ORDER BY criado_em DESC LIMIT 30`
+               FROM pedidos ORDER BY criado_em DESC LIMIT 15`
         ),
 
         db.prepare(
@@ -1595,7 +1595,7 @@ async function tratarResumo(request, env, loja, db) {
                     SUM(CASE WHEN resultados = 0 THEN 1 ELSE 0 END) AS vazias
                FROM buscas WHERE criado_em >= ?1
               GROUP BY termo ORDER BY buscas DESC, termo
-              LIMIT 20`
+              LIMIT 10`
         ).bind(desde),
 
         // procuraram e o site não tinha: cada linha é uma venda perdida
@@ -1604,7 +1604,7 @@ async function tratarResumo(request, env, loja, db) {
                FROM buscas
               WHERE criado_em >= ?1 AND resultados = 0
               GROUP BY termo ORDER BY buscas DESC, ultima DESC
-              LIMIT 20`
+              LIMIT 10`
         ).bind(desde)
 
     ]);
