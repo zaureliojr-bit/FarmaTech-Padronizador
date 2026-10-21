@@ -26,8 +26,10 @@ errado faria a filial nova mostrar os pedidos da primeira.
 
 ## O caminho manual, passo a passo
 
-Sete passos. Nenhum deles cria site novo nem copia arquivo: a filial nova
-entra como linha de banco, e o site e o painel passam a atendê-la.
+Oito passos. Sete são linha de banco e clique na Cloudflare — nenhum
+deles cria site novo nem copia arquivo: a filial entra como linha, e o
+site e o painel passam a atendê-la. O oitavo é o único que acontece na
+loja, no PC onde o Farmax roda.
 
 > **Antes de começar**, escolha o *apelido* dela — o `slug`. Só letra
 > minúscula, número e hífen. Ele vai no endereço da vitrine
@@ -110,11 +112,25 @@ não por disciplina de quem escreve a consulta, mas porque a conexão é
 outra.
 
 1. Cloudflare → **D1** → *Create database* → nome: `farmatech-farma-centro`
-2. Abra o **Console** dele e rode o `pedidos-proxy/schema.sql`
-   (é o schema de operação: pedidos, clientes, banners, promoções,
-   encartes, buscas). **Não** rode o `schema-lojas` nem o
-   `schema-acesso` aqui — o cadastro de lojas é um só, e fica no banco
-   principal.
+2. Abra o **Console** dele e rode **os três**, nesta ordem:
+
+   | arquivo | o que ele liga |
+   |---|---|
+   | `pedidos-proxy/schema-colar.sql` | pedidos, clientes, banners, promoções, encartes, buscas |
+   | `pedidos-proxy/schema-estoque-colar.sql` | a aba **Estoque**: ruptura, excesso e giro |
+   | `pedidos-proxy/schema-reativacao-colar.sql` | a aba **Reativação** e a fila do agente de envio |
+
+   Use sempre os arquivos terminados em **`-colar`**: o console do D1
+   não aceita comentário nenhum, nem `--` nem `/* */`, e os `-colar`
+   são os mesmos schemas sem eles.
+
+   Os dois últimos são fáceis de esquecer porque a loja funciona sem
+   eles — vende, recebe pedido, tudo normal. O que acontece é que as
+   abas Estoque e Reativação abrem vazias, e vazio não se distingue de
+   "esta farmácia não tem ruptura". Rode os três de uma vez.
+
+   **Não** rode o `schema-lojas` nem o `schema-acesso` aqui — o cadastro
+   de lojas é um só, e fica no banco principal.
 
 ## 4. Ligar o banco ao worker
 
@@ -202,6 +218,37 @@ no Google — o contrário de dar um endereço a ela.
 
 Quando ela quiser o domínio próprio (`farmaciadocentro.com.br`), é o
 mesmo passo com outro nome: o site já está pronto para receber.
+
+---
+
+## 8. O PC da farmácia: o extrator
+
+É o último passo e o único que acontece fora da Cloudflare — na máquina
+onde o Farmax roda. Tudo acima é inútil sem ele: sem extração não há
+catálogo, e sem catálogo a vitrine abre vazia.
+
+Leve a pasta `firebird-extrator/instalador/` num pen drive, com o
+`extrator.exe` já gerado dentro (ver `firebird-extrator/README.md` —
+o `.exe` se gera uma vez, no seu PC, e serve para todas as lojas).
+
+Dois cliques em `instalar.bat` e responda as perguntas. Três delas são
+desta loja e não podem ser copiadas da anterior:
+
+- **Número da filial** — o do Farmax dela (tabela `FILIAIS` no banco).
+  Errado aqui, você publica o estoque de uma filial no site de outra.
+- **`ESTOQUE_LOJA`** — o **apelido** da loja, o mesmo do endereço:
+  `farma-centro`, de `farma-centro.drogalink.com.br`. Sem ele a
+  fotografia de estoque entra sem dono.
+- **Horário da tarefa** — de madrugada, para a extração não disputar o
+  banco com o movimento do balcão.
+
+As outras (endereço e chave dos workers) são as mesmas de sempre.
+
+Antes de sair da loja, rode o `extrator.exe` uma vez na mão e leia o
+log. A primeira linha diz a versão; o fim tem de falar de estoque. Se
+disser que `ESTOQUE_URL` não está configurado, a aba Estoque do painel
+dessa farmácia vai abrir vazia para sempre — e vazia não se distingue
+de "não tem ruptura".
 
 ---
 
