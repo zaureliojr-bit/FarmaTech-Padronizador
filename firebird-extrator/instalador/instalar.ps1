@@ -86,6 +86,31 @@ if (-not [string]::IsNullOrWhiteSpace($uploadUrl)) {
     $uploadKey = Read-Host "Chave (X-Imagens-Key) desse worker"
 }
 
+# --- 2.6. Fotografia de estoque (opcional) ---
+# Outro destino e outra chave: o catalogo vai pro worker de imagens, e o
+# estoque vai pro de pedidos, que e quem guarda o historico que a aba
+# Estoque do painel le pra apontar ruptura e excesso.
+#
+# Fica aqui, e nao so no README, porque sem estas tres linhas a aba
+# Estoque do painel abre vazia e nao da nenhum sinal do motivo - o
+# extrator avisa em silencio no log e segue.
+Escrever ""
+Escrever "--- Fotografia de estoque pro painel (opcional) ---" "Cyan"
+Escrever "E o que alimenta a aba Estoque: ruptura, excesso e giro." "DarkGray"
+Escrever "Deixa em branco se nao quiser isso agora." "DarkGray"
+
+$estoqueUrl = Read-Host "Endereco do worker de pedidos (ex: https://farmatech-pedidos-proxy.SEUNOME.workers.dev)"
+$estoqueKey = ""
+$estoqueLoja = ""
+if (-not [string]::IsNullOrWhiteSpace($estoqueUrl)) {
+    $estoqueUrl = $estoqueUrl.TrimEnd("/")
+    $estoqueKey = Read-Host "Chave (X-Estoque-Key) desse worker"
+    # O apelido da loja, igual ao do dominio dela: mais-barato.drogalink.com.br
+    # Sem isso a fotografia entra sem dono e o painel de uma farmacia
+    # mostraria o estoque de outra.
+    $estoqueLoja = Read-Host "Apelido da loja (o mesmo do endereco do site, ex: mais-barato)"
+}
+
 # --- 3. Gravar o .env ---
 $conteudoEnv = @"
 FB_DATABASE=$caminhoBanco
@@ -97,6 +122,9 @@ FB_FILIAL=$filial
 SAIDA_ARQUIVO=produtos_extraidos.xlsx
 UPLOAD_URL=$uploadUrl
 UPLOAD_KEY=$uploadKey
+ESTOQUE_URL=$estoqueUrl
+ESTOQUE_KEY=$estoqueKey
+ESTOQUE_LOJA=$estoqueLoja
 "@
 
 Set-Content -Path (Join-Path $pastaDestino ".env") -Value $conteudoEnv -Encoding UTF8

@@ -15,6 +15,22 @@ const fs = require("fs");
 const Firebird = require("node-firebird");
 const XLSX = require("xlsx");
 
+// A versão impressa na primeira linha do log.
+//
+// Existe por um problema prático de campo: o extrator roda como um .exe
+// autônomo no PC da farmácia, e atualizar é copiar o arquivo por cima.
+// Quando dá ruim ("a aba Estoque está vazia"), a primeira pergunta é
+// "qual versão está rodando lá?" - e até aqui a resposta era espiar o
+// extracao.log tentando reconhecer frases que mudaram entre as versões.
+//
+// Uma linha no começo do log responde isso de longe, inclusive numa
+// foto do terminal mandada por WhatsApp. Sobe quando o que o extrator
+// MANDA pra fora muda (colunas da planilha, fotografia de estoque) -
+// não a cada ajuste interno.
+const VERSAO = "2.0 (catálogo + fotografia de estoque)";
+
+console.log(`Extrator DrogaLink ${VERSAO}`);
+
 const FILIAL = Number(process.env.FB_FILIAL);
 
 if (!Number.isInteger(FILIAL) || FILIAL < 0) {
@@ -331,7 +347,7 @@ Firebird.attach(OPCOES, (erro, db) => {
         XLSX.writeFile(livro, saida);
 
         console.log(`Pronto! ${linhas.length} produtos exportados pra "${saida}" (filial ${FILIAL}).`);
-        console.log("Já pode subir esse arquivo direto no FarmaTech Padronizador.");
+        console.log("Já pode subir esse arquivo direto no DrogaLink Padronizador.");
 
         await enviarParaPainel(saida);
 

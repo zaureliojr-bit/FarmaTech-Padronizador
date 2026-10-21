@@ -158,6 +158,83 @@ sendo gerado localmente do mesmo jeito, só não avisa o painel sozinho.
 > implantada (é um deploy manual, não puxa do Git automaticamente -
 > ver `imagens-proxy/README.md`) e a tabela `extracoes` criada no D1.
 
+## Mandar a fotografia de estoque pro painel
+
+Outro destino e outra chave, de propósito: o catálogo vai pro worker de
+imagens (acima) e o estoque vai pro **worker de pedidos**, que é quem
+guarda o histórico que a aba **Estoque** do painel lê pra apontar
+ruptura, excesso e giro.
+
+- `ESTOQUE_URL` - endereço do `pedidos-proxy` (ex.:
+  `https://farmatech-pedidos-proxy.<seu-usuario>.workers.dev`).
+- `ESTOQUE_KEY` - a chave `ESTOQUE_KEY` configurada nesse worker.
+- `ESTOQUE_LOJA` - o apelido da loja, **o mesmo do endereço do site**
+  (`mais-barato`, de `mais-barato.drogalink.com.br`). Sem ele a
+  fotografia entra sem dono, e o painel de uma farmácia mostraria o
+  estoque de outra.
+
+Em branco, o extrator avisa no log e segue: o catálogo não depende
+disso. Mas a aba Estoque fica vazia — e vazia sem explicar por quê, o
+que é fácil de confundir com "a farmácia não tem ruptura".
+
+> Precisa dos schemas `schema-estoque.sql` e `schema-reativacao.sql`
+> rodados no D1 da loja (use os `-colar.sql`, que o console do D1
+> aceita) e do `pedidos-proxy` implantado.
+
+## Atualizar um extrator já instalado
+
+Trocar a versão é copiar um `.exe` por cima — o `.env` e a tarefa
+agendada do Windows não mudam de lugar e continuam valendo.
+
+**1. No PC onde está o código (o seu):**
+
+```
+cd firebird-extrator
+git pull
+npm install
+npm run build:exe
+```
+
+Sai `dist/extrator.exe`. Confere na hora que é a versão nova:
+
+```
+dist\extrator.exe
+```
+
+A **primeira linha** diz a versão:
+
+```
+Extrator DrogaLink 2.0 (catálogo + fotografia de estoque)
+```
+
+É esse o jeito de saber o que está rodando em cada máquina — inclusive
+num print do terminal mandado por WhatsApp. Sem essa linha, o `.exe`
+é anterior à fotografia de estoque, e a aba Estoque do painel vai
+continuar vazia por mais que o `.env` esteja certo.
+
+O fim do log também tem de falar de estoque: ou "Estoque do dia ...
+enviado", ou o aviso de que `ESTOQUE_URL` não está configurado.
+
+**2. No PC da farmácia:**
+
+1. Para a tarefa agendada, se ela estiver rodando (Agendador de
+   Tarefas → a tarefa do extrator → Finalizar). Copiar o `.exe` por
+   cima enquanto ele roda dá erro de arquivo em uso.
+2. Copia o `extrator.exe` novo por cima do que está na pasta de
+   instalação (`C:\DrogaLink\extrator` ou a que foi escolhida).
+3. Abre o `.exe` com dois cliques, uma vez, pra conferir que ele
+   conecta e que o log fala de estoque.
+
+**Se o `.env` de lá ainda não tem as três linhas do estoque**, aí sim
+vale rodar o `instalar.bat` da pasta `instalador/` (com o `.exe` novo
+dentro): ele refaz o `.env` perguntando tudo, inclusive
+`ESTOQUE_URL`/`ESTOQUE_KEY`/`ESTOQUE_LOJA`, e recadastra a tarefa.
+
+> Atenção ao refazer o `.env` pelo instalador: ele **sobrescreve** o
+> arquivo e não pergunta por `FB_COLUNA_MINIMO` nem
+> `FB_COLUNA_VALIDADE`. Se essa instalação usa essas duas colunas,
+> anote os valores antes e põe de volta à mão depois.
+
 ## Próximos passos possíveis
 
 - Adicionar mais campos (substância, registro ANVISA, NCM, flag de
