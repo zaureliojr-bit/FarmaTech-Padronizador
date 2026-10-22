@@ -25,6 +25,7 @@ const ler = (nome) => readFileSync(new URL("./" + nome, import.meta.url), "utf8"
 
 const db = new DatabaseSync(":memory:");
 db.exec(ler("schema-colar.sql"));
+db.exec(ler("schema-cupons-colar.sql"));
 
 /* O banco como ele está hoje: três pedidos nossos, de teste, e o
    primeiro de um cliente de verdade. */
@@ -55,6 +56,17 @@ db.exec(`INSERT INTO clientes (telefone, nome, ultimo_endereco, primeiro_pedido,
          VALUES ('11999990000', 'Zé Teste', 'Rua Tal, 10', 0, 0, 2, 180),
                 ('11988880000', 'Fulano', 'Rua Tal, 10', 0, 0, 1, 50),
                 ('11977770000', 'Maria da Silva', 'Rua Tal, 10', 0, 0, 1, 64.9)`);
+
+/* O cupom usado nos testes. É o caso que apareceu na primeira loja de
+   verdade: o dono testa com o próprio telefone, apaga os pedidos e no
+   dia seguinte o cupom "uma vez por cliente" está queimado para ele. */
+db.exec(`INSERT INTO cupons (codigo, tipo, valor, minimo, teto, limite_total, limite_pessoa, usos, ativo, criado_em)
+         VALUES ('TESTE01', 'valor', 10, 0, 0, 0, 1, 3, 1, 0)`);
+
+db.exec(`INSERT INTO cupom_usos (codigo, telefone, ref, desconto, quando)
+         VALUES ('TESTE01', '11999990000', 'TESTE-1', 10, 0),
+                ('TESTE01', '11999990000', 'TESTE-2', 10, 0),
+                ('TESTE01', '11977770000', 'REAL-1', 10, 0)`);
 
 db.exec(`INSERT INTO buscas (termo, criado_em, resultados)
          VALUES ('teste', ${AGORA - 86400000}, 0),
@@ -121,6 +133,27 @@ console.log("\n3. a lista de clientes, refeita");
     const datas = db.prepare("SELECT primeiro_pedido, ultimo_pedido FROM clientes").get();
     conferir("e as datas vieram do pedido, não do zero antigo",
         datas.primeiro_pedido > 0 && datas.ultimo_pedido > 0, JSON.stringify(datas));
+}
+
+/* ---- o cupom ---------------------------------------------------------- */
+console.log("\n3.5. o cupom usado no teste");
+{
+    const usos = db.prepare("SELECT ref FROM cupom_usos").all().map((u) => u.ref);
+
+    /* Apagar o pedido não devolvia o uso: a linha é separada e
+       sobrevivia. O dono testava, apagava, tentava de novo e ouvia
+       "você já usou este cupom" sem entender por quê. */
+    conferir("os usos dos pedidos apagados saíram",
+        usos.length === 1 && usos[0] === "REAL-1", JSON.stringify(usos));
+
+    const contador = db.prepare("SELECT usos FROM cupons WHERE codigo='TESTE01'").get().usos;
+    conferir("e o contador do cupom foi refeito — 3 viraram 1",
+        contador === 1, String(contador));
+
+    /* O uso do cliente de verdade fica: ele usou mesmo. */
+    const dela = db.prepare(
+        "SELECT COUNT(*) AS n FROM cupom_usos WHERE telefone='11977770000'").get().n;
+    conferir("o uso da cliente de verdade continua contando", dela === 1, String(dela));
 }
 
 /* ---- as buscas ------------------------------------------------------ */

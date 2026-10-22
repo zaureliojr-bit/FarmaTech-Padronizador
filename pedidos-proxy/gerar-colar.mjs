@@ -145,6 +145,9 @@ for (const [nome, achatar] of [["como arquivo", false], ["achatado", true]]) {
             for (const arquivo of GRUPOS.operacao) db.exec(limpos.get(arquivo));
         }
 
+        /* A limpeza também mexe em cupom_usos, que é do schema de
+           cupons — já incluído no grupo de operação acima. */
+
         for (const volta of [1, 2]) {
             for (const arquivo of arquivos) {
                 const sql = limpos.get(arquivo);

@@ -93,6 +93,32 @@ SELECT p.telefone,
 
 
 -- -------------------------------------------------------------------
+-- 4.5. O CUPOM QUE VOCÊ USOU NO TESTE
+-- -------------------------------------------------------------------
+-- Apagar o pedido NÃO devolve o uso do cupom. O uso é uma linha à
+-- parte, ligada ao pedido pelo código dele — e ela sobrevive.
+--
+-- Duas consequências, as duas chatas no dia seguinte:
+--
+--   - o cupom "uma vez por cliente" fica QUEIMADO para o seu telefone.
+--     Você testa, apaga o pedido, tenta de novo e ouve "você já usou
+--     este cupom" sem entender por quê;
+--   - o painel mostra "3 de 50 usos" e R$ 30 descontados de promoção
+--     que não aconteceu.
+--
+-- Isto tira os usos cujo pedido não existe mais e refaz o contador a
+-- partir do que sobrou. Se a loja ainda não rodou o schema-cupons.sql,
+-- estas duas linhas dão erro de "no such table" e podem ser puladas.
+
+DELETE FROM cupom_usos
+ WHERE NOT EXISTS (SELECT 1 FROM pedidos p WHERE p.ref = cupom_usos.ref);
+
+UPDATE cupons SET usos = (
+    SELECT COUNT(*) FROM cupom_usos u WHERE u.codigo = cupons.codigo
+);
+
+
+-- -------------------------------------------------------------------
 -- 5. AS BUSCAS DE TESTE  (opcional, e pense antes)
 -- -------------------------------------------------------------------
 -- A tabela `buscas` alimenta "o que mais procuram" e "procuraram e não
@@ -123,6 +149,7 @@ DELETE FROM buscas WHERE termo IN ('teste', 'aaa', 'asd');
 SELECT (SELECT COUNT(*) FROM pedidos)       AS pedidos,
        (SELECT COUNT(*) FROM pedido_itens)  AS itens,
        (SELECT COUNT(*) FROM clientes)      AS clientes,
+       (SELECT COUNT(*) FROM cupom_usos)    AS usos_de_cupom,
        (SELECT COALESCE(SUM(total), 0) FROM pedidos) AS faturamento;
 
 
