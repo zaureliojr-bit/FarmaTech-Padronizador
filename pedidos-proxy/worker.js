@@ -1900,27 +1900,40 @@ async function tratarResumo(request, env, loja, db) {
     const [hoje, periodo, anterior, porDia, topProdutos, recentes, aguardando,
            maisProcurados, naoEncontrados] = await db.batch([
 
+        /* PEDIDO CANCELADO NÃO É VENDA.
+
+           Faltava este filtro em toda esta função, e o estrago era
+           silencioso: o cancelado somava no faturamento, puxava o
+           ticket médio e aparecia em "produtos mais vendidos". A loja
+           decidiria compra em cima de venda que não aconteceu — e,
+           pior, a conta FICA ERRADA PARA SEMPRE, porque ninguém olha
+           duas vezes para um número que parece bom.
+
+           'novo' e 'separando' contam, de propósito: é pedido feito,
+           que a loja vai entregar. O que não conta é o que foi
+           desfeito. */
         db.prepare(
             `SELECT COUNT(*) AS pedidos, COALESCE(SUM(total),0) AS faturamento
-               FROM pedidos WHERE criado_em >= ?1`
+               FROM pedidos WHERE criado_em >= ?1 AND status <> 'cancelado'`
         ).bind(inicioDoDiaSP),
 
         db.prepare(
             `SELECT COUNT(*) AS pedidos, COALESCE(SUM(total),0) AS faturamento,
                     COALESCE(AVG(total),0) AS ticket
-               FROM pedidos WHERE criado_em >= ?1`
+               FROM pedidos WHERE criado_em >= ?1 AND status <> 'cancelado'`
         ).bind(desde),
 
         db.prepare(
             `SELECT COUNT(*) AS pedidos, COALESCE(SUM(total),0) AS faturamento,
                     COALESCE(AVG(total),0) AS ticket
-               FROM pedidos WHERE criado_em >= ?1 AND criado_em < ?2`
+               FROM pedidos
+              WHERE criado_em >= ?1 AND criado_em < ?2 AND status <> 'cancelado'`
         ).bind(anteriorDesde, desde),
 
         db.prepare(
             `SELECT date((criado_em - 10800000)/1000, 'unixepoch') AS dia,
                     COUNT(*) AS pedidos, COALESCE(SUM(total),0) AS faturamento
-               FROM pedidos WHERE criado_em >= ?1
+               FROM pedidos WHERE criado_em >= ?1 AND status <> 'cancelado'
               GROUP BY dia ORDER BY dia`
         ).bind(desde),
 
@@ -1930,7 +1943,7 @@ async function tratarResumo(request, env, loja, db) {
                     SUM(i.total_item) AS faturamento
                FROM pedido_itens i
                JOIN pedidos p ON p.ref = i.ref
-              WHERE p.criado_em >= ?1
+              WHERE p.criado_em >= ?1 AND p.status <> 'cancelado'
               GROUP BY COALESCE(NULLIF(i.ean,''), i.descricao)
               ORDER BY unidades DESC
               LIMIT 10`
@@ -3389,11 +3402,74 @@ async function tratarStatus(request, env, loja, db) {
         return json({ erro: "Informe 'ref' e um 'status' válido." }, 400);
     }
 
-    const r = await db.prepare(
-        `UPDATE pedidos SET status = ?2 WHERE ref = ?1`
-    ).bind(texto(ref, 40), status).run();
+    const codigo = texto(ref, 40);
 
-    return json({ sucesso: true, alterados: r.meta?.changes ?? 0 });
+    /* De quem é este pedido: preciso saber ANTES de mudar o status,
+       porque o resumo do cliente vai ser refeito a partir dele. */
+    const dono = await db.prepare(
+        `SELECT telefone FROM pedidos WHERE ref = ?1`
+    ).bind(codigo).first();
+
+    const comandos = [
+        db.prepare(`UPDATE pedidos SET status = ?2 WHERE ref = ?1`).bind(codigo, status)
+    ];
+
+    /* A tabela `clientes` é um RESUMO dos pedidos — quantos, quanto
+       gastou —, somado na hora em que o pedido entra. Cancelar não
+       desfazia essa soma: o cliente ficava com um pedido e um valor que
+       não existem mais, e a aba Reativação passava a tratá-lo como
+       alguém que já comprou mais do que comprou.
+
+       Em vez de subtrair (que erra assim que alguém cancela duas vezes
+       ou reabre um pedido), o resumo é RECALCULADO a partir dos pedidos
+       que sobraram. Fica certo por definição, inclusive se o status for
+       e voltar. */
+    if (dono && dono.telefone) {
+
+        comandos.push(
+            db.prepare(
+                `UPDATE clientes SET
+                    pedidos = (SELECT COUNT(*) FROM pedidos p
+                                WHERE p.telefone = clientes.telefone
+                                  AND p.status <> 'cancelado'),
+                    total_gasto = (SELECT COALESCE(SUM(p.total),0) FROM pedidos p
+                                    WHERE p.telefone = clientes.telefone
+                                      AND p.status <> 'cancelado')
+                  WHERE telefone = ?1`
+            ).bind(dono.telefone)
+        );
+
+        /* Cancelado também devolve o cupom. Senão o cliente que teve o
+           pedido cancelado — por falta do produto, por exemplo — fica
+           sem poder usar de novo o cupom que ele nunca chegou a
+           aproveitar. */
+        if (status === "cancelado") {
+            comandos.push(db.prepare(`DELETE FROM cupom_usos WHERE ref = ?1`).bind(codigo));
+            comandos.push(
+                db.prepare(
+                    `UPDATE cupons SET usos = (
+                        SELECT COUNT(*) FROM cupom_usos u WHERE u.codigo = cupons.codigo)`
+                )
+            );
+        }
+
+    }
+
+    /* O DELETE de cupom_usos pode falhar na farmácia que ainda não
+       colou o schema-cupons.sql. Cancelar um pedido não pode depender
+       disso: se der erro, o status muda assim mesmo. */
+    let alterados = 0;
+
+    try {
+        const saidas = await db.batch(comandos);
+        alterados = saidas[0]?.meta?.changes ?? 0;
+    } catch (erro) {
+        const r = await db.prepare(`UPDATE pedidos SET status = ?2 WHERE ref = ?1`)
+            .bind(codigo, status).run();
+        alterados = r.meta?.changes ?? 0;
+    }
+
+    return json({ sucesso: true, alterados });
 
 }
 

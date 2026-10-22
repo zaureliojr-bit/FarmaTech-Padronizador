@@ -67,6 +67,7 @@ DELETE FROM pedidos      WHERE ref IN ('TROQUE-AQUI-1', 'TROQUE-AQUI-2');
 -- -------------------------------------------------------------------
 -- A tabela `clientes` não é cadastro: é um resumo do que os pedidos
 -- dizem (quantos pedidos, quanto gastou, quando foi a primeira vez).
+-- Pedido cancelado não entra na soma — ele não foi venda.
 -- Apagar os pedidos não desfaz o resumo — seu telefone ficaria lá como
 -- "3 pedidos, R$ 280 gastos" para sempre, e apareceria na Reativação
 -- como cliente sumido.
@@ -86,8 +87,8 @@ SELECT p.telefone,
          ORDER BY x.criado_em DESC LIMIT 1),
        MIN(p.criado_em),
        MAX(p.criado_em),
-       COUNT(*),
-       COALESCE(SUM(p.total), 0)
+       SUM(CASE WHEN p.status <> 'cancelado' THEN 1 ELSE 0 END),
+       COALESCE(SUM(CASE WHEN p.status <> 'cancelado' THEN p.total ELSE 0 END), 0)
   FROM pedidos p
  GROUP BY p.telefone;
 

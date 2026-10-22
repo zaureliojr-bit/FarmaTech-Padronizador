@@ -18,8 +18,8 @@ SELECT p.telefone,
          ORDER BY x.criado_em DESC LIMIT 1),
        MIN(p.criado_em),
        MAX(p.criado_em),
-       COUNT(*),
-       COALESCE(SUM(p.total), 0)
+       SUM(CASE WHEN p.status <> 'cancelado' THEN 1 ELSE 0 END),
+       COALESCE(SUM(CASE WHEN p.status <> 'cancelado' THEN p.total ELSE 0 END), 0)
   FROM pedidos p
  GROUP BY p.telefone;
 DELETE FROM cupom_usos
