@@ -39,7 +39,8 @@ import { DatabaseSync } from "node:sqlite";
    que o de acesso pressupõe. */
 const GRUPOS = {
     principal: ["schema-lojas.sql", "schema-acesso.sql", "schema-visual.sql"],
-    operacao: ["schema.sql", "schema-estoque.sql", "schema-reativacao.sql"],
+    operacao: ["schema.sql", "schema-estoque.sql", "schema-reativacao.sql",
+               "schema-cupons.sql"],
     /* Não é schema: é a limpeza dos pedidos de teste, que se roda uma
        vez por loja, no dia em que cai o primeiro pedido de verdade.
        Entra aqui pelo mesmo motivo que os outros — o console do D1 não
@@ -180,7 +181,8 @@ for (const [nome, achatar] of [["como arquivo", false], ["achatado", true]]) {
             if (volta === 1 && grupo === "operacao") {
                 for (const tabela of ["pedidos", "pedido_itens", "buscas",
                                       "estoque_foto", "estoque_mov",
-                                      "reativacao_fila", "reativacao_bloqueio"]) {
+                                      "reativacao_fila", "reativacao_bloqueio",
+                                      "cupons", "cupom_usos"]) {
                     const n = db.prepare(`SELECT COUNT(*) AS n FROM ${tabela}`).get().n;
                     if (n !== 0) problemas.push(`${nome}: ${tabela} devia nascer vazia, veio com ${n}`);
                 }

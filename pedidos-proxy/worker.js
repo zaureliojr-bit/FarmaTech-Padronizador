@@ -840,6 +840,272 @@ async function tratarNovaBusca(request, env, db) {
 
 }
 
+/* =====================================================================
+   CUPONS
+   =====================================================================
+
+   O site não cobra nada: o pedido vira mensagem de WhatsApp e o dinheiro
+   troca de mão no balcão. Então o cupom é uma INSTRUÇÃO para a farmácia
+   cobrar menos, e o que ele precisa garantir é que o desconto que a
+   atendente vê na fila foi mesmo criado pela loja.
+
+   Por isso a conta é feita AQUI, nunca no navegador. Validado no site,
+   qualquer pessoa abriria o console, inventaria "DESCONTO90", e a
+   atendente veria um cupom com cara de legítimo no pedido.
+
+   O código é limpo do mesmo jeito em todo lugar — maiúscula, sem espaço
+   — porque quem digita no celular digita "bemvindo10", "BemVindo10" e
+   " BEMVINDO10 ", e os três têm de ser o mesmo cupom. */
+function limparCupom(valor) {
+    return String(valor ?? "").trim().toUpperCase().replace(/\s+/g, "").slice(0, 40);
+}
+
+/* O desconto em reais, dado o cupom e o que está no carrinho.
+
+   Separada da consulta ao banco de propósito: é a única parte que faz
+   conta, e é a que tem teste. */
+function descontoDoCupom(cupom, subtotal, frete) {
+
+    const base = numero(subtotal);
+
+    if (cupom.tipo === "frete") {
+        return Number(numero(frete).toFixed(2));
+    }
+
+    if (cupom.tipo === "valor") {
+        /* Nunca mais que o próprio pedido: um cupom de R$ 20 num pedido
+           de R$ 12 não pode virar troco. */
+        return Number(Math.min(numero(cupom.valor), base).toFixed(2));
+    }
+
+    if (cupom.tipo === "percentual") {
+
+        let desconto = base * (numero(cupom.valor) / 100);
+
+        /* O teto existe para o percentual não virar outra promoção num
+           pedido grande: 20% de R$ 800 é R$ 160, e não era isso que a
+           loja quis dizer quando escreveu "20% de desconto". */
+        if (numero(cupom.teto) > 0) desconto = Math.min(desconto, numero(cupom.teto));
+
+        return Number(Math.min(desconto, base).toFixed(2));
+    }
+
+    return 0;
+}
+
+/* Diz se o cupom vale, e por quê não quando não vale.
+
+   A mensagem de recusa é específica de propósito: "cupom inválido" faz
+   o cliente tentar de novo, digitar de novo e desistir. "Este cupom vale
+   em pedidos a partir de R$ 50" faz ele pôr mais um item no carrinho —
+   que é o que a promoção queria. */
+async function avaliarCupom(db, codigoBruto, { subtotal, frete, telefone }) {
+
+    const codigo = limparCupom(codigoBruto);
+
+    if (!codigo) return { valido: false, motivo: "Digite o código do cupom." };
+
+    const cupom = await db.prepare(
+        `SELECT codigo, tipo, valor, minimo, teto, inicio, fim,
+                limite_total, limite_pessoa, usos, ativo, descricao
+           FROM cupons WHERE codigo = ?1`
+    ).bind(codigo).first();
+
+    /* "Não existe" e "está desligado" dão a MESMA resposta, e isso é de
+       propósito: respostas diferentes transformam o campo de cupom num
+       detector de códigos válidos, e aí alguém varre a lista inteira. */
+    if (!cupom || !cupom.ativo) {
+        return { valido: false, motivo: "Cupom não encontrado." };
+    }
+
+    const agora = Date.now();
+
+    if (cupom.inicio && agora < cupom.inicio) {
+        return { valido: false, motivo: "Este cupom ainda não começou a valer." };
+    }
+
+    if (cupom.fim && agora > cupom.fim) {
+        return { valido: false, motivo: "Este cupom já expirou." };
+    }
+
+    if (cupom.limite_total > 0 && cupom.usos >= cupom.limite_total) {
+        return { valido: false, motivo: "Este cupom já atingiu o limite de usos." };
+    }
+
+    if (numero(subtotal) < numero(cupom.minimo)) {
+        return {
+            valido: false,
+            motivo: `Este cupom vale em pedidos a partir de ${dinheiroBR(cupom.minimo)}.`
+        };
+    }
+
+    /* O limite por pessoa é o que impede o uso mais óbvio: o cupom de
+       boas-vindas rodando toda semana no mesmo telefone. Só dá para
+       conferir quando o telefone já foi digitado — no carrinho ele pode
+       ainda estar vazio, e aí a checagem fica para o envio do pedido. */
+    const fone = soDigitos(telefone);
+
+    if (fone && cupom.limite_pessoa > 0) {
+
+        const jaUsou = await db.prepare(
+            `SELECT COUNT(*) AS n FROM cupom_usos WHERE codigo = ?1 AND telefone = ?2`
+        ).bind(codigo, fone).first();
+
+        if ((jaUsou?.n || 0) >= cupom.limite_pessoa) {
+            return { valido: false, motivo: "Você já usou este cupom." };
+        }
+
+    }
+
+    const desconto = descontoDoCupom(cupom, subtotal, frete);
+
+    if (desconto <= 0) {
+        return { valido: false, motivo: "Este cupom não dá desconto neste pedido." };
+    }
+
+    return {
+        valido: true,
+        codigo,
+        tipo: cupom.tipo,
+        desconto,
+        descricao: cupom.descricao || ""
+    };
+
+}
+
+function dinheiroBR(v) {
+    return "R$ " + numero(v).toFixed(2).replace(".", ",");
+}
+
+/* A rota pública: o carrinho pergunta antes de o cliente fechar o
+   pedido. Devolve o desconto JÁ CALCULADO — a tela só mostra o número
+   que veio daqui, em vez de recalcular e arriscar divergir. */
+async function tratarCupomValidar(request, env, db) {
+
+    const corpo = await request.json().catch(() => null);
+
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    const resultado = await avaliarCupom(db, corpo.codigo, {
+        subtotal: corpo.subtotal,
+        frete: corpo.frete,
+        telefone: corpo.telefone
+    });
+
+    return json(resultado);
+
+}
+
+/* ---- o lado do painel: criar, listar e desligar cupons ------------- */
+
+async function tratarCuponsDaLoja(request, env, loja, db) {
+
+    const cupons = await db.prepare(
+        `SELECT c.codigo, c.tipo, c.valor, c.minimo, c.teto, c.inicio, c.fim,
+                c.limite_total, c.limite_pessoa, c.usos, c.ativo, c.descricao,
+                c.criado_em,
+                COALESCE((SELECT SUM(u.desconto) FROM cupom_usos u
+                           WHERE u.codigo = c.codigo), 0) AS descontado
+           FROM cupons c
+          ORDER BY c.ativo DESC, c.criado_em DESC
+          LIMIT 100`
+    ).all();
+
+    return json({ cupons: cupons.results || [] });
+
+}
+
+const TIPOS_DE_CUPOM = ["percentual", "valor", "frete"];
+
+/* Quantas vezes a MESMA pessoa pode usar.
+
+   Campo em branco vale 1, e não zero. O schema já dizia isso no DEFAULT,
+   mas o INSERT passa a coluna explicitamente — então o DEFAULT nunca
+   valia, e um numero(undefined) virava 0, que aqui quer dizer
+   ILIMITADO. Resultado: todo cupom criado sem preencher esse campo
+   podia rodar toda semana no mesmo telefone, que é exatamente o buraco
+   que o limite existe para fechar. Quem pegou foi o teste.
+
+   Zero continua existindo como escapatória, para o cupom que a loja
+   quer mesmo deixar solto — mas aí é escolha escrita, não esquecimento. */
+function limitePessoaDe(valor) {
+    if (valor === undefined || valor === null || valor === "") return 1;
+    return Math.max(0, Math.round(numero(valor)));
+}
+
+async function tratarSalvarCupom(request, env, loja, db) {
+
+    const corpo = await request.json().catch(() => null);
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    const codigo = limparCupom(corpo.codigo);
+
+    if (!codigo) return json({ erro: "Dê um código ao cupom." }, 400);
+    if (!/^[A-Z0-9-]+$/.test(codigo)) {
+        return json({ erro: "O código aceita só letra, número e hífen." }, 400);
+    }
+
+    const tipo = TIPOS_DE_CUPOM.includes(corpo.tipo) ? corpo.tipo : "valor";
+    const valor = numero(corpo.valor);
+
+    if (tipo !== "frete" && valor <= 0) {
+        return json({ erro: "O desconto precisa ser maior que zero." }, 400);
+    }
+
+    if (tipo === "percentual" && valor > 90) {
+        return json({ erro: "Mais de 90% é quase dar o produto. Confira o número." }, 400);
+    }
+
+    /* O fim é o fim do DIA escolhido. Quem põe 31/10 quer que valha até
+       o fim do dia 31, e não até a meia-noite que começa o dia. */
+    const dia = (texto(corpo.fim, 10) || "").trim();
+    const fim = dia ? Date.parse(dia + "T23:59:59-03:00") || null : null;
+
+    const inicioDia = (texto(corpo.inicio, 10) || "").trim();
+    const inicio = inicioDia ? Date.parse(inicioDia + "T00:00:00-03:00") || null : null;
+
+    await db.prepare(
+        `INSERT INTO cupons
+            (codigo, tipo, valor, minimo, teto, inicio, fim,
+             limite_total, limite_pessoa, usos, ativo, descricao, criado_em)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,?10,?11,?12)
+         ON CONFLICT(codigo) DO UPDATE SET
+            tipo = excluded.tipo, valor = excluded.valor,
+            minimo = excluded.minimo, teto = excluded.teto,
+            inicio = excluded.inicio, fim = excluded.fim,
+            limite_total = excluded.limite_total,
+            limite_pessoa = excluded.limite_pessoa,
+            ativo = excluded.ativo, descricao = excluded.descricao`
+    ).bind(
+        codigo, tipo, valor,
+        numero(corpo.minimo), numero(corpo.teto),
+        inicio, fim,
+        Math.max(0, Math.round(numero(corpo.limiteTotal))),
+        limitePessoaDe(corpo.limitePessoa),
+        corpo.ativo === false ? 0 : 1,
+        texto(corpo.descricao, 120),
+        Date.now()
+    ).run();
+
+    return json({ ok: true, codigo });
+
+}
+
+/* Desligar, e não apagar. Cupom apagado leva junto o histórico de uso —
+   e é o histórico que responde se a promoção valeu a pena. */
+async function tratarExcluirCupom(request, env, loja, db) {
+
+    const corpo = await request.json().catch(() => null);
+    const codigo = limparCupom(corpo && corpo.codigo);
+
+    if (!codigo) return json({ erro: "Qual cupom?" }, 400);
+
+    await db.prepare(`UPDATE cupons SET ativo = 0 WHERE codigo = ?1`).bind(codigo).run();
+
+    return json({ ok: true });
+
+}
+
 async function tratarNovoPedido(request, env, db) {
 
     const corpo = await request.json().catch(() => null);
@@ -858,7 +1124,44 @@ async function tratarNovoPedido(request, env, db) {
     const criadoEm = Date.now();
     const cliente = texto(corpo.cliente) || "(sem nome)";
     const endereco = texto(corpo.endereco, 300);
-    const total = numero(corpo.total);
+    const subtotal = numero(corpo.subtotal);
+    const frete = numero(corpo.frete);
+
+    /* O cupom é revalidado AQUI, do zero.
+
+       O carrinho já perguntou antes, mas aquela resposta ficou no
+       navegador do cliente — e entre a pergunta e o envio cabe de tudo:
+       o cupom expirar, acabar o limite, o carrinho mudar de valor, ou
+       alguém simplesmente mandar um JSON com o desconto que quiser.
+       O que vale é o que esta consulta disser agora.
+
+       Pedido sem cupom não paga nada por isto: o avaliarCupom sai na
+       primeira linha quando o código vem vazio. */
+    let cupom = null;
+
+    if (limparCupom(corpo.cupom)) {
+
+        const avaliado = await avaliarCupom(db, corpo.cupom, {
+            subtotal, frete, telefone
+        });
+
+        /* Cupom recusado não derruba o pedido. O cliente mandou a
+           compra; recusar tudo por causa de um código vencido seria
+           perder a venda para proteger o desconto. Ele entra sem o
+           desconto, e a resposta diz por quê — a tela avisa antes de
+           abrir o WhatsApp. */
+        if (avaliado.valido) cupom = avaliado;
+
+    }
+
+    const desconto = cupom ? cupom.desconto : 0;
+
+    /* O total é RECALCULADO quando há cupom, em vez de aceito como veio.
+       É o que fecha o laço: de nada adianta validar o cupom e depois
+       gravar o total que o navegador mandou. */
+    const total = cupom
+        ? Number(Math.max(subtotal + frete - desconto, 0).toFixed(2))
+        : numero(corpo.total);
 
     // Itens normalizados aqui, e não confiando no que chegou: o total de
     // cada linha é recalculado, para o relatório não herdar conta errada.
@@ -905,8 +1208,8 @@ async function tratarNovoPedido(request, env, db) {
             texto(corpo.entrega, 20) || "Retirada",
             endereco,
             texto(corpo.pagamento, 40),
-            numero(corpo.subtotal),
-            numero(corpo.frete),
+            subtotal,
+            frete,
             total,
             corpo.temReceita ? 1 : 0
         ),
@@ -942,10 +1245,52 @@ async function tratarNovoPedido(request, env, db) {
         ).bind(telefone, cliente, endereco, criadoEm, total)
     );
 
+    /* O uso do cupom entra na MESMA transação do pedido. Separado, um
+       erro de rede no meio deixaria o pedido com desconto e o contador
+       sem registro — e o cupom "uma vez por pessoa" valeria duas.
+
+       O índice único em `ref` é o que torna o reenvio inofensivo: o
+       cliente que clica duas vezes não gasta dois usos. */
+    if (cupom) {
+
+        /* Já contado antes? Então este é um reenvio, e o contador não
+           pode subir de novo.
+
+           A pergunta é feita ANTES do batch, e não dentro dele com um
+           NOT EXISTS: as instruções do batch rodam em sequência, então
+           o INSERT acima já teria gravado a linha e o NOT EXISTS seria
+           sempre falso — o contador nunca subiria. Escrevi assim na
+           primeira versão e o teste do reenvio pegou. */
+        const jaContado = await db.prepare(
+            `SELECT 1 AS n FROM cupom_usos WHERE ref = ?1`
+        ).bind(ref).first();
+
+        comandos.push(
+            db.prepare(
+                `INSERT INTO cupom_usos (codigo, telefone, ref, desconto, quando)
+                 VALUES (?1,?2,?3,?4,?5)
+                 ON CONFLICT(ref) DO NOTHING`
+            ).bind(cupom.codigo, telefone, ref, desconto, criadoEm)
+        );
+
+        if (!jaContado) {
+            comandos.push(
+                db.prepare(`UPDATE cupons SET usos = usos + 1 WHERE codigo = ?1`)
+                    .bind(cupom.codigo)
+            );
+        }
+
+    }
+
     // batch roda tudo numa transação: ou o pedido inteiro entra, ou nada
     await db.batch(comandos);
 
-    return json({ sucesso: true, ref, itens: linhas.length });
+    return json({
+        sucesso: true, ref, itens: linhas.length,
+        cupom: cupom ? cupom.codigo : null,
+        desconto,
+        total
+    });
 
 }
 
@@ -1680,6 +2025,45 @@ async function tratarPedido(request, env, loja, db, ref) {
 
    Os itens vêm na mesma resposta, e não um pedido por vez: separar dez
    pedidos custaria onze idas ao servidor em vez de uma. */
+/* O cupom de cada pedido, em consulta separada.
+
+   A primeira versão disto era um LEFT JOIN na consulta da fila, que é
+   mais curto e estava errado: a fila passaria a EXIGIR a tabela
+   cupom_usos, e qualquer farmácia que ainda não tivesse colado o
+   schema-cupons.sql perderia a tela de pedidos inteira — 500 na /fila.
+
+   Entre implantar o worker e rodar o schema no console há sempre uma
+   janela, às vezes de dias quando a farmácia é de outra cidade. E
+   segunda-feira entra loja nova. O teste de duas lojas pegou isso
+   porque o banco dele não tem a tabela.
+
+   Então: consulta à parte, e sem tabela a resposta é "nenhum cupom".
+   A fila continua de pé, que é o que não pode faltar. */
+async function cuponsPorRef(db, refs) {
+
+    const mapa = new Map();
+
+    if (!refs.length) return mapa;
+
+    const marcadores = refs.map((_, i) => `?${i + 1}`).join(",");
+
+    try {
+
+        const usos = await db.prepare(
+            `SELECT ref, codigo, desconto FROM cupom_usos WHERE ref IN (${marcadores})`
+        ).bind(...refs).all();
+
+        (usos.results || []).forEach((u) => mapa.set(u.ref, u));
+
+    } catch (erro) {
+        /* Sem a tabela: a loja ainda não rodou o schema de cupons. Não
+           é erro de pedido, e o pedido é o que importa agora. */
+    }
+
+    return mapa;
+
+}
+
 async function tratarFila(request, env, loja, db) {
 
     const ABERTOS = ["novo", "separando", "receita-ok"];
@@ -1715,8 +2099,19 @@ async function tratarFila(request, env, loja, db) {
         porRef.get(item.ref)?.push(item);
     }
 
+    /* O desconto vai junto porque é a atendente quem vai cobrar. Sem
+       isso ela veria um total menor que a soma dos itens e não saberia
+       por quê — o caminho mais curto para alguém "corrigir" o valor no
+       balcão e cobrar o preço cheio de um cliente que tinha desconto. */
+    const cupons = await cuponsPorRef(db, refs);
+
     return json({
-        pedidos: lista.map(p => ({ ...p, itens: porRef.get(p.ref) || [] })),
+        pedidos: lista.map(p => ({
+            ...p,
+            itens: porRef.get(p.ref) || [],
+            cupom: cupons.get(p.ref)?.codigo || null,
+            desconto: cupons.get(p.ref)?.desconto || 0
+        })),
         abertos: ABERTOS
     });
 
@@ -3029,6 +3424,25 @@ export default {
                 return await tratarNovoPedido(request, env, alvo.db);
             }
 
+            /* Conferir cupom: público, porque quem pergunta é o carrinho
+               antes de o cliente fechar o pedido.
+
+               Com teto por acesso, e aqui ele não é formalidade: sem
+               limite, este endereço vira uma máquina de adivinhar código
+               — tenta "NATAL10", "BLACK20", "FRETE" até achar. O mesmo
+               teto dos pedidos serve, porque ninguém digita cupom
+               dezenas de vezes por hora. */
+            if (request.method === "POST" && rota === "/cupom/validar") {
+                const cheio = await barrarRotaPublica(
+                    env, request, "cupom", LIMITE_PEDIDOS_HORA,
+                    "Muitas tentativas de cupom deste acesso. Tente mais tarde."
+                );
+                if (cheio) return cheio;
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarCupomValidar(request, env, alvo.db);
+            }
+
             // idem: quem grava é o site público
             if (request.method === "POST" && rota === "/busca") {
                 const cheio = await barrarRotaPublica(
@@ -3188,6 +3602,10 @@ export default {
             if (request.method === "GET"  && rota === "/encartes")         return await tratarEncartesDaLoja(request, env, loja, db);
             if (request.method === "POST" && rota === "/encartes")         return await tratarSalvarEncarte(request, env, loja, db);
             if (request.method === "POST" && rota === "/encartes/excluir") return await tratarExcluirEncarte(request, env, loja, db);
+
+            if (request.method === "GET"  && rota === "/cupons")         return await tratarCuponsDaLoja(request, env, loja, db);
+            if (request.method === "POST" && rota === "/cupons")         return await tratarSalvarCupom(request, env, loja, db);
+            if (request.method === "POST" && rota === "/cupons/excluir") return await tratarExcluirCupom(request, env, loja, db);
 
             if (request.method === "GET"  && rota === "/promocoes/todas")   return await tratarPromocoesDaLoja(request, env, loja, db);
             if (request.method === "POST" && rota === "/promocoes")         return await tratarSalvarPromocoes(request, env, loja, db);
