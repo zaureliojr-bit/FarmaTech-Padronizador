@@ -39,10 +39,15 @@ import { DatabaseSync } from "node:sqlite";
    que o de acesso pressupõe. */
 const GRUPOS = {
     principal: ["schema-lojas.sql", "schema-acesso.sql", "schema-visual.sql"],
-    operacao: ["schema.sql", "schema-estoque.sql", "schema-reativacao.sql"]
+    operacao: ["schema.sql", "schema-estoque.sql", "schema-reativacao.sql"],
+    /* Não é schema: é a limpeza dos pedidos de teste, que se roda uma
+       vez por loja, no dia em que cai o primeiro pedido de verdade.
+       Entra aqui pelo mesmo motivo que os outros — o console do D1 não
+       aceita comentário, e este arquivo é quase todo comentário. */
+    manutencao: ["LIMPAR-TESTES.sql"]
 };
 
-const SCHEMAS = [...GRUPOS.principal, ...GRUPOS.operacao];
+const SCHEMAS = [...GRUPOS.principal, ...GRUPOS.operacao, ...GRUPOS.manutencao];
 
 const CONFERIR = process.argv.includes("--conferir");
 
@@ -129,6 +134,16 @@ for (const [nome, achatar] of [["como arquivo", false], ["achatado", true]]) {
   for (const [grupo, arquivos] of Object.entries(GRUPOS)) {
     try {
         const db = new DatabaseSync(":memory:");
+
+        /* A manutenção não cria tabela: ela mexe nas que o schema de
+           operação já criou. Então o banco de mentira começa com elas,
+           que é exatamente o estado do D1 de uma loja no dia em que
+           alguém roda a limpeza. Sem isto o teste falharia com "no such
+           table: pedidos" — um erro sobre o teste, não sobre o SQL. */
+        if (grupo === "manutencao") {
+            for (const arquivo of GRUPOS.operacao) db.exec(limpos.get(arquivo));
+        }
+
         for (const volta of [1, 2]) {
             for (const arquivo of arquivos) {
                 const sql = limpos.get(arquivo);
@@ -153,6 +168,15 @@ for (const [nome, achatar] of [["como arquivo", false], ["achatado", true]]) {
                sem estoque. Se algum dia um schema vier com linha de
                exemplo dentro, a filial recém-criada abriria o painel
                mostrando venda que não houve. */
+            /* A limpeza roda num banco COM pedido de teste dentro e
+               tem de sair deixando só o que foi mandado ficar. É a
+               asserção que importa: um DELETE largo demais aqui apaga o
+               pedido do cliente, e esse ninguém recupera. */
+            if (volta === 1 && grupo === "manutencao") {
+                const sobraram = db.prepare("SELECT COUNT(*) AS n FROM pedidos").get().n;
+                if (sobraram !== 0) problemas.push(`${nome}: a limpeza devia rodar sem erro em banco vazio`);
+            }
+
             if (volta === 1 && grupo === "operacao") {
                 for (const tabela of ["pedidos", "pedido_itens", "buscas",
                                       "estoque_foto", "estoque_mov",
