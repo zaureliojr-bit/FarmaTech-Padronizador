@@ -44,6 +44,14 @@ pasta `instalador/` (junto com `instalar.ps1` e `instalar.bat`).
    agendada no Windows - não precisa abrir o Agendador de Tarefas na
    mão.
 
+> **O horário e o PC desligado.** A tarefa é criada com "rodar assim
+> que possível depois de um horário perdido": se a farmácia desliga o
+> computador à noite, a extração das 6h acontece quando ele ligar, e
+> não deixa de acontecer. Em Windows antigo (anterior ao 8) o
+> instalador cai no agendamento simples, que só roda com a máquina
+> ligada na hora — ele avisa na tela quando isso acontece, e aí vale
+> escolher um horário de expediente.
+
 Pronto - a partir daí o `.xlsx` se atualiza sozinho todo dia na pasta
 escolhida, com log em `extracao.log`. Pra reconfigurar algo depois
 (trocar senha, horário etc.), roda o `instalar.bat` de novo - ele
@@ -230,10 +238,12 @@ vale rodar o `instalar.bat` da pasta `instalador/` (com o `.exe` novo
 dentro): ele refaz o `.env` perguntando tudo, inclusive
 `ESTOQUE_URL`/`ESTOQUE_KEY`/`ESTOQUE_LOJA`, e recadastra a tarefa.
 
-> Atenção ao refazer o `.env` pelo instalador: ele **sobrescreve** o
-> arquivo e não pergunta por `FB_COLUNA_MINIMO` nem
-> `FB_COLUNA_VALIDADE`. Se essa instalação usa essas duas colunas,
-> anote os valores antes e põe de volta à mão depois.
+> Rodar o instalador de novo é seguro. Ele lê o `.env` que estiver lá,
+> oferece cada valor como padrão (Enter mantém) e devolve no fim as
+> linhas que ele **não** pergunta — `FB_COLUNA_MINIMO`,
+> `FB_COLUNA_VALIDADE` e qualquer outra posta à mão. Senha do banco e
+> chaves de worker não aparecem na tela: ele só pergunta se quer
+> trocar, e Enter mantém a que já estava.
 
 ## Próximos passos possíveis
 

@@ -119,15 +119,17 @@ outra.
    | `pedidos-proxy/schema-colar.sql` | pedidos, clientes, banners, promoções, encartes, buscas |
    | `pedidos-proxy/schema-estoque-colar.sql` | a aba **Estoque**: ruptura, excesso e giro |
    | `pedidos-proxy/schema-reativacao-colar.sql` | a aba **Reativação** e a fila do agente de envio |
+   | `pedidos-proxy/schema-cupons-colar.sql` | a aba **Cupons** e o campo de cupom no carrinho |
 
    Use sempre os arquivos terminados em **`-colar`**: o console do D1
    não aceita comentário nenhum, nem `--` nem `/* */`, e os `-colar`
    são os mesmos schemas sem eles.
 
-   Os dois últimos são fáceis de esquecer porque a loja funciona sem
+   Os três últimos são fáceis de esquecer porque a loja funciona sem
    eles — vende, recebe pedido, tudo normal. O que acontece é que as
-   abas Estoque e Reativação abrem vazias, e vazio não se distingue de
-   "esta farmácia não tem ruptura". Rode os três de uma vez.
+   abas Estoque, Reativação e Cupons abrem vazias, e vazio não se
+   distingue de "esta farmácia não tem ruptura". Rode os quatro de uma
+   vez.
 
    **Não** rode o `schema-lojas` nem o `schema-acesso` aqui — o cadastro
    de lojas é um só, e fica no banco principal.
