@@ -16,7 +16,7 @@
  * =====================================================
  */
 
-import { ABREVIACOES } from "../dictionary";
+import { expandirAbreviacoes } from "../dictionary";
 import { primeiraLetraMaiuscula } from "../../utils/texto";
 
 export function refinarDescricaoPesquisa(produto) {
@@ -24,16 +24,14 @@ export function refinarDescricaoPesquisa(produto) {
     let descricao = produto.descricaoPesquisa;
 
     // =====================================================
-    // Expandir abreviações (somente como palavra isolada)
+    // Expandir abreviações
     // =====================================================
+    // A regra mora no dicionário porque deixou de ser uma
+    // troca de palavra: FR pode ser frasco ou fralda, SOL
+    // pode ser solução ou protetor solar, e quem decide é o
+    // resto da descrição. Ver o cabeçalho do abreviacoes.js.
 
-    for (const [sigla, expandida] of Object.entries(ABREVIACOES)) {
-
-        const regex = new RegExp(`\\b${sigla}\\b`, "g");
-
-        descricao = descricao.replace(regex, expandida);
-
-    }
+    descricao = expandirAbreviacoes(descricao);
 
     // =====================================================
     // Remover espaços duplicados
