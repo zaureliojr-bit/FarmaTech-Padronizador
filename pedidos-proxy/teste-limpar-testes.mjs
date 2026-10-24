@@ -27,6 +27,7 @@ const db = new DatabaseSync(":memory:");
 db.exec(ler("schema-colar.sql"));
 db.exec(ler("schema-cupons-colar.sql"));
 db.exec(ler("schema-funil-colar.sql"));
+db.exec(ler("schema-campanhas-colar.sql"));
 
 /* O banco como ele está hoje: três pedidos nossos, de teste, e o
    primeiro de um cliente de verdade. */
@@ -76,6 +77,17 @@ db.exec(`INSERT INTO funil (dia, etapa, total)
          VALUES ('2026-10-20', 'visita', 4),
                 ('2026-10-20', 'busca', 1),
                 ('2026-10-20', 'carrinho', 1)`);
+
+/* A campanha de teste, com os pedidos de teste carimbados nela. É o
+   caso em que a aba Marketing mostraria "R$ 0,00 por pedido, retorno
+   infinito" — e é esse número que decide onde a loja põe dinheiro. */
+db.exec(`INSERT INTO campanhas (id, nome, canal, gasto, ativa, criado_em)
+         VALUES ('teste-interno', 'Teste interno', 'outro', 0, 1, 0)`);
+
+db.exec(`INSERT INTO pedido_campanha (ref, campanha, quando)
+         VALUES ('TESTE-1', 'teste-interno', 0),
+                ('TESTE-2', 'teste-interno', 0),
+                ('REAL-1', 'teste-interno', 0)`);
 
 db.exec(`INSERT INTO buscas (termo, criado_em, resultados)
          VALUES ('teste', ${AGORA - 86400000}, 0),
@@ -197,6 +209,24 @@ console.log("\n4.5. o funil contado nos testes");
     const existe = db.prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='funil'").get();
     conferir("mas a tabela continua existindo", !!existe, JSON.stringify(existe));
+}
+
+/* ---- as campanhas --------------------------------------------------- */
+console.log("\n4.7. o carimbo dos pedidos apagados");
+{
+    const sobraram = db.prepare("SELECT ref FROM pedido_campanha").all().map((l) => l.ref);
+
+    /* Carimbo de pedido que não existe mais continuaria contando
+       visita e venda para uma campanha — e o custo por pedido dela
+       sairia menor do que foi. */
+    conferir("o carimbo dos pedidos de teste saiu",
+        !sobraram.includes("TESTE-1") && !sobraram.includes("TESTE-2"),
+        JSON.stringify(sobraram));
+
+    /* E o do pedido de cliente de verdade FICA: se ele veio mesmo de
+       uma campanha, essa campanha vendeu. */
+    conferir("e o do pedido de verdade ficou",
+        sobraram.includes("REAL-1"), JSON.stringify(sobraram));
 }
 
 /* ---- rodar duas vezes ----------------------------------------------- */

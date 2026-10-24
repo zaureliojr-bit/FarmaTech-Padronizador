@@ -1172,6 +1172,219 @@ async function tratarFunil(request, env, db) {
 
 }
 
+/* =====================================================================
+   CAMPANHAS
+   =====================================================================
+
+   O Meta diz "47 cliques". O Google diz "R$ 80 gastos". Nenhum dos
+   dois sabe que saíram três pedidos de R$ 280 desta farmácia — eles
+   não enxergam o carrinho daqui. Sem isso o dono decide onde pôr o
+   dinheiro do mês por quantidade de clique, que não paga conta.
+
+   O carimbo (?c=instagram-outubro) vai no link do anúncio, o site o
+   guarda no navegador por 7 dias e devolve no pedido. Continua sem
+   identificar ninguém: o que chega aqui é "mais uma visita da campanha
+   X hoje", igual ao funil. */
+
+/* Minúscula, número e hífen: este texto aparece na barra de endereço do
+   cliente, e também vira chave primária. Limitado a 40 porque o nome
+   bonito mora na coluna `nome` — aqui é só o carimbo. */
+function limparIdCampanha(valor) {
+    return String(valor || "")
+        .toLowerCase()
+        .normalize("NFD").replace(/[̀-ͯ]/g, "")
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40);
+}
+
+const CANAIS = ["instagram", "facebook", "google", "whatsapp", "panfleto", "outro"];
+
+/* Só conta visita de campanha QUE EXISTE.
+
+   Sem esta checagem, qualquer um inventaria ?c=qualquer-coisa e a aba
+   de Marketing encheria de campanha que a loja nunca criou — e o
+   relatório de uma farmácia não pode ser escrito por quem está do lado
+   de fora. Como o carimbo vem do próprio painel, uma campanha real
+   nunca cai aqui. */
+async function registrarVisitaCampanha(db, id, quando) {
+
+    if (!id) return;
+
+    try {
+
+        const existe = await db.prepare(
+            `SELECT 1 AS n FROM campanhas WHERE id = ?1`
+        ).bind(id).first();
+
+        if (!existe) return;
+
+        await db.prepare(
+            `INSERT INTO campanha_dia (dia, campanha, visitas) VALUES (?1, ?2, 1)
+             ON CONFLICT(dia, campanha) DO UPDATE SET visitas = visitas + 1`
+        ).bind(diaEmSP(quando), id).run();
+
+    } catch (erro) {
+        /* loja que ainda não colou o schema-campanhas: a contagem não
+           acontece e o site segue vendendo igual */
+    }
+
+}
+
+async function tratarVisitaDeCampanha(request, env, db) {
+
+    const corpo = await request.json().catch(() => null);
+
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    const id = limparIdCampanha(corpo.campanha);
+
+    if (!id) return json({ erro: "Sem campanha." }, 400);
+
+    await registrarVisitaCampanha(db, id);
+
+    /* Sempre ok, mesmo quando a campanha não existe: o site não ganha
+       nada sabendo disso, e responder "não existe" daria a quem sonda o
+       endereço uma lista das campanhas da loja. */
+    return json({ ok: true });
+
+}
+
+/* Guardado fora da transação do pedido, como o funil, e pelo mesmo
+   motivo: saber de onde veio a venda é bom, perder a venda por causa
+   disso é inaceitável. */
+async function registrarPedidoDeCampanha(db, ref, id, quando) {
+
+    if (!id) return;
+
+    try {
+
+        const existe = await db.prepare(
+            `SELECT 1 AS n FROM campanhas WHERE id = ?1`
+        ).bind(id).first();
+
+        if (!existe) return;
+
+        await db.prepare(
+            `INSERT INTO pedido_campanha (ref, campanha, quando) VALUES (?1,?2,?3)
+             ON CONFLICT(ref) DO NOTHING`
+        ).bind(ref, id, quando).run();
+
+    } catch (erro) {
+        /* idem */
+    }
+
+}
+
+/* A aba Marketing do painel: a campanha e o que ela deu.
+
+   As duas contas que o dono procura estão aqui prontas, e não na tela,
+   porque conta feita no navegador é conta que diverge quando alguém
+   mexe num dos dois lugares:
+
+     custo por pedido = gasto / pedidos
+     retorno          = receita / gasto
+
+   Pedido cancelado não entra na receita. Já tínhamos sido mordidos por
+   isso no relatório de vendas: venda que não aconteceu inflando número
+   que decide compra. */
+async function tratarCampanhasDaLoja(request, env, loja, db) {
+
+    const url = new URL(request.url);
+    const dias = Math.min(Math.max(parseInt(url.searchParams.get("dias") || "30", 10) || 30, 1), MAX_DIAS_RELATORIO);
+    const desde = Date.now() - dias * 86400000;
+
+    let campanhas = [];
+
+    try {
+
+        const linhas = await db.prepare(
+            `SELECT c.id, c.nome, c.canal, c.gasto, c.ativa, c.criado_em,
+
+                    COALESCE((SELECT SUM(d.visitas) FROM campanha_dia d
+                               WHERE d.campanha = c.id AND d.dia >= ?1), 0) AS visitas,
+
+                    COALESCE((SELECT COUNT(*)
+                                FROM pedido_campanha pc
+                                JOIN pedidos p ON p.ref = pc.ref
+                               WHERE pc.campanha = c.id
+                                 AND p.criado_em >= ?2
+                                 AND p.status <> 'cancelado'), 0) AS pedidos,
+
+                    COALESCE((SELECT SUM(p.total)
+                                FROM pedido_campanha pc
+                                JOIN pedidos p ON p.ref = pc.ref
+                               WHERE pc.campanha = c.id
+                                 AND p.criado_em >= ?2
+                                 AND p.status <> 'cancelado'), 0) AS receita
+
+               FROM campanhas c
+              ORDER BY c.ativa DESC, c.criado_em DESC
+              LIMIT 100`
+        ).bind(diaEmSP(desde), desde).all();
+
+        campanhas = linhas.results || [];
+
+    } catch (erro) {
+        campanhas = [];
+    }
+
+    return json({ dias, campanhas });
+
+}
+
+async function tratarSalvarCampanha(request, env, loja, db) {
+
+    const corpo = await request.json().catch(() => null);
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    const nome = texto(corpo.nome, 80);
+
+    if (!nome) return json({ erro: "Dê um nome à campanha." }, 400);
+
+    /* O id sai do nome quando não vem escrito. Pedir ao dono que invente
+       um "identificador" separado é pedir que ele entenda uma coisa que
+       só existe por causa da URL. */
+    const id = limparIdCampanha(corpo.id || nome);
+
+    if (!id) return json({ erro: "Esse nome não vira endereço. Use letras e números." }, 400);
+
+    const canal = CANAIS.includes(corpo.canal) ? corpo.canal : "outro";
+
+    await db.prepare(
+        `INSERT INTO campanhas (id, nome, canal, gasto, ativa, criado_em)
+         VALUES (?1,?2,?3,?4,?5,?6)
+         ON CONFLICT(id) DO UPDATE SET
+            nome = excluded.nome, canal = excluded.canal,
+            gasto = excluded.gasto, ativa = excluded.ativa`
+    ).bind(
+        id, nome, canal,
+        Math.max(0, numero(corpo.gasto)),
+        corpo.ativa === false ? 0 : 1,
+        Date.now()
+    ).run();
+
+    return json({ ok: true, id });
+
+}
+
+/* Desligar, e não apagar — mesma regra do cupom. A campanha apagada
+   levaria junto a resposta de quanto ela vendeu, que é justamente o
+   que a loja vai querer olhar no mês que vem, na hora de decidir se
+   repete. */
+async function tratarExcluirCampanha(request, env, loja, db) {
+
+    const corpo = await request.json().catch(() => null);
+    const id = limparIdCampanha(corpo && corpo.id);
+
+    if (!id) return json({ erro: "Qual campanha?" }, 400);
+
+    await db.prepare(`UPDATE campanhas SET ativa = 0 WHERE id = ?1`).bind(id).run();
+
+    return json({ ok: true });
+
+}
+
 async function tratarNovoPedido(request, env, db) {
 
     const corpo = await request.json().catch(() => null);
@@ -1355,6 +1568,12 @@ async function tratarNovoPedido(request, env, db) {
        lugar que sabe que o pedido entrou mesmo. Fora da transação de
        propósito — um erro na contagem não pode desfazer a venda. */
     await registrarEtapa(db, "pedido", criadoEm);
+
+    /* De onde veio esta venda. Fora da transação pelo mesmo motivo: o
+       pedido já entrou, e nenhuma estatística vale desfazê-lo. */
+    await registrarPedidoDeCampanha(
+        db, ref, limparIdCampanha(corpo.campanha), criadoEm
+    );
 
     return json({
         sucesso: true, ref, itens: linhas.length,
@@ -3629,6 +3848,20 @@ export default {
                 return await tratarFunil(request, env, alvo.db);
             }
 
+            /* De onde a visita veio. Mesmo teto do funil e da busca, e
+               mesma tolerância: perder contagem de um bairro que sai
+               pelo mesmo IP é melhor que barrar cliente. */
+            if (request.method === "POST" && rota === "/campanha") {
+                const cheio = await barrarRotaPublica(
+                    env, request, "campanha", LIMITE_BUSCAS_HORA,
+                    "Muitos acessos deste endereço em pouco tempo."
+                );
+                if (cheio) return cheio;
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarVisitaDeCampanha(request, env, alvo.db);
+            }
+
             // idem: quem grava é o site público
             if (request.method === "POST" && rota === "/busca") {
                 const cheio = await barrarRotaPublica(
@@ -3792,6 +4025,10 @@ export default {
             if (request.method === "GET"  && rota === "/cupons")         return await tratarCuponsDaLoja(request, env, loja, db);
             if (request.method === "POST" && rota === "/cupons")         return await tratarSalvarCupom(request, env, loja, db);
             if (request.method === "POST" && rota === "/cupons/excluir") return await tratarExcluirCupom(request, env, loja, db);
+
+            if (request.method === "GET"  && rota === "/campanhas")         return await tratarCampanhasDaLoja(request, env, loja, db);
+            if (request.method === "POST" && rota === "/campanhas")         return await tratarSalvarCampanha(request, env, loja, db);
+            if (request.method === "POST" && rota === "/campanhas/excluir") return await tratarExcluirCampanha(request, env, loja, db);
 
             if (request.method === "GET"  && rota === "/promocoes/todas")   return await tratarPromocoesDaLoja(request, env, loja, db);
             if (request.method === "POST" && rota === "/promocoes")         return await tratarSalvarPromocoes(request, env, loja, db);

@@ -61,10 +61,15 @@ no topo do `script.js` do site, em `API_PEDIDOS_D1`.
 |---|---|---|---|
 | POST | `/pedidos` | não | o site grava um pedido |
 | POST | `/busca` | não | o site grava um termo buscado |
+| POST | `/funil` | não | o site conta uma etapa (visita, busca, carrinho) |
+| POST | `/campanha` | não | o site conta uma visita vinda de um anúncio |
 | GET | `/resumo?dias=30` | sim | números do painel |
 | GET | `/pedidos/{ref}` | sim | um pedido com os itens |
 | GET | `/clientes?limite=100` | sim | quem já comprou |
 | POST | `/status` | sim | muda o status de um pedido |
+| GET | `/campanhas?dias=30` | sim | as campanhas e o que cada uma vendeu |
+| POST | `/campanhas` | sim | cria ou atualiza uma campanha |
+| POST | `/campanhas/excluir` | sim | desliga uma campanha (sem apagar o histórico) |
 
 Status aceitos: `novo`, `separando`, `receita-ok`, `entregue`, `cancelado`.
 
@@ -73,6 +78,28 @@ digitado na busca do site) e `naoEncontrados` (o que foi procurado e não
 devolveu produto nenhum). O segundo é o relatório que mostra o que falta
 no catálogo — vendas que não aconteceram e que o histórico de pedidos,
 por definição, nunca mostraria.
+
+## O funil e as campanhas não identificam ninguém
+
+As duas contagens públicas (`/funil` e `/campanha`) recebem uma palavra e
+nada mais: `{"etapa":"busca"}`, `{"campanha":"instagram-outubro"}`. Quem
+garante que cada etapa conte uma vez por visita é o próprio navegador,
+com um registro que fica no `sessionStorage` e nunca sai de lá.
+
+É por isso que não há cookie, não há identificador e não há banner de
+consentimento. Numa farmácia o que a pessoa procura é informação de
+saúde, e a forma mais segura de guardar isso é não ter como ligar a
+ninguém — as tabelas foram feitas para não poderem responder "quem".
+
+Duas regras que o worker impõe, e que não são detalhe:
+
+- **a etapa `pedido` não vem do site.** Quem a grava é o `/pedidos`,
+  quando o pedido entra de verdade. Aceitá-la na rota pública deixaria
+  qualquer um mandar dez, e o painel mostraria dez vendas que não
+  existem;
+- **campanha que não existe é ignorada.** Sem isso, qualquer
+  `?c=qualquer-coisa` viraria linha no relatório, e o número que decide
+  onde a loja põe o dinheiro do mês estaria sendo escrito de fora.
 
 ## O que a tabela de buscas NÃO guarda
 

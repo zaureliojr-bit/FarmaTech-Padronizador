@@ -175,6 +175,32 @@ DELETE FROM funil;
 
 
 -- -------------------------------------------------------------------
+-- 5.7. AS CAMPANHAS DE TESTE
+-- -------------------------------------------------------------------
+-- Mesma história do funil: a campanha que você criou para ver como a
+-- aba Marketing funciona contou as suas próprias visitas, e os pedidos
+-- de teste ficaram carimbados com ela.
+--
+-- O estrago aqui é pior que o do funil, porque a aba Marketing mostra
+-- CUSTO POR PEDIDO. Uma campanha de teste com gasto zero e três
+-- pedidos seus aparece como "R$ 0,00 por pedido, retorno infinito" — e
+-- é esse número que a loja usa para decidir onde pôr o dinheiro.
+--
+-- O primeiro comando tira o carimbo dos pedidos que já não existem. O
+-- segundo e o terceiro são para quando a campanha inteira era teste:
+-- apague a linha dela e a contagem de visitas junto, trocando o nome.
+--
+-- Se a loja ainda não rodou o schema-campanhas.sql, estes comandos dão
+-- erro de "no such table" e podem ser pulados.
+
+DELETE FROM pedido_campanha
+ WHERE NOT EXISTS (SELECT 1 FROM pedidos p WHERE p.ref = pedido_campanha.ref);
+
+-- DELETE FROM campanha_dia WHERE campanha = 'TROQUE-PELO-ID-DA-CAMPANHA';
+-- DELETE FROM campanhas    WHERE id       = 'TROQUE-PELO-ID-DA-CAMPANHA';
+
+
+-- -------------------------------------------------------------------
 -- 6. CONFERIR  (não apaga nada)
 -- -------------------------------------------------------------------
 -- Os três números têm de bater com o que o painel mostra em "Relatórios"
@@ -185,6 +211,7 @@ SELECT (SELECT COUNT(*) FROM pedidos)       AS pedidos,
        (SELECT COUNT(*) FROM clientes)      AS clientes,
        (SELECT COUNT(*) FROM cupom_usos)    AS usos_de_cupom,
        (SELECT COUNT(*) FROM funil)         AS linhas_do_funil,
+       (SELECT COUNT(*) FROM pedido_campanha) AS pedidos_de_campanha,
        (SELECT COALESCE(SUM(total), 0) FROM pedidos) AS faturamento;
 
 
