@@ -1106,6 +1106,72 @@ async function tratarExcluirCupom(request, env, loja, db) {
 
 }
 
+/* =====================================================================
+   O FUNIL
+   =====================================================================
+
+   Quantas visitas entram, quantas buscam, quantas chegam ao carrinho,
+   quantas pedem. A Cloudflare conta visita; o que ela não responde é
+   onde a conta cai — e é só isso que faz a farmácia mudar alguma coisa.
+
+   O servidor recebe a ETAPA e nada mais. Quem garante uma contagem por
+   visita é o navegador, com um número sorteado que fica no
+   sessionStorage e nunca sai de lá. Aqui não há como saber quem fez o
+   quê, e é de propósito: sem identificador não há dado pessoal, e sem
+   dado pessoal não há banner de consentimento numa farmácia, onde o
+   que a pessoa busca é informação de saúde. */
+const ETAPAS_DO_FUNIL = ["visita", "busca", "carrinho", "pedido"];
+
+function diaEmSP(quando) {
+    const agora = new Date((quando || Date.now()) - 3 * 3600000);
+    return agora.toISOString().slice(0, 10);
+}
+
+async function registrarEtapa(db, etapa, quando) {
+
+    if (!ETAPAS_DO_FUNIL.includes(etapa)) return;
+
+    /* Falha em silêncio quando a loja ainda não colou o schema-funil.
+       Contagem de visita não pode derrubar o pedido de ninguém — e é
+       justamente no pedido que a etapa "pedido" é gravada. */
+    try {
+
+        await db.prepare(
+            `INSERT INTO funil (dia, etapa, total) VALUES (?1, ?2, 1)
+             ON CONFLICT(dia, etapa) DO UPDATE SET total = total + 1`
+        ).bind(diaEmSP(quando), etapa).run();
+
+    } catch (erro) {
+        /* sem a tabela, o funil simplesmente não enche */
+    }
+
+}
+
+async function tratarFunil(request, env, db) {
+
+    const corpo = await request.json().catch(() => null);
+
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    const etapa = texto(corpo.etapa, 20);
+
+    if (!ETAPAS_DO_FUNIL.includes(etapa)) {
+        return json({ erro: "Etapa desconhecida." }, 400);
+    }
+
+    /* O pedido se conta sozinho, no tratarNovoPedido. Aceitar aqui
+       também deixaria o site mandar "pedido" sem pedido nenhum, e o
+       funil terminaria com mais vendas do que a loja fez. */
+    if (etapa === "pedido") {
+        return json({ erro: "Esta etapa é contada no pedido." }, 400);
+    }
+
+    await registrarEtapa(db, etapa);
+
+    return json({ ok: true });
+
+}
+
 async function tratarNovoPedido(request, env, db) {
 
     const corpo = await request.json().catch(() => null);
@@ -1284,6 +1350,11 @@ async function tratarNovoPedido(request, env, db) {
 
     // batch roda tudo numa transação: ou o pedido inteiro entra, ou nada
     await db.batch(comandos);
+
+    /* A última etapa do funil, contada aqui e não pelo site: é o único
+       lugar que sabe que o pedido entrou mesmo. Fora da transação de
+       propósito — um erro na contagem não pode desfazer a venda. */
+    await registrarEtapa(db, "pedido", criadoEm);
 
     return json({
         sucesso: true, ref, itens: linhas.length,
@@ -1981,6 +2052,27 @@ async function tratarResumo(request, env, loja, db) {
 
     ]);
 
+    /* O funil vem numa consulta à parte, e não no batch acima, por um
+       motivo prático: a tabela é nova, e farmácia que ainda não colou o
+       schema-funil.sql derrubaria o relatório INTEIRO se ela entrasse
+       no batch — um batch falha por inteiro. Aqui, sem a tabela, o
+       funil vem vazio e o resto da tela continua de pé. */
+    let funil = {};
+
+    try {
+
+        const linhas = await db.prepare(
+            `SELECT etapa, COALESCE(SUM(total), 0) AS total
+               FROM funil WHERE dia >= ?1
+              GROUP BY etapa`
+        ).bind(diaEmSP(desde)).all();
+
+        (linhas.results || []).forEach((l) => { funil[l.etapa] = l.total; });
+
+    } catch (erro) {
+        funil = {};
+    }
+
     return json({
         dias,
         hoje: hoje.results[0] || { pedidos: 0, faturamento: 0 },
@@ -1991,7 +2083,8 @@ async function tratarResumo(request, env, loja, db) {
         recentes: recentes.results || [],
         aguardandoReceita: (aguardando.results[0] || {}).n || 0,
         maisProcurados: maisProcurados.results || [],
-        naoEncontrados: naoEncontrados.results || []
+        naoEncontrados: naoEncontrados.results || [],
+        funil
     });
 
 }
@@ -3517,6 +3610,23 @@ export default {
                 const alvo = await lojaPublicaDaURL(request, env);
                 if (alvo.recusa) return alvo.recusa;
                 return await tratarCupomValidar(request, env, alvo.db);
+            }
+
+            /* O funil: uma linha por etapa, sem identificador nenhum.
+
+               Com o mesmo teto das buscas, que é folgado de propósito:
+               se um bairro inteiro sai pelo mesmo IP, perder contagem
+               de visita é melhor que barrar gente de verdade — e um
+               funil com buraco ainda mostra onde a conta cai. */
+            if (request.method === "POST" && rota === "/funil") {
+                const cheio = await barrarRotaPublica(
+                    env, request, "funil", LIMITE_BUSCAS_HORA,
+                    "Muitos acessos deste endereço em pouco tempo."
+                );
+                if (cheio) return cheio;
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarFunil(request, env, alvo.db);
             }
 
             // idem: quem grava é o site público

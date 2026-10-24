@@ -112,7 +112,7 @@ não por disciplina de quem escreve a consulta, mas porque a conexão é
 outra.
 
 1. Cloudflare → **D1** → *Create database* → nome: `farmatech-farma-centro`
-2. Abra o **Console** dele e rode **os três**, nesta ordem:
+2. Abra o **Console** dele e rode **os cinco**, nesta ordem:
 
    | arquivo | o que ele liga |
    |---|---|
@@ -120,15 +120,17 @@ outra.
    | `pedidos-proxy/schema-estoque-colar.sql` | a aba **Estoque**: ruptura, excesso e giro |
    | `pedidos-proxy/schema-reativacao-colar.sql` | a aba **Reativação** e a fila do agente de envio |
    | `pedidos-proxy/schema-cupons-colar.sql` | a aba **Cupons** e o campo de cupom no carrinho |
+   | `pedidos-proxy/schema-funil-colar.sql` | o gráfico **Do visitante ao pedido**, nos Relatórios |
 
    Use sempre os arquivos terminados em **`-colar`**: o console do D1
    não aceita comentário nenhum, nem `--` nem `/* */`, e os `-colar`
    são os mesmos schemas sem eles.
 
-   Os três últimos são fáceis de esquecer porque a loja funciona sem
+   Os quatro últimos são fáceis de esquecer porque a loja funciona sem
    eles — vende, recebe pedido, tudo normal. O que acontece é que as
-   abas Estoque, Reativação e Cupons abrem vazias, e vazio não se
-   distingue de "esta farmácia não tem ruptura". Rode os quatro de uma
+   abas Estoque, Reativação e Cupons abrem vazias, e o funil dos
+   Relatórios também; e vazio não se distingue de "esta farmácia não
+   tem ruptura" nem de "ninguém entrou no site". Rode os cinco de uma
    vez.
 
    **Não** rode o `schema-lojas` nem o `schema-acesso` aqui — o cadastro
