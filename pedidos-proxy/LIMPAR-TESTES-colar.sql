@@ -28,8 +28,10 @@ UPDATE cupons SET usos = (
     SELECT COUNT(*) FROM cupom_usos u WHERE u.codigo = cupons.codigo
 );
 DELETE FROM buscas WHERE termo IN ('teste', 'aaa', 'asd');
+DELETE FROM funil;
 SELECT (SELECT COUNT(*) FROM pedidos)       AS pedidos,
        (SELECT COUNT(*) FROM pedido_itens)  AS itens,
        (SELECT COUNT(*) FROM clientes)      AS clientes,
        (SELECT COUNT(*) FROM cupom_usos)    AS usos_de_cupom,
+       (SELECT COUNT(*) FROM funil)         AS linhas_do_funil,
        (SELECT COALESCE(SUM(total), 0) FROM pedidos) AS faturamento;

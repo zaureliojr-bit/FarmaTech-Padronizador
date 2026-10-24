@@ -26,6 +26,7 @@ const ler = (nome) => readFileSync(new URL("./" + nome, import.meta.url), "utf8"
 const db = new DatabaseSync(":memory:");
 db.exec(ler("schema-colar.sql"));
 db.exec(ler("schema-cupons-colar.sql"));
+db.exec(ler("schema-funil-colar.sql"));
 
 /* O banco como ele está hoje: três pedidos nossos, de teste, e o
    primeiro de um cliente de verdade. */
@@ -67,6 +68,14 @@ db.exec(`INSERT INTO cupom_usos (codigo, telefone, ref, desconto, quando)
          VALUES ('TESTE01', '11999990000', 'TESTE-1', 10, 0),
                 ('TESTE01', '11999990000', 'TESTE-2', 10, 0),
                 ('TESTE01', '11977770000', 'REAL-1', 10, 0)`);
+
+/* O funil contado enquanto a loja testava. São quase todas as visitas
+   que existem nos primeiros dias, e somadas ao movimento de verdade
+   fazem a taxa de pedido nascer afundada. */
+db.exec(`INSERT INTO funil (dia, etapa, total)
+         VALUES ('2026-10-20', 'visita', 4),
+                ('2026-10-20', 'busca', 1),
+                ('2026-10-20', 'carrinho', 1)`);
 
 db.exec(`INSERT INTO buscas (termo, criado_em, resultados)
          VALUES ('teste', ${AGORA - 86400000}, 0),
@@ -169,6 +178,25 @@ console.log("\n4. as buscas");
        vendas perdidas que ninguém mais vai ver. */
     conferir("e a busca de cliente de verdade ficou",
         termos.includes("dipirona"), JSON.stringify(termos));
+}
+
+/* ---- o funil ---------------------------------------------------------- */
+console.log("\n4.5. o funil contado nos testes");
+{
+    const linhas = db.prepare("SELECT COUNT(*) AS n FROM funil").get().n;
+
+    /* Aqui o corte é a tabela inteira, ao contrário do resto do
+       arquivo — e pode ser, porque a tabela guarda só contagem por dia:
+       sem pedido, sem cliente, sem nada que não dê para recomeçar
+       amanhã. O que se perde é meia dúzia de visitas do próprio dono. */
+    conferir("a contagem de teste saiu inteira", linhas === 0, String(linhas));
+
+    /* E o que NÃO pode acontecer: a tabela sumir junto. O worker grava
+       nela em todo pedido, e sem a tabela a etapa "pedido" cairia no
+       catch silencioso — o funil terminaria para sempre em zero. */
+    const existe = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='funil'").get();
+    conferir("mas a tabela continua existindo", !!existe, JSON.stringify(existe));
 }
 
 /* ---- rodar duas vezes ----------------------------------------------- */

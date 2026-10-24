@@ -142,6 +142,39 @@ DELETE FROM buscas WHERE termo IN ('teste', 'aaa', 'asd');
 
 
 -- -------------------------------------------------------------------
+-- 5.5. O FUNIL CONTADO ENQUANTO VOCÊ TESTAVA
+-- -------------------------------------------------------------------
+-- O funil ("Do visitante ao pedido", nos Relatórios) conta uma visita
+-- por aba. Cada vez que você abriu o site para conferir alguma coisa,
+-- contou uma — e nos primeiros dias essas são QUASE TODAS as visitas
+-- que existem.
+--
+-- O estrago é na leitura, não no dado: com 4 visitas suas e 1 busca,
+-- a tela diz "perdeu 75% de quem entrou no site", e isso não é a loja,
+-- é você. Pior quando o movimento de verdade começar e os dois ficarem
+-- somados: a taxa de pedido nasce afundada por visitas que nunca foram
+-- clientes, e ninguém lembra de descontar.
+--
+-- Aqui o corte é por tabela inteira, ao contrário do resto deste
+-- arquivo — e pode ser, porque não há nada a perder: a tabela guarda
+-- SÓ contagem por dia, sem pedido, sem cliente e sem nada que não dê
+-- para recomeçar amanhã.
+--
+-- Faça isto ANTES de divulgar o endereço, não depois.
+--
+-- Se a loja ainda não rodou o schema-funil.sql, esta linha dá erro de
+-- "no such table" e pode ser pulada — não há contagem para apagar.
+
+DELETE FROM funil;
+
+-- Se o site já recebeu gente de fora e você só quer tirar os dias de
+-- teste, troque a data: tudo ANTES dela sai, e o movimento de verdade
+-- fica.
+
+-- DELETE FROM funil WHERE dia < '2026-10-24';
+
+
+-- -------------------------------------------------------------------
 -- 6. CONFERIR  (não apaga nada)
 -- -------------------------------------------------------------------
 -- Os três números têm de bater com o que o painel mostra em "Relatórios"
@@ -151,6 +184,7 @@ SELECT (SELECT COUNT(*) FROM pedidos)       AS pedidos,
        (SELECT COUNT(*) FROM pedido_itens)  AS itens,
        (SELECT COUNT(*) FROM clientes)      AS clientes,
        (SELECT COUNT(*) FROM cupom_usos)    AS usos_de_cupom,
+       (SELECT COUNT(*) FROM funil)         AS linhas_do_funil,
        (SELECT COALESCE(SUM(total), 0) FROM pedidos) AS faturamento;
 
 
