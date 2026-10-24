@@ -31,10 +31,13 @@ DELETE FROM buscas WHERE termo IN ('teste', 'aaa', 'asd');
 DELETE FROM funil;
 DELETE FROM pedido_campanha
  WHERE NOT EXISTS (SELECT 1 FROM pedidos p WHERE p.ref = pedido_campanha.ref);
+SELECT codigo, tipo, leve, pague, quantidade, preco, inicio, fim, ativo
+  FROM promocao_quantidade ORDER BY criado_em DESC;
 SELECT (SELECT COUNT(*) FROM pedidos)       AS pedidos,
        (SELECT COUNT(*) FROM pedido_itens)  AS itens,
        (SELECT COUNT(*) FROM clientes)      AS clientes,
        (SELECT COUNT(*) FROM cupom_usos)    AS usos_de_cupom,
        (SELECT COUNT(*) FROM funil)         AS linhas_do_funil,
        (SELECT COUNT(*) FROM pedido_campanha) AS pedidos_de_campanha,
+       (SELECT COUNT(*) FROM promocao_quantidade) AS ofertas_de_quantidade,
        (SELECT COALESCE(SUM(total), 0) FROM pedidos) AS faturamento;

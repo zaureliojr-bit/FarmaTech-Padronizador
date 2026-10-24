@@ -3424,7 +3424,35 @@ async function tratarPromocoesPublicas(request, env, db) {
             AND (fim    IS NULL OR fim    = '' OR fim    >= ?1)`
     ).bind(hoje).all();
 
-    return json({ promocoes: results || [] });
+    /* As de quantidade vêm na MESMA resposta, e numa consulta à parte.
+
+       Na mesma resposta porque o site precisa das duas para montar o
+       preço de um produto, e duas idas ao worker fariam a vitrine
+       piscar o preço de tabela antes de corrigi-lo.
+
+       Em consulta à parte, fora do mesmo prepare, porque a tabela é
+       nova: farmácia que ainda não colou o schema-promo-quantidade
+       derrubaria TODAS as promoções se esta consulta pudesse falhar
+       junto. Aqui ela falha sozinha e o resto continua de pé. */
+    let quantidade = [];
+
+    try {
+
+        const extra = await db.prepare(
+            `SELECT codigo, tipo, leve, pague, quantidade, preco
+               FROM promocao_quantidade
+              WHERE ativo = 1
+                AND (inicio IS NULL OR inicio = '' OR inicio <= ?1)
+                AND (fim    IS NULL OR fim    = '' OR fim    >= ?1)`
+        ).bind(hoje).all();
+
+        quantidade = extra.results || [];
+
+    } catch (erro) {
+        quantidade = [];
+    }
+
+    return json({ promocoes: results || [], quantidade });
 
 }
 
@@ -3441,7 +3469,149 @@ async function tratarPromocoesDaLoja(request, env, loja, db) {
           GROUP BY lote ORDER BY MAX(criado_em) DESC`
     ).all();
 
-    return json({ promocoes: results || [], lotes: lotes.results || [] });
+    let quantidade = [];
+
+    try {
+        const extra = await db.prepare(
+            `SELECT codigo, tipo, leve, pague, quantidade, preco,
+                    inicio, fim, ativo, lote, criado_em
+               FROM promocao_quantidade ORDER BY criado_em DESC`
+        ).all();
+        quantidade = extra.results || [];
+    } catch (erro) {
+        quantidade = [];
+    }
+
+    return json({
+        promocoes: results || [],
+        lotes: lotes.results || [],
+        quantidade
+    });
+
+}
+
+/* As ofertas de quantidade. O painel manda uma por vez — são feitas a
+   dedo, produto a produto, ao contrário da promoção em massa por
+   percentual. */
+const TIPOS_DE_OFERTA = ["leve-pague", "pacote"];
+
+async function tratarSalvarPromoQuantidade(request, env, loja, db) {
+
+    const corpo = await request.json().catch(() => null);
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    /* Um código ou muitos: "leve 3 pague 2 em todas as fraldas Pompom"
+       é uma campanha de verdade, e marcar cinco produtos para repetir o
+       mesmo cadastro cinco vezes é o tipo de trabalho que faz a loja
+       desistir da promoção. */
+    const codigos = (Array.isArray(corpo.codigos) ? corpo.codigos : [corpo.codigo])
+        .map((c) => texto(c, 40)).filter(Boolean);
+
+    if (!codigos.length) return json({ erro: "Qual produto?" }, 400);
+    if (codigos.length > MAX_PROMOCOES_POR_LOTE) {
+        return json({ erro: `Máximo de ${MAX_PROMOCOES_POR_LOTE} produtos por vez.` }, 400);
+    }
+
+    const tipo = TIPOS_DE_OFERTA.includes(corpo.tipo) ? corpo.tipo : "";
+    if (!tipo) return json({ erro: "Tipo de oferta desconhecido." }, 400);
+
+    const leve = Math.max(0, Math.round(numero(corpo.leve)));
+    const pague = Math.max(0, Math.round(numero(corpo.pague)));
+    const quantidade = Math.max(0, Math.round(numero(corpo.quantidade)));
+    const preco = Number(numero(corpo.preco).toFixed(2));
+
+    /* As mesmas recusas do promoQtd.js, repetidas aqui de propósito. A
+       tela já avisa antes de salvar, mas a tela é do lado de fora: quem
+       guarda o que a loja prometeu ao cliente não pode depender de um
+       JavaScript que qualquer um reescreve. */
+    if (tipo === "leve-pague") {
+        if (leve < 2) return json({ erro: "A oferta precisa valer a partir de 2 unidades." }, 400);
+        if (pague < 1 || pague >= leve) {
+            return json({ erro: `Pagar ${pague} levando ${leve} não é promoção.` }, 400);
+        }
+    } else {
+        if (quantidade < 2) return json({ erro: "A oferta precisa valer a partir de 2 unidades." }, 400);
+        if (preco <= 0) return json({ erro: "Quanto custa o pacote?" }, 400);
+    }
+
+    const inicio = dataISO(corpo.inicio);
+    const fim = dataISO(corpo.fim);
+    if (inicio && fim && fim < inicio) {
+        return json({ erro: "A data final não pode ser antes da inicial." }, 400);
+    }
+
+    const ativo = corpo.ativo === false ? 0 : 1;
+    const lote = texto(corpo.lote, 60) || null;
+    const agora = Date.now();
+
+    try {
+
+        /* Uma transação só, como no lote de percentual: meio lote de
+           promoção aplicado é pior que nenhum, porque ninguém sabe
+           onde parou. */
+        await db.batch(codigos.map((codigo) =>
+            db.prepare(
+                `INSERT INTO promocao_quantidade
+                    (codigo, tipo, leve, pague, quantidade, preco,
+                     inicio, fim, ativo, lote, criado_em)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+                 ON CONFLICT(codigo) DO UPDATE SET
+                    tipo = excluded.tipo, leve = excluded.leve,
+                    pague = excluded.pague, quantidade = excluded.quantidade,
+                    preco = excluded.preco, inicio = excluded.inicio,
+                    fim = excluded.fim, ativo = excluded.ativo,
+                    lote = excluded.lote, criado_em = excluded.criado_em`
+            ).bind(
+                codigo, tipo, leve, pague, quantidade, preco,
+                inicio, fim, ativo, lote, agora
+            )
+        ));
+
+    } catch (erro) {
+        /* Aqui o silêncio seria o pior serviço possível: a loja
+           montaria o encarte achando que a oferta está no ar. */
+        return json({
+            erro: "Não consegui gravar a oferta. Se esta farmácia é nova, "
+                + "falta rodar o schema-promo-quantidade.sql no banco dela."
+        }, 500);
+    }
+
+    return json({ sucesso: true, gravados: codigos.length, lote });
+
+}
+
+async function tratarExcluirPromoQuantidade(request, env, loja, db) {
+
+    const corpo = await request.json().catch(() => ({}));
+
+    const lote = texto(corpo.lote, 60);
+
+    try {
+
+        if (lote) {
+            const r = await db.prepare(
+                `DELETE FROM promocao_quantidade WHERE lote = ?1`).bind(lote).run();
+            return json({ sucesso: true, apagados: r.meta?.changes ?? 0 });
+        }
+
+        const codigos = (Array.isArray(corpo.codigos) ? corpo.codigos : [corpo.codigo])
+            .map((c) => texto(c, 40)).filter(Boolean);
+
+        if (!codigos.length) return json({ erro: "Informe 'codigo', 'codigos' ou 'lote'." }, 400);
+        if (codigos.length > MAX_PROMOCOES_POR_LOTE) {
+            return json({ erro: `Máximo de ${MAX_PROMOCOES_POR_LOTE} por vez.` }, 400);
+        }
+
+        const marcadores = codigos.map((_, i) => `?${i + 1}`).join(",");
+        const r = await db.prepare(
+            `DELETE FROM promocao_quantidade WHERE codigo IN (${marcadores})`
+        ).bind(...codigos).run();
+
+        return json({ sucesso: true, apagados: r.meta?.changes ?? 0 });
+
+    } catch (erro) {
+        return json({ erro: "Não consegui apagar a oferta." }, 500);
+    }
 
 }
 
@@ -4033,6 +4203,9 @@ export default {
             if (request.method === "GET"  && rota === "/promocoes/todas")   return await tratarPromocoesDaLoja(request, env, loja, db);
             if (request.method === "POST" && rota === "/promocoes")         return await tratarSalvarPromocoes(request, env, loja, db);
             if (request.method === "POST" && rota === "/promocoes/excluir") return await tratarExcluirPromocoes(request, env, loja, db);
+
+            if (request.method === "POST" && rota === "/promocoes/quantidade")         return await tratarSalvarPromoQuantidade(request, env, loja, db);
+            if (request.method === "POST" && rota === "/promocoes/quantidade/excluir") return await tratarExcluirPromoQuantidade(request, env, loja, db);
 
             /* Catálogo: a senha do painel já foi conferida acima, então
                daqui para baixo quem chama provou quem é. Este worker

@@ -28,6 +28,7 @@ db.exec(ler("schema-colar.sql"));
 db.exec(ler("schema-cupons-colar.sql"));
 db.exec(ler("schema-funil-colar.sql"));
 db.exec(ler("schema-campanhas-colar.sql"));
+db.exec(ler("schema-promo-quantidade-colar.sql"));
 
 /* O banco como ele está hoje: três pedidos nossos, de teste, e o
    primeiro de um cliente de verdade. */

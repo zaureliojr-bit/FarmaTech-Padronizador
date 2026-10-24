@@ -201,6 +201,28 @@ DELETE FROM pedido_campanha
 
 
 -- -------------------------------------------------------------------
+-- 5.8. AS OFERTAS DE QUANTIDADE DE TESTE
+-- -------------------------------------------------------------------
+-- O "leve 3 pague 2" que você criou para ver como aparece na vitrine
+-- continua valendo para os clientes. Diferente do funil e das
+-- campanhas, esta não é estatística: é promessa de preço, e ela está
+-- no ar.
+--
+-- Por isso o corte é por CÓDIGO, como no resto do arquivo. Apagar a
+-- tabela inteira levaria junto as ofertas de verdade que a loja já
+-- tenha criado.
+--
+-- Veja quais existem antes de apagar:
+
+SELECT codigo, tipo, leve, pague, quantidade, preco, inicio, fim, ativo
+  FROM promocao_quantidade ORDER BY criado_em DESC;
+
+-- E tire só as de teste, trocando os códigos:
+
+-- DELETE FROM promocao_quantidade WHERE codigo IN ('TROQUE-1', 'TROQUE-2');
+
+
+-- -------------------------------------------------------------------
 -- 6. CONFERIR  (não apaga nada)
 -- -------------------------------------------------------------------
 -- Os três números têm de bater com o que o painel mostra em "Relatórios"
@@ -212,6 +234,7 @@ SELECT (SELECT COUNT(*) FROM pedidos)       AS pedidos,
        (SELECT COUNT(*) FROM cupom_usos)    AS usos_de_cupom,
        (SELECT COUNT(*) FROM funil)         AS linhas_do_funil,
        (SELECT COUNT(*) FROM pedido_campanha) AS pedidos_de_campanha,
+       (SELECT COUNT(*) FROM promocao_quantidade) AS ofertas_de_quantidade,
        (SELECT COALESCE(SUM(total), 0) FROM pedidos) AS faturamento;
 
 

@@ -70,6 +70,8 @@ no topo do `script.js` do site, em `API_PEDIDOS_D1`.
 | GET | `/campanhas?dias=30` | sim | as campanhas e o que cada uma vendeu |
 | POST | `/campanhas` | sim | cria ou atualiza uma campanha |
 | POST | `/campanhas/excluir` | sim | desliga uma campanha (sem apagar o histórico) |
+| POST | `/promocoes/quantidade` | sim | cria "leve 3 pague 2" ou "3 por R$ 10" |
+| POST | `/promocoes/quantidade/excluir` | sim | tira a oferta de um produto, de vários ou de um lote |
 
 Status aceitos: `novo`, `separando`, `receita-ok`, `entregue`, `cancelado`.
 
@@ -78,6 +80,25 @@ digitado na busca do site) e `naoEncontrados` (o que foi procurado e não
 devolveu produto nenhum). O segundo é o relatório que mostra o que falta
 no catálogo — vendas que não aconteceram e que o histórico de pedidos,
 por definição, nunca mostraria.
+
+## As duas promoções convivem
+
+A rota pública `/promocoes` devolve duas listas: `promocoes`, que troca
+o preço de uma unidade, e `quantidade`, com as ofertas de "leve 3 pague
+2" e "3 por R$ 10". Não são alternativas — "R$ 5,90 cada, ou 3 por R$
+15" é como a farmácia anuncia de verdade.
+
+A aritmética não mora aqui. Quem calcula é o `promoQtd.js`, no site,
+que roda sem navegador e tem teste: dois lugares calculando dinheiro é
+como um deles fica errado. O worker guarda o que a loja prometeu e
+recusa o que não faz sentido ("pague 4 levando 3"), porque a validação
+da tela é do lado de fora e qualquer um a reescreve.
+
+A consulta das ofertas vem fora do mesmo `prepare` das promoções
+comuns, de propósito: a tabela é nova, e farmácia que ainda não colou o
+`schema-promo-quantidade.sql` derrubaria TODAS as promoções se a
+consulta pudesse falhar junto — a loja voltaria ao preço de tabela sem
+ninguém ligar uma coisa à outra.
 
 ## O funil e as campanhas não identificam ninguém
 
