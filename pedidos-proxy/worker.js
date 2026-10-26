@@ -3368,6 +3368,184 @@ async function tratarConferirLoja(request, env, dono, slug) {
    Ligar só passa se a conferência passar: é a trava que impede uma
    filial meio cadastrada chegar ao cliente. Desligar passa sempre —
    tirar do ar nunca pode depender de nada estar certo. */
+/* ---------------------------------------------------------------------
+   Ler e editar uma filial já cadastrada
+   ---------------------------------------------------------------------
+
+   Faltava desde o começo, e a falta aparecia no pior momento: a farmácia
+   troca de WhatsApp, muda de endereço, o farmacêutico responsável sai —
+   e o único caminho era mexer no banco pelo console do D1, à mão, numa
+   tabela com trinta colunas.
+
+   O QUE NÃO SE EDITA, E POR QUÊ
+
+   O `slug` não. Ele não é um nome: é o endereço da loja
+   (mais-barato.drogalink.com.br), o prefixo das imagens no R2, o nome do
+   binding do banco e o carimbo que já está colado em anúncio pago. Trocá-lo
+   aqui renomearia a etiqueta e deixaria tudo o que ela identifica apontando
+   para o lugar antigo — em silêncio. Para mudar de endereço, cadastra-se
+   outra e desliga-se esta.
+
+   O `ativo` também não, mas por outro motivo: ligar uma filial tem uma
+   conferência própria (banco, schema, horário) e rota própria. Deixá-lo
+   passar por aqui daria um caminho para ligar loja sem conferir nada.
+
+   SÓ O QUE VEIO NO CORPO É ALTERADO
+
+   Campo ausente fica como está. É o que permite à tela mandar só o que
+   mudou, e o que impede um formulário que não conhece um campo novo de
+   apagá-lo sem querer. */
+
+/* As colunas que a edição alcança, e como cada uma é limpa. Lista
+   explícita de propósito: um `for in` sobre o corpo deixaria quem chama
+   escolher a coluna. */
+const CAMPOS_DA_FILIAL = {
+    nome:               (v) => texto(v, 120),
+    razaoSocial:        (v) => texto(v, 120),
+    cnpj:               (v) => texto(v, 20),
+    logradouro:         (v) => texto(v, 120),
+    numeroEndereco:     (v) => texto(v, 20),
+    complemento:        (v) => texto(v, 60),
+    bairro:             (v) => texto(v, 80),
+    cidade:             (v) => texto(v, 80),
+    uf:                 (v) => texto(v, 2).toUpperCase(),
+    cep:                (v) => texto(v, 12),
+    latitude:           (v) => (v === "" || v === null ? null : numero(v)),
+    longitude:          (v) => (v === "" || v === null ? null : numero(v)),
+    whatsapp:           (v) => soDigitos(v),
+    telefone:           (v) => texto(v, 24),
+    email:              (v) => texto(v, 120),
+    farmaceutico:       (v) => texto(v, 120),
+    crf:                (v) => texto(v, 20),
+    rotuloResponsavel:  (v) => texto(v, 60) || "Farmacêutico(a) responsável",
+    autorizacao:        (v) => texto(v, 120),
+    licencaMs:          (v) => texto(v, 60),
+    raioEntregaKm:      (v) => numero(v) || 8,
+    freteGratisAcima:   (v) => Math.max(0, numero(v)),
+    fuso:               (v) => texto(v, 40) || "America/Sao_Paulo"
+};
+
+/* O nome da coluna no banco, quando difere do nome do campo na tela. */
+const COLUNA_DA_FILIAL = {
+    razaoSocial: "razao_social",
+    numeroEndereco: "numero",
+    rotuloResponsavel: "rotulo_responsavel",
+    licencaMs: "licenca_ms",
+    raioEntregaKm: "raio_entrega_km",
+    freteGratisAcima: "frete_gratis_acima"
+};
+
+async function tratarLerFilial(request, env, dono, slug) {
+
+    if (!dono) return json({ erro: "Só o dono da plataforma edita filial." }, 403);
+
+    const loja = await env.DB.prepare(
+        `SELECT l.*, a.banco, a.prefixo_r2
+           FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
+          WHERE l.slug = ?1`
+    ).bind(slug).first();
+
+    if (!loja) return json({ erro: `Não achei a filial "${slug}".` }, 404);
+
+    const horario = await env.DB.prepare(
+        `SELECT dia, abre, fecha FROM lojas_horario WHERE slug = ?1 ORDER BY dia`
+    ).bind(slug).all();
+
+    return json({ loja, horario: horario.results || [] });
+
+}
+
+async function tratarEditarFilial(request, env, dono, slug) {
+
+    if (!dono) return json({ erro: "Só o dono da plataforma edita filial." }, 403);
+
+    const corpo = await request.json().catch(() => null);
+    if (!corpo) return json({ erro: "Corpo inválido." }, 400);
+
+    const existe = await env.DB.prepare(
+        `SELECT slug FROM lojas WHERE slug = ?1`).bind(slug).first();
+
+    if (!existe) return json({ erro: `Não achei a filial "${slug}".` }, 404);
+
+    /* Dito, e não ignorado em silêncio: quem tentou renomear precisa
+       saber que não aconteceu, senão sai achando que mudou. */
+    if (corpo.slug !== undefined && String(corpo.slug) !== slug) {
+        return json({
+            erro: "O apelido da filial não muda: ele é o endereço do site, "
+                + "o prefixo das imagens e o nome do banco. Para trocar, "
+                + "cadastre outra filial e desligue esta."
+        }, 400);
+    }
+
+    const colunas = [];
+    const valores = [];
+
+    for (const [campo, limpar] of Object.entries(CAMPOS_DA_FILIAL)) {
+        if (corpo[campo] === undefined) continue;
+        colunas.push(`${COLUNA_DA_FILIAL[campo] || campo} = ?${valores.length + 1}`);
+        valores.push(limpar(corpo[campo]));
+    }
+
+    const horarioNovo = Array.isArray(corpo.horario) ? corpo.horario : null;
+
+    if (!colunas.length && !horarioNovo) {
+        return json({ erro: "Nada para alterar." }, 400);
+    }
+
+    if (!texto(corpo.nome, 120) && corpo.nome !== undefined) {
+        return json({ erro: "A farmácia precisa de um nome." }, 400);
+    }
+
+    const comandos = [];
+
+    if (colunas.length) {
+        comandos.push(
+            env.DB.prepare(
+                `UPDATE lojas SET ${colunas.join(", ")} WHERE slug = ?${valores.length + 1}`
+            ).bind(...valores, slug)
+        );
+    }
+
+    /* O horário vem inteiro ou não vem. Alterar um dia só exigiria saber
+       quais vieram e quais não, e "segunda sumiu porque a tela não a
+       mandou" é o tipo de erro que aparece como "fechado" para o
+       cliente numa terça de manhã. */
+    if (horarioNovo) {
+
+        const horas = (v) => (/^\d{2}:\d{2}$/.test(String(v || "")) ? String(v) : "");
+        const faixas = [];
+
+        for (const faixa of horarioNovo) {
+            const dia = Math.round(numero(faixa?.dia));
+            const abre = horas(faixa?.abre);
+            const fecha = horas(faixa?.fecha);
+            if (dia < 0 || dia > 6) continue;
+            /* Dia sem horário é dia FECHADO, e isso é informação: some
+               da tabela, e o site lê a ausência como fechado. */
+            if (!abre || !fecha) continue;
+            faixas.push({ dia, abre, fecha });
+        }
+
+        comandos.push(env.DB.prepare(`DELETE FROM lojas_horario WHERE slug = ?1`).bind(slug));
+
+        for (const f of faixas) {
+            comandos.push(
+                env.DB.prepare(
+                    `INSERT INTO lojas_horario (slug, dia, abre, fecha) VALUES (?1,?2,?3,?4)`
+                ).bind(slug, f.dia, f.abre, f.fecha)
+            );
+        }
+
+    }
+
+    /* Numa transação só: o endereço e o horário mudando pela metade
+       deixariam a loja dizendo uma coisa na vitrine e outra no rodapé. */
+    await env.DB.batch(comandos);
+
+    return json({ sucesso: true, slug, alterados: colunas.length });
+
+}
+
 async function tratarAtivarLoja(request, env, dono, slug) {
 
     if (!dono) return json({ erro: "Só o dono da plataforma liga filial." }, 403);
@@ -4149,6 +4327,16 @@ export default {
             const cor = rota.match(/^\/lojas\/([a-z0-9-]+)\/cor$/);
             if (request.method === "POST" && cor) {
                 return await tratarCorDaLoja(request, env, loja, porta.dono, cor[1]);
+            }
+
+            /* Ler e editar uma filial. Só o dono — e a recusa é no
+               worker, não na tela. */
+            const umaLoja = rota.match(/^\/lojas\/([a-z0-9-]+)$/);
+            if (request.method === "GET" && umaLoja) {
+                return await tratarLerFilial(request, env, porta.dono, umaLoja[1]);
+            }
+            if (request.method === "POST" && umaLoja) {
+                return await tratarEditarFilial(request, env, porta.dono, umaLoja[1]);
             }
 
             const ativar = rota.match(/^\/lojas\/([a-z0-9-]+)\/ativo$/);

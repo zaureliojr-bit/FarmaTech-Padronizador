@@ -72,6 +72,8 @@ no topo do `script.js` do site, em `API_PEDIDOS_D1`.
 | POST | `/campanhas/excluir` | sim | desliga uma campanha (sem apagar o histórico) |
 | POST | `/promocoes/quantidade` | sim | cria "leve 3 pague 2" ou "3 por R$ 10" |
 | POST | `/promocoes/quantidade/excluir` | sim | tira a oferta de um produto, de vários ou de um lote |
+| GET | `/lojas/{slug}` | chave de **dono** | o cadastro completo de uma filial, para preencher o formulário |
+| POST | `/lojas/{slug}` | chave de **dono** | altera o cadastro e o horário dessa filial |
 
 Status aceitos: `novo`, `separando`, `receita-ok`, `entregue`, `cancelado`.
 
@@ -80,6 +82,31 @@ digitado na busca do site) e `naoEncontrados` (o que foi procurado e não
 devolveu produto nenhum). O segundo é o relatório que mostra o que falta
 no catálogo — vendas que não aconteceram e que o histórico de pedidos,
 por definição, nunca mostraria.
+
+## O apelido da filial não muda
+
+A edição de uma filial (`POST /lojas/{slug}`) alcança tudo menos duas
+coisas, e as duas recusas são deliberadas.
+
+O **slug** não muda. Ele não é um nome: é o endereço do site
+(`mais-barato.drogalink.com.br`), o prefixo das imagens no R2, o nome do
+binding do banco e o carimbo já colado em anúncio pago. Trocá-lo
+renomearia a etiqueta e deixaria tudo o que ela identifica apontando
+para o lugar antigo — e o pior é que a loja continuaria abrindo, vazia.
+Para mudar de endereço, cadastra-se outra filial e desliga-se esta. A
+tentativa é recusada com essa explicação, e não ignorada em silêncio.
+
+O **ativo** também não, por outro motivo: ligar uma filial tem
+conferência própria (banco, schema, horário) e rota própria. Deixá-lo
+passar pela edição daria um caminho para pôr no ar uma loja cujo banco
+nem existe — e o cliente entraria num site que aceita pedido e grava em
+lugar nenhum.
+
+Só o que vem no corpo é alterado; campo ausente fica como está. É o que
+permite à tela mandar só o que mudou, e o que impede um formulário que
+não conhece uma coluna nova de apagá-la sem querer. O horário é a
+exceção: vem inteiro ou não vem, porque "segunda sumiu porque a tela não
+a mandou" aparece como loja fechada numa terça de manhã.
 
 ## As duas promoções convivem
 
