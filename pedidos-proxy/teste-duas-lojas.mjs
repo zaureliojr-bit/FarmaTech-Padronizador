@@ -277,7 +277,11 @@ console.log("\n3. o isolamento, que é o motivo de tudo isto");
     conferir("as promoções, idem", codigos.includes("BBB222") && !codigos.includes("AAA111"), codigos.join(","));
 
     limparTentativas();
-    const banners = await (await pedir("/banners/todos", { loja: "farma-centro", senha: SENHA_B })).json();
+    /* Com a chave de DONO: banner é tela de quem administra a
+       plataforma (ver teste-permissoes). O que esta linha mede é outra
+       coisa — que, mesmo o dono entrando NA filial, o que ele vê é o
+       banco dela e não o da vizinha. */
+    const banners = await (await pedir("/banners/todos", { loja: "farma-centro", senha: SENHA_DONO })).json();
     const titulos = (banners.banners || []).map((b) => b.alt);
     conferir("os banners, idem",
         titulos.some((x) => /Centro/.test(x)) && !titulos.some((x) => /Mais Barato/.test(x)),
@@ -455,12 +459,12 @@ console.log("\n10. os arquivos de cada farmácia, no balde que é um só");
     const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13]);
 
     limparTentativas();
-    const envioA = await (await enviar(null, SENHA_WORKER, "image/png", png)).json();
+    const envioA = await (await enviar(null, SENHA_DONO, "image/png", png)).json();
     conferir("a loja de sempre grava sem prefixo, onde os arquivos dela já estão",
         /^banner\//.test(envioA.chave || ""), envioA.chave);
 
     limparTentativas();
-    const envioB = await (await enviar("farma-centro", SENHA_B, "image/png", png)).json();
+    const envioB = await (await enviar("farma-centro", SENHA_DONO, "image/png", png)).json();
     conferir("a farmácia nova grava debaixo do prefixo dela",
         /^farma-centro\/banner\//.test(envioB.chave || ""), envioB.chave);
 
@@ -493,7 +497,10 @@ console.log("\n10. os arquivos de cada farmácia, no balde que é um só");
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            "X-Painel-Key": SENHA_B,
+            /* Com a chave de dono: banner é tela dele. O que esta
+               prova mede é a parede do R2 — o apagar roda, e mesmo
+               assim não alcança o arquivo da outra loja. */
+            "X-Painel-Key": SENHA_DONO,
             "X-Painel-Loja": "farma-centro",
             "CF-Connecting-IP": "8.8.9.1"
         },

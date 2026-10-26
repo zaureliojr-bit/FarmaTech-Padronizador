@@ -89,7 +89,12 @@ const comTabela = montarLoja({ comCampanhas: true });
 const semTabela = montarLoja({ comCampanhas: false });
 
 let bancoAtivo = comTabela;
-const env = { get DB() { return fingirD1(bancoAtivo); }, PAINEL_KEY: SENHA };
+/* A MESMA senha vale como chave de dono aqui: cupom, banner, encarte
+   e campanha são telas de quem administra a plataforma (ver
+   SO_DO_DONO no worker, e o teste-permissoes, que é quem prova
+   essa separação). Este arquivo trata de outro assunto, e separar
+   as duas chaves aqui só acrescentaria ruído ao que ele mede. */
+const env = { get DB() { return fingirD1(bancoAtivo); }, PAINEL_KEY: SENHA, DONO_KEY: SENHA };
 
 function pedir(caminho, { metodo = "GET", corpo, semSenha = false } = {}) {
     const cabecalhos = { "CF-Connecting-IP": "1.2.3.4" };

@@ -392,6 +392,44 @@ async function lojaPublicaDaURL(request, env) {
 
    O que ela NÃO faz: aparecer em resposta, em log ou na tela. Ela é um
    secret do worker, como as chaves do catálogo. */
+/* =====================================================================
+   O QUE SÓ O DONO DA PLATAFORMA MEXE
+   =====================================================================
+
+   O painel é o mesmo para as duas pessoas que entram nele, e elas têm
+   trabalhos diferentes. A farmácia atende: vê pedido, muda status,
+   confere estoque, ajusta preço. Quem administra a plataforma monta a
+   vitrine e as campanhas — banner, encarte, cupom, anúncio pago.
+
+   A separação não é hierarquia, é escopo: são quatro telas que a loja
+   não usa no dia a dia e que, mexidas sem querer, aparecem na vitrine
+   para o cliente. Cupom é dinheiro saindo; banner e encarte são
+   propaganda publicada; campanha é verba.
+
+   ESTÁ AQUI, E NÃO ESCONDENDO A ABA
+
+   Aba escondida não é permissão: o endereço do worker é público e
+   qualquer um monta a mesma requisição com a senha da loja. A tela
+   esconde para não confundir; quem RECUSA é esta lista.
+
+   O que a loja continua fazendo sozinha, de propósito: pedidos,
+   relatórios, estoque, reativação, catálogo, promoção de preço e a
+   marca dela. Preço e marca são da farmácia — quem decide quanto vender
+   e com que cara é ela. */
+const SO_DO_DONO = [
+    /^\/cupons(\/|$)/,
+    /^\/banners(\/|$)/,
+    /^\/encartes(\/|$)/,
+    /^\/campanhas(\/|$)/,
+    /* O envio de arquivo serve banner e encarte: liberado para a loja,
+       ele seria a porta dos fundos das duas telas. */
+    /^\/arquivos$/
+];
+
+function soDonoPodeMexer(rota) {
+    return SO_DO_DONO.some((padrao) => padrao.test(rota));
+}
+
 function ehDono(request, env) {
 
     const digitada = request.headers.get("X-Painel-Key") || "";
@@ -4286,6 +4324,18 @@ export default {
 
             const loja = porta.loja;
             const db = porta.db;
+
+            /* A trava de escopo, num lugar só e antes de qualquer rota.
+
+               Espalhar um `if (!dono)` por dezesseis handlers é como um
+               deles fica de fora — e o que fica de fora não dá erro:
+               responde 200 e publica banner na vitrine da farmácia. */
+            if (!porta.dono && soDonoPodeMexer(rota)) {
+                return json({
+                    erro: "Esta parte do painel é de quem administra a plataforma. "
+                        + "Fale com quem instalou o site da sua farmácia."
+                }, 403);
+            }
 
             /* Cadastrar/trocar senha. Fica aqui em cima, logo depois do
                portão, porque é a única rota de painel que aceita o slug

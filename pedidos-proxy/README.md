@@ -83,6 +83,38 @@ devolveu produto nenhum). O segundo é o relatório que mostra o que falta
 no catálogo — vendas que não aconteceram e que o histórico de pedidos,
 por definição, nunca mostraria.
 
+## Quem mexe em quê
+
+O painel é o mesmo para duas pessoas com trabalhos diferentes. A
+farmácia atende: pedido, status, relatório, estoque, reativação,
+catálogo, preço e a marca dela. Quem administra a plataforma monta
+vitrine e campanha.
+
+Quatro telas são só do dono, e a recusa é no worker (`SO_DO_DONO`), não
+na tela:
+
+| tela | rotas |
+|---|---|
+| Cupons | `/cupons*` |
+| Banners | `/banners/todos`, `/banners*` de escrita |
+| Encarte | `/encartes*` |
+| Marketing | `/campanhas*` |
+| (o envio de arquivo que serve as duas primeiras) | `/arquivos` |
+
+A separação não é hierarquia, é escopo: são telas que a loja não usa no
+dia a dia e que, mexidas sem querer, aparecem na vitrine para o cliente.
+Cupom é dinheiro saindo do caixa, banner e encarte são propaganda
+publicada, campanha é verba de anúncio.
+
+**Esconder a aba não é permissão.** O endereço do worker é público e
+qualquer um monta a mesma requisição com a senha da loja. O painel
+esconde para não mostrar o que não vai funcionar; quem recusa é a lista.
+
+O que o CLIENTE lê continua aberto sem senha — `/banners`, `/encarte`,
+`/promocoes`, `/cupom/validar`. Uma trava que alcançasse a leitura
+pública apagaria a vitrine de todas as lojas de uma vez, e o sintoma
+("sumiram os banners") não apontaria para permissão nenhuma.
+
 ## O apelido da filial não muda
 
 A edição de uma filial (`POST /lojas/{slug}`) alcança tudo menos duas
