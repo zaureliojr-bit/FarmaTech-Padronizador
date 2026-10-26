@@ -112,6 +112,14 @@ não por disciplina de quem escreve a consulta, mas porque a conexão é
 outra.
 
 1. Cloudflare → **D1** → *Create database* → nome: `farmatech-farma-centro`
+
+   > **Minúsculo, e não é o nome do passo 4.** São dois nomes
+   > diferentes para a mesma coisa, e é aqui que se tropeça: o campo
+   > *Name* do D1 só aceita minúscula, número, hífen e sublinhado, e
+   > recusa `DB_FARMA_CENTRO` com um "Not valid" em vermelho.
+   > `DB_FARMA_CENTRO` é o nome da VARIÁVEL do binding, no passo 4, onde
+   > a maiúscula é obrigatória. Aqui vai `farmatech-` + o apelido da
+   > filial.
 2. Abra o **Console** dele e rode **os sete**, nesta ordem:
 
    | arquivo | o que ele liga |
