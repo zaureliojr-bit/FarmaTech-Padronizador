@@ -2810,7 +2810,21 @@ const CATALOGO_BASE =
 async function tratarLojaPublica(request, env) {
 
     const url = new URL(request.url);
-    const slug = texto(url.searchParams.get("slug"), 60);
+
+    /* Dois nomes para o mesmo parâmetro, e não é descuido.
+
+       Esta rota nasceu com `?slug=`. Todas as outras rotas públicas —
+       banners, encarte, promoções, pedidos — usam `?loja=`, que é o que
+       o `lojaPublicaDaURL` lê. O site passou a carimbar `?loja=` em
+       TODA chamada, e esta ficou de fora: continuava respondendo a
+       farmácia mais antiga, e com ela o WhatsApp dela.
+
+       O estrago era o "Pedido rápido" da filial abrindo a conversa da
+       farmácia principal — o cliente mandando o pedido para a loja
+       errada, achando que falava com a que estava na tela.
+
+       Aceitar os dois mantém de pé quem já chama com `?slug=`. */
+    const slug = texto(url.searchParams.get("loja") || url.searchParams.get("slug"), 60);
 
     let loja;
     let horario;
@@ -3581,6 +3595,104 @@ async function tratarEditarFilial(request, env, dono, slug) {
     await env.DB.batch(comandos);
 
     return json({ sucesso: true, slug, alterados: colunas.length });
+
+}
+
+/* Apagar uma filial.
+
+   Existe para um caso só, e é um caso real: a filial cadastrada com o
+   apelido errado, antes de entrar qualquer pedido. Sem isto ela fica na
+   lista para sempre, cinza, e quem administra convive com um cadastro
+   que não serve para nada e que mais cedo ou mais tarde alguém vai
+   clicar por engano.
+
+   TRÊS TRAVAS, E CADA UMA FECHA UM BURACO DIFERENTE
+
+   1. SÓ DESLIGADA. Apagar uma loja no ar é tirar o site dela do ar sem
+      aviso. Desligar primeiro obriga a olhar o que quebra antes de o
+      estrago ser definitivo — e, de quebra, impede apagar a farmácia
+      principal, que é a que atende quando ninguém mandou ?loja=.
+
+   2. SÓ SEM PEDIDO. O pedido é o registro de uma venda que aconteceu, e
+      o cadastro da loja é o que dá nome a ele. Apagar com histórico é
+      perder a resposta de "de quem era este pedido" — e essa não volta.
+
+   3. SÓ O DONO. Como tudo que mexe no cadastro de lojas.
+
+   O QUE ESTA ROTA NÃO APAGA
+
+   O banco D1 e os arquivos no R2. Os dois são da Cloudflare, e apagar
+   dado de verdade a partir de um clique no painel é poder demais para o
+   ganho: o banco vazio não atrapalha ninguém, e quem quiser removê-lo
+   faz isso no painel da Cloudflare, onde a confirmação é dela. */
+async function tratarApagarFilial(request, env, dono, slug) {
+
+    if (!dono) return json({ erro: "Só o dono da plataforma apaga filial." }, 403);
+
+    const loja = await env.DB.prepare(
+        `SELECT l.slug, l.nome, l.ativo, a.banco
+           FROM lojas l LEFT JOIN lojas_acesso a ON a.slug = l.slug
+          WHERE l.slug = ?1`
+    ).bind(slug).first();
+
+    if (!loja) return json({ erro: `Não achei a filial "${slug}".` }, 404);
+
+    if (loja.ativo) {
+        return json({
+            erro: "Desligue a filial antes de apagar. Assim dá para ver o que "
+                + "para de funcionar enquanto ainda é possível voltar atrás."
+        }, 409);
+    }
+
+    /* Quantos pedidos ela tem. Sem banco ligado não há como ter pedido
+       nenhum — é a filial que nunca chegou a existir de verdade, e é
+       justamente a que se quer apagar. */
+    const db = loja.banco ? env[loja.banco] : null;
+
+    if (db) {
+
+        let pedidos = null;
+
+        try {
+            const r = await db.prepare(`SELECT COUNT(*) AS n FROM pedidos`).first();
+            pedidos = (r && r.n) || 0;
+        } catch (erro) {
+            /* Sem a tabela, não há pedido. Banco ligado e sem schema é o
+               estado de quem parou no meio da instalação. */
+            pedidos = 0;
+        }
+
+        if (pedidos > 0) {
+            return json({
+                erro: `Esta filial tem ${pedidos} pedido(s) no histórico. `
+                    + "Apagar o cadastro deixaria essas vendas sem dono. "
+                    + "Ela pode ficar desligada o tempo que for preciso."
+            }, 409);
+        }
+
+    }
+
+    /* As quatro linhas que o cadastro espalha. Numa transação só: meio
+       cadastro apagado deixaria a filial fora da lista e a senha dela
+       ainda valendo. */
+    await env.DB.batch([
+        env.DB.prepare(`DELETE FROM lojas_horario WHERE slug = ?1`).bind(slug),
+        env.DB.prepare(`DELETE FROM lojas_visual  WHERE slug = ?1`).bind(slug),
+        env.DB.prepare(`DELETE FROM lojas_acesso  WHERE slug = ?1`).bind(slug),
+        env.DB.prepare(`DELETE FROM lojas         WHERE slug = ?1`).bind(slug)
+    ]);
+
+    return json({
+        sucesso: true,
+        slug,
+        nome: loja.nome,
+        /* O que sobrou para a pessoa limpar na mão, dito aqui para a
+           tela não ter de saber a regra. */
+        sobrou: {
+            bancoD1: loja.banco ? `o binding ${loja.banco} e o banco dele` : null,
+            arquivos: `os arquivos em ${slug}/ no R2`
+        }
+    });
 
 }
 
@@ -4387,6 +4499,9 @@ export default {
             }
             if (request.method === "POST" && umaLoja) {
                 return await tratarEditarFilial(request, env, porta.dono, umaLoja[1]);
+            }
+            if (request.method === "DELETE" && umaLoja) {
+                return await tratarApagarFilial(request, env, porta.dono, umaLoja[1]);
             }
 
             const ativar = rota.match(/^\/lojas\/([a-z0-9-]+)\/ativo$/);

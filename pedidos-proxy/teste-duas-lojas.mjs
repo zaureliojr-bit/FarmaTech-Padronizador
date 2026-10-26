@@ -1086,5 +1086,58 @@ console.log("\n20. cada farmácia publica no catálogo dela");
     conferir("e nada foi encaminhado", chamadas.length === 0, chamadas.join(","));
 }
 
+/* ---- 12. a vitrine pergunta "quem é esta loja?" --------------------- */
+console.log("\n12. a rota /loja responde pela farmácia certa");
+{
+    /* O defeito, visto no dia da primeira filial: esta rota nasceu com
+       `?slug=`, e todas as outras rotas públicas usam `?loja=`. O site
+       passou a carimbar `?loja=` em toda chamada e esta ficou de fora —
+       respondendo sempre a farmácia mais antiga, e com ela o WhatsApp
+       dela.
+
+       O estrago: o "Pedido rápido" da filial abria a conversa da
+       farmácia principal. O cliente mandava o pedido para a loja
+       errada, achando que falava com a que estava na tela. */
+
+    limparTentativas();
+    const comLoja = await (await worker.fetch(
+        new Request("https://exemplo.workers.dev/loja?loja=farma-centro", {
+            headers: { "CF-Connecting-IP": "9.9.9.1" }
+        }), env)).json();
+
+    conferir("com ?loja=, responde a filial",
+        comLoja.loja && comLoja.loja.slug === "farma-centro",
+        JSON.stringify(comLoja.loja && comLoja.loja.slug));
+
+    /* O WhatsApp é o campo que o "Pedido rápido" usa. */
+    conferir("e com o WhatsApp dela",
+        comLoja.loja && comLoja.loja.whatsapp !== undefined,
+        JSON.stringify(comLoja.loja && comLoja.loja.whatsapp));
+
+    limparTentativas();
+    const comSlug = await (await worker.fetch(
+        new Request("https://exemplo.workers.dev/loja?slug=farma-centro", {
+            headers: { "CF-Connecting-IP": "9.9.9.2" }
+        }), env)).json();
+
+    /* `?slug=` continua valendo: é o nome com que esta rota nasceu, e
+       quebrá-lo derrubaria quem ainda chamar assim. */
+    conferir("o nome antigo ?slug= continua funcionando",
+        comSlug.loja && comSlug.loja.slug === "farma-centro",
+        JSON.stringify(comSlug.loja && comSlug.loja.slug));
+
+    limparTentativas();
+    const sem = await (await worker.fetch(
+        new Request("https://exemplo.workers.dev/loja", {
+            headers: { "CF-Connecting-IP": "9.9.9.3" }
+        }), env)).json();
+
+    /* Sem parâmetro continua sendo a farmácia principal — é a
+       instalação de uma loja só, que é a maioria. */
+    conferir("sem parâmetro, a principal",
+        sem.loja && sem.loja.slug === "mais-barato",
+        JSON.stringify(sem.loja && sem.loja.slug));
+}
+
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
 process.exit(falhas === 0 ? 0 : 1);

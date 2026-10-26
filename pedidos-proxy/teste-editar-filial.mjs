@@ -91,11 +91,24 @@ const banco = new DatabaseSync(":memory:");
 banco.exec(ler("schema-lojas-colar.sql"));
 banco.exec(ler("schema-acesso-colar.sql"));
 banco.exec(ler("schema-colar.sql"));
+banco.exec(ler("schema-visual-colar.sql"));
+
+/* O banco PRÓPRIO da filial, ligado como DB_FARMA_CENTRO — é assim em
+   produção: cada farmácia tem o seu, e o cadastro de lojas fica no
+   principal. É nele que o bloco 9 põe um pedido, para provar que uma
+   filial com histórico não é apagada. */
+const bancoDaFilial = new DatabaseSync(":memory:");
+bancoDaFilial.exec(ler("schema-colar.sql"));
 
 /* Duas chaves diferentes, como em produção: a DONO_KEY abre qualquer
    farmácia e é a única que administra a plataforma; a PAINEL_KEY é a
    senha de balcão. É exatamente essa distinção que o bloco 6 prova. */
-const env = { DB: fingirD1(banco), PAINEL_KEY: SENHA_DA_LOJA, DONO_KEY: CHAVE_DONO };
+const env = {
+    DB: fingirD1(banco),
+    DB_FARMA_CENTRO: fingirD1(bancoDaFilial),
+    PAINEL_KEY: SENHA_DA_LOJA,
+    DONO_KEY: CHAVE_DONO
+};
 
 function pedir(caminho, { metodo = "GET", corpo, chave = CHAVE_DONO, loja } = {}) {
     const cabecalhos = { "CF-Connecting-IP": "1.2.3.4" };
@@ -334,6 +347,86 @@ console.log("\n7. apelido errado");
     const vazio = await pedir("/lojas/farma-centro", { metodo: "POST", corpo: {} });
     conferir("corpo sem nada para mudar dá recado", vazio.status === 400,
         String(vazio.status));
+}
+
+
+/* ---- 8. apagar a filial criada por engano ----------------------------- */
+console.log("\n8. apagar");
+{
+    /* O caso real: a filial cadastrada com o apelido errado, antes de
+       entrar qualquer pedido. Sem apagar, ela fica na lista para
+       sempre, cinza, e mais cedo ou mais tarde alguém clica nela. */
+
+    await pedir("/lojas", {
+        metodo: "POST",
+        corpo: { slug: "engano-01", nome: "Filial criada por engano" }
+    });
+
+    conferir("a filial de engano existe",
+        !!noBanco("engano-01"), JSON.stringify(noBanco("engano-01")));
+
+    const r = await pedir("/lojas/engano-01", { metodo: "DELETE" });
+    conferir("apagar responde ok", r.status === 200, String(r.status));
+
+    conferir("e ela some da tabela de lojas", !noBanco("engano-01"));
+
+    /* As quatro linhas que o cadastro espalha. Meio cadastro apagado
+       deixaria a filial fora da lista e a senha dela ainda valendo. */
+    const sobras = ["lojas_horario", "lojas_visual", "lojas_acesso"].map((t) => ({
+        t, n: banco.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE slug='engano-01'`).get().n
+    }));
+
+    conferir("sem sobras em horário, marca e acesso",
+        sobras.every((x) => x.n === 0), JSON.stringify(sobras));
+
+    /* E diz o que ficou para a pessoa limpar na mão: o banco D1 e os
+       arquivos no R2 são da Cloudflare. */
+    const corpo = await r.json();
+    conferir("avisa o que sobrou na Cloudflare",
+        corpo.sobrou && /engano-01/.test(corpo.sobrou.arquivos || ""),
+        JSON.stringify(corpo.sobrou));
+}
+
+/* ---- 9. o que apagar NÃO pode alcançar -------------------------------- */
+console.log("\n9. as travas");
+{
+    /* Ligada, não. Apagar uma loja no ar é tirar o site dela do ar sem
+       aviso; desligar primeiro obriga a olhar o que quebra enquanto
+       ainda dá para voltar. E é o que impede apagar a farmácia
+       principal, que é a que atende quando ninguém mandou ?loja=. */
+    const ligada = await pedir("/lojas/mais-barato", { metodo: "DELETE" });
+    conferir("filial ligada não é apagada", ligada.status === 409,
+        String(ligada.status));
+
+    const recado = (await ligada.json()).erro || "";
+    conferir("e o recado manda desligar antes", /desligue/i.test(recado), recado);
+
+    conferir("a principal continua lá", !!noBanco("mais-barato"));
+
+    /* Com pedido, não. O pedido é o registro de uma venda, e o cadastro
+       da loja é o que dá nome a ele. */
+    bancoDaFilial.exec(`
+        INSERT INTO pedidos (ref, criado_em, cliente, telefone, entrega,
+                             pagamento, subtotal, frete, total, status)
+        VALUES ('VENDA-1', ${Date.now()}, 'Maria', '11999990000', 'Entrega',
+                'Pix', 50, 0, 50, 'novo')
+    `);
+
+    const comVenda = await pedir("/lojas/farma-centro", { metodo: "DELETE" });
+    conferir("filial com pedido não é apagada", comVenda.status === 409,
+        String(comVenda.status));
+
+    const porQue = (await comVenda.json()).erro || "";
+    conferir("dizendo quantos pedidos tem", /1 pedido/.test(porQue), porQue);
+
+    conferir("e ela continua cadastrada", !!noBanco("farma-centro"));
+
+    /* Quem não é dono, não. */
+    const comSenhaDaLoja = await pedir("/lojas/farma-centro", {
+        metodo: "DELETE", chave: SENHA_DA_LOJA, loja: "mais-barato"
+    });
+    conferir("e a loja não apaga filial nenhuma", comSenhaDaLoja.status === 403,
+        String(comSenhaDaLoja.status));
 }
 
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
