@@ -3175,6 +3175,14 @@ async function tratarListarLojas(request, env, dono) {
        certo de quem usa a identidade da casa. */
     const { results } = await env.DB.prepare(
         `SELECT l.slug, l.nome, l.cidade, l.uf, l.ativo, l.criado_em,
+                /* Só o SIM ou NÃO, não os números. A lista de filiais
+                   precisa avisar quem está sem coordenada — sem ela o
+                   site não calcula taxa de entrega —, e para isso basta
+                   saber se existe. Mandar latitude e longitude de todas
+                   as farmácias numa listagem seria dado a mais numa
+                   tela que não os usa. */
+                CASE WHEN l.latitude IS NOT NULL AND l.longitude IS NOT NULL
+                     THEN 1 ELSE 0 END AS tem_coordenada,
                 CASE WHEN a.hash IS NOT NULL AND a.hash <> '' THEN 1 ELSE 0 END AS tem_senha,
                 a.trocada_em, a.banco, a.prefixo_r2,
                 v.logo, v.cor
