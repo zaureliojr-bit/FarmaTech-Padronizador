@@ -89,7 +89,8 @@ console.log("\n1. o schema-cupons.sql roda como o console do D1 manda");
        produção: a loja que existia antes da plataforma ficou onde
        estava, e o cadastro de lojas nasceu ao lado dela. */
     const sql = ler("schema-lojas-colar.sql") + "\n" + ler("schema-acesso-colar.sql")
-        + "\n" + ler("schema-colar.sql") + "\n" + ler("schema-cupons-colar.sql");
+        + "\n" + ler("schema-colar.sql") + "\n" + ler("schema-cupons-colar.sql")
+        + "\n" + ler("schema-cupom-raio-colar.sql");
     const achatado = sql.replace(/\r?\n/g, " ");
 
     try {
@@ -112,8 +113,12 @@ console.log("\n1. o schema-cupons.sql roda como o console do D1 manda");
    as duas chaves aqui só acrescentaria ruído ao que ele mede. */
 const env = { DB: fingirD1(banco), PAINEL_KEY: SENHA, DONO_KEY: SENHA };
 
-function pedir(caminho, { metodo = "GET", corpo, senha = SENHA, semSenha = false } = {}) {
-    const cabecalhos = { "CF-Connecting-IP": "1.2.3.4" };
+/* O `ip` existe por causa do porteiro: a rota pública de validação tem
+   limite por acesso, e um teste que valida vinte cupons seguidos do
+   mesmo IP acaba sendo barrado por ele — o que é o porteiro funcionando,
+   não um defeito. Cada seção que valida muito usa um IP próprio. */
+function pedir(caminho, { metodo = "GET", corpo, senha = SENHA, semSenha = false, ip = "1.2.3.4" } = {}) {
+    const cabecalhos = { "CF-Connecting-IP": ip };
     if (!semSenha) cabecalhos["X-Painel-Key"] = senha;
     if (corpo !== undefined) cabecalhos["Content-Type"] = "application/json";
     return worker.fetch(new Request("https://exemplo.workers.dev" + caminho, {
@@ -124,7 +129,7 @@ function pedir(caminho, { metodo = "GET", corpo, senha = SENHA, semSenha = false
 }
 
 const criar = (cupom) => pedir("/cupons", { metodo: "POST", corpo: cupom });
-const validar = (corpo) => pedir("/cupom/validar", { metodo: "POST", corpo, semSenha: true });
+const validar = (corpo, ip) => pedir("/cupom/validar", { metodo: "POST", corpo, semSenha: true, ip });
 
 const pedido = (corpo) => pedir("/pedidos", { metodo: "POST", semSenha: true, corpo: {
     cliente: "Maria", telefone: "11954664429", entrega: "Entrega",
@@ -324,6 +329,138 @@ console.log("\n10. a fila mostra o cupom");
     conferir("e o pedido sem cupom não inventa desconto",
         semCupom && !semCupom.cupom && semCupom.desconto === 0,
         JSON.stringify(semCupom && { cupom: semCupom.cupom, desconto: semCupom.desconto }));
+}
+
+/* ---- 11. "entrega grátis até 3 km" ----------------------------------- */
+console.log("\n11. o cupom que só vale perto");
+{
+    const DAQUI = "9.9.9.9";
+    await criar({ codigo: "PERTO3", tipo: "frete", minimo: 0, raioKm: 3 });
+
+    const dentro = await (await validar(
+        { codigo: "PERTO3", subtotal: 40, frete: 8, km: 2.4 }, DAQUI)).json();
+    conferir("a 2,4 km vale", dentro.valido === true && dentro.desconto === 8,
+        JSON.stringify(dentro));
+
+    /* O limite é inclusivo: quem mora EM 3 km num cupom "até 3 km" não
+       pode ouvir que está fora. */
+    const naBorda = await (await validar(
+        { codigo: "PERTO3", subtotal: 40, frete: 8, km: 3 }, DAQUI)).json();
+    conferir("em cima dos 3 km ainda vale", naBorda.valido === true,
+        JSON.stringify(naBorda));
+
+    const fora = await (await validar(
+        { codigo: "PERTO3", subtotal: 40, frete: 8, km: 7.2 }, DAQUI)).json();
+    conferir("a 7,2 km não vale", fora.valido === false, JSON.stringify(fora));
+
+    /* A recusa tem de dizer o número. "Cupom inválido" num cupom que o
+       cliente viu anunciado é o jeito de transformar promoção em
+       reclamação no WhatsApp. */
+    conferir("e a recusa diz até onde ele vale",
+        /3 km/.test(fora.motivo || ""), fora.motivo);
+
+    /* Sem endereço calculado, recusa em vez de liberar: liberar na
+       dúvida daria frete grátis a quem mora a 9 km e não preencheu o
+       CEP, que é o que o raio existe para evitar. */
+    const semKm = await (await validar(
+        { codigo: "PERTO3", subtotal: 40, frete: 8 }, DAQUI)).json();
+    conferir("sem endereço calculado, não libera", semKm.valido === false,
+        JSON.stringify(semKm));
+    conferir("e explica que falta calcular a entrega",
+        /calcule a taxa|calcule/i.test(semKm.motivo || ""), semKm.motivo);
+
+    /* Cupom sem raio continua ignorando a distância — é o caso de todos
+       os que já existiam antes desta tabela. */
+    const longe = await (await validar(
+        { codigo: "BEMVINDO10", subtotal: 80, frete: 8, km: 40 }, DAQUI)).json();
+    conferir("cupom sem raio não liga para a distância",
+        longe.valido === true, JSON.stringify(longe));
+
+    /* Editar o cupom e limpar o campo tem de TIRAR o limite. Sem o
+       DELETE no salvar, o raio antigo ficaria valendo invisível: a
+       loja veria "Frete grátis" na lista e o site recusaria a 5 km. */
+    await criar({ codigo: "PERTO3", tipo: "frete", minimo: 0, raioKm: 0 });
+    const solto = await (await validar(
+        { codigo: "PERTO3", subtotal: 40, frete: 8, km: 9 }, DAQUI)).json();
+    conferir("zerar o raio solta o cupom de novo", solto.valido === true,
+        JSON.stringify(solto));
+
+    /* E a lista do painel precisa trazer o raio: sem isso a loja cria
+       "até 3 km", vê só "Frete grátis" na tabela, e anuncia no
+       Instagram uma promoção diferente da que o site aplica. */
+    await criar({ codigo: "VIZINHO", tipo: "valor", valor: 10, minimo: 0, raioKm: 1.5 });
+
+    const lista = await (await pedir("/cupons")).json();
+    const comRaio = (lista.cupons || []).find((c) => c.codigo === "VIZINHO");
+    const semRaio = (lista.cupons || []).find((c) => c.codigo === "PERTO3");
+
+    conferir("a lista do painel traz o raio de quem tem",
+        comRaio && comRaio.raio_km === 1.5, JSON.stringify(comRaio));
+
+    conferir("e vem nulo em quem não tem",
+        semRaio && !semRaio.raio_km, JSON.stringify(semRaio));
+}
+
+/* ---- 12. a farmácia que ainda não colou o schema novo ---------------- */
+console.log("\n12. recurso novo não derruba quem ainda não o tem");
+{
+    /* O caso real do dia em que isto for publicado: o worker sobe para
+       todas as lojas de uma vez, e a tabela cupom_raio só existe depois
+       que alguém abre o console do D1 de cada farmácia e cola o SQL.
+       Entre uma coisa e outra passam dias.
+
+       Sem a rede do semARaio(), o LEFT JOIN estoura com "no such table"
+       e a validação de cupom devolve 500 — o cupom PARA DE FUNCIONAR no
+       carrinho de todas as lojas, por causa de um recurso que nenhuma
+       delas pediu ainda. Foi o teste-permissoes que pegou. */
+    const antiga = new DatabaseSync(":memory:");
+    const sql = (ler("schema-lojas-colar.sql") + "\n" + ler("schema-acesso-colar.sql")
+        + "\n" + ler("schema-colar.sql") + "\n" + ler("schema-cupons-colar.sql"))
+        .replace(/\r?\n/g, " ");
+    antiga.exec(sql);
+
+    const envAntigo = { DB: fingirD1(antiga), PAINEL_KEY: SENHA, DONO_KEY: SENHA };
+
+    const pedirAntigo = (caminho, corpo, semSenha = false) => worker.fetch(
+        new Request("https://exemplo.workers.dev" + caminho, {
+            method: "POST",
+            headers: {
+                "CF-Connecting-IP": "7.7.7.7",
+                "Content-Type": "application/json",
+                ...(semSenha ? {} : { "X-Painel-Key": SENHA })
+            },
+            body: JSON.stringify(corpo)
+        }), envAntigo);
+
+    await pedirAntigo("/cupons", { codigo: "ANTIGO", tipo: "valor", valor: 5, minimo: 0 });
+
+    const r = await (await pedirAntigo("/cupom/validar",
+        { codigo: "ANTIGO", subtotal: 50, frete: 8 }, true)).json();
+    conferir("o cupom continua valendo sem a tabela nova",
+        r.valido === true && r.desconto === 5, JSON.stringify(r));
+
+    const lista = await (await worker.fetch(
+        new Request("https://exemplo.workers.dev/cupons", {
+            headers: { "CF-Connecting-IP": "7.7.7.7", "X-Painel-Key": SENHA }
+        }), envAntigo)).json();
+    conferir("e a lista do painel abre igual",
+        Array.isArray(lista.cupons) && lista.cupons.some((c) => c.codigo === "ANTIGO"),
+        JSON.stringify(lista).slice(0, 160));
+
+    /* Gravar é o caso em que a rede responde diferente: dizer "ok" a um
+       raio que não tem onde morar criaria um cupom que a tela mostra
+       como "até 3 km" e o site trata como sem limite nenhum. */
+    const comRaio = await pedirAntigo("/cupons",
+        { codigo: "TENTATIVA", tipo: "frete", minimo: 0, raioKm: 3 });
+    const resposta = await comRaio.json();
+    conferir("mas criar cupom COM raio é recusado, com instrução",
+        comRaio.status === 409 && /schema-cupom-raio/.test(resposta.erro || ""),
+        comRaio.status + " " + JSON.stringify(resposta));
+
+    const semRaio = await pedirAntigo("/cupons",
+        { codigo: "NORMAL", tipo: "frete", minimo: 0, raioKm: 0 });
+    conferir("e criar cupom SEM raio continua funcionando",
+        semRaio.status === 200, String(semRaio.status));
 }
 
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);

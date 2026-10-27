@@ -131,17 +131,19 @@ outra.
    | `pedidos-proxy/schema-funil-colar.sql` | o gráfico **Do visitante ao pedido**, nos Relatórios |
    | `pedidos-proxy/schema-campanhas-colar.sql` | a aba **Marketing**: o que anunciar e o que cada campanha vendeu |
    | `pedidos-proxy/schema-promo-quantidade-colar.sql` | as ofertas "leve 3 pague 2" e "3 por R$ 10" na aba Promoções |
+   | `pedidos-proxy/schema-cupom-raio-colar.sql` | o campo **"Só até X km"** do cupom — "entrega grátis até 3 km" |
 
    Use sempre os arquivos terminados em **`-colar`**: o console do D1
    não aceita comentário nenhum, nem `--` nem `/* */`, e os `-colar`
    são os mesmos schemas sem eles.
 
-   Os seis últimos são fáceis de esquecer porque a loja funciona sem
+   Os sete últimos são fáceis de esquecer porque a loja funciona sem
    eles — vende, recebe pedido, tudo normal. O que acontece é que as
    abas Estoque, Reativação, Cupons e Marketing abrem vazias, o funil
-   dos Relatórios também, e a oferta de quantidade não salva; e vazio
-   não se distingue de "esta farmácia não tem ruptura" nem de "ninguém
-   entrou no site". Rode os sete de uma vez.
+   dos Relatórios também, a oferta de quantidade não salva e o cupom com
+   raio é recusado com instrução; e vazio não se distingue de "esta
+   farmácia não tem ruptura" nem de "ninguém entrou no site". Rode os
+   sete de uma vez.
 
    **Não** rode o `schema-lojas` nem o `schema-acesso` aqui — o cadastro
    de lojas é um só, e fica no banco principal.

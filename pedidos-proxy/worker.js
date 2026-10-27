@@ -937,17 +937,57 @@ function descontoDoCupom(cupom, subtotal, frete) {
    o cliente tentar de novo, digitar de novo e desistir. "Este cupom vale
    em pedidos a partir de R$ 50" faz ele pôr mais um item no carrinho —
    que é o que a promoção queria. */
-async function avaliarCupom(db, codigoBruto, { subtotal, frete, telefone }) {
+/* Roda a consulta com cupom_raio e, se a tabela não existir naquela
+   farmácia, roda a de antes.
+
+   Recurso novo não pode derrubar o que já funcionava. O schema é colado
+   à mão, no console do D1 de cada loja, e entre o deploy do worker e a
+   colagem passam dias — às vezes a loja nem vai querer o recurso. Nesse
+   intervalo o cupom tem de continuar valendo exatamente como valia.
+
+   Só a falta da tabela cai na rede. Qualquer outro erro sobe: um banco
+   corrompido ou uma consulta errada têm de aparecer, não virar silêncio. */
+async function semARaio(comRaio, sem) {
+    try {
+        return await comRaio();
+    } catch (erro) {
+        if (!/no such table:?\s*(main\.)?cupom_raio/i.test(String(erro && erro.message))) throw erro;
+        return await sem();
+    }
+}
+
+async function avaliarCupom(db, codigoBruto, { subtotal, frete, telefone, km }) {
 
     const codigo = limparCupom(codigoBruto);
 
     if (!codigo) return { valido: false, motivo: "Digite o código do cupom." };
 
-    const cupom = await db.prepare(
-        `SELECT codigo, tipo, valor, minimo, teto, inicio, fim,
-                limite_total, limite_pessoa, usos, ativo, descricao
-           FROM cupons WHERE codigo = ?1`
-    ).bind(codigo).first();
+    /* LEFT JOIN, e não JOIN: cupom sem linha em cupom_raio é cupom sem
+       limite de distância, que é o caso de todos os que já existiam
+       antes desta tabela. O raio vem nulo e a checagem passa batida.
+
+       E `semARaio` existe porque a tabela é NOVA: toda farmácia que já
+       está no ar tem cupons funcionando e não tem cupom_raio até
+       alguém colar o schema no console dela. Sem esta rede, a consulta
+       estoura com "no such table" e a rota devolve 500 — ou seja, o
+       cupom PARA DE FUNCIONAR no carrinho de todas as lojas no instante
+       em que este worker sobe, por causa de um recurso que nenhuma
+       delas pediu ainda. Quem pegou foi o teste-permissoes. */
+    const cupom = await semARaio(
+        () => db.prepare(
+            `SELECT c.codigo, c.tipo, c.valor, c.minimo, c.teto, c.inicio, c.fim,
+                    c.limite_total, c.limite_pessoa, c.usos, c.ativo, c.descricao,
+                    r.raio_km
+               FROM cupons c
+               LEFT JOIN cupom_raio r ON r.codigo = c.codigo
+              WHERE c.codigo = ?1`
+        ).bind(codigo).first(),
+        () => db.prepare(
+            `SELECT codigo, tipo, valor, minimo, teto, inicio, fim,
+                    limite_total, limite_pessoa, usos, ativo, descricao
+               FROM cupons WHERE codigo = ?1`
+        ).bind(codigo).first()
+    );
 
     /* "Não existe" e "está desligado" dão a MESMA resposta, e isso é de
        propósito: respostas diferentes transformam o campo de cupom num
@@ -975,6 +1015,41 @@ async function avaliarCupom(db, codigoBruto, { subtotal, frete, telefone }) {
             valido: false,
             motivo: `Este cupom vale em pedidos a partir de ${dinheiroBR(cupom.minimo)}.`
         };
+    }
+
+    /* "Entrega grátis até 3 km."
+
+       O km vem do site, que já geocodificou o endereço para calcular a
+       taxa de entrega. Não é trava de segurança — quem abrir o console
+       manda o número que quiser —, e não precisa ser: o site não cobra
+       nada, e quem confirma a taxa é a pessoa do balcão olhando o
+       endereço. O raio existe para a promoção se explicar sozinha ao
+       cliente honesto.
+
+       SEM ENDEREÇO, O CUPOM É RECUSADO
+
+       Liberar na dúvida seria dar entrega grátis para quem mora a 9 km
+       e não calculou o frete — exatamente o que a loja quis evitar ao
+       pôr o raio. E a recusa é útil: ela pede o CEP, que a farmácia
+       precisa de qualquer jeito para entregar. */
+    if (cupom.raio_km > 0) {
+
+        const distancia = numero(km);
+
+        if (!(distancia > 0)) {
+            return {
+                valido: false,
+                motivo: `Este cupom vale até ${kmBR(cupom.raio_km)} da loja. Calcule a taxa de entrega para usá-lo.`
+            };
+        }
+
+        if (distancia > cupom.raio_km) {
+            return {
+                valido: false,
+                motivo: `Este cupom vale até ${kmBR(cupom.raio_km)} da loja, e seu endereço está a ${kmBR(distancia)}.`
+            };
+        }
+
     }
 
     /* O limite por pessoa é o que impede o uso mais óbvio: o cupom de
@@ -1006,6 +1081,7 @@ async function avaliarCupom(db, codigoBruto, { subtotal, frete, telefone }) {
         codigo,
         tipo: cupom.tipo,
         desconto,
+        raio_km: cupom.raio_km || 0,
         descricao: cupom.descricao || ""
     };
 
@@ -1013,6 +1089,16 @@ async function avaliarCupom(db, codigoBruto, { subtotal, frete, telefone }) {
 
 function dinheiroBR(v) {
     return "R$ " + numero(v).toFixed(2).replace(".", ",");
+}
+
+/* "3 km" e "1,5 km" — sem a casa decimal quando ela é zero.
+
+   A frase vai inteira para a tela do cliente ("Este cupom vale até 3 km
+   da loja"), e "3,0 km" num texto corrido lê como número de sistema. */
+function kmBR(v) {
+    const n = numero(v);
+    const texto = Number.isInteger(n) ? String(n) : n.toFixed(1).replace(".", ",");
+    return texto + " km";
 }
 
 /* A rota pública: o carrinho pergunta antes de o cliente fechar o
@@ -1027,7 +1113,8 @@ async function tratarCupomValidar(request, env, db) {
     const resultado = await avaliarCupom(db, corpo.codigo, {
         subtotal: corpo.subtotal,
         frete: corpo.frete,
-        telefone: corpo.telefone
+        telefone: corpo.telefone,
+        km: corpo.km
     });
 
     return json(resultado);
@@ -1038,16 +1125,32 @@ async function tratarCupomValidar(request, env, db) {
 
 async function tratarCuponsDaLoja(request, env, loja, db) {
 
-    const cupons = await db.prepare(
-        `SELECT c.codigo, c.tipo, c.valor, c.minimo, c.teto, c.inicio, c.fim,
-                c.limite_total, c.limite_pessoa, c.usos, c.ativo, c.descricao,
-                c.criado_em,
-                COALESCE((SELECT SUM(u.desconto) FROM cupom_usos u
-                           WHERE u.codigo = c.codigo), 0) AS descontado
-           FROM cupons c
-          ORDER BY c.ativo DESC, c.criado_em DESC
-          LIMIT 100`
-    ).all();
+    /* Mesma rede do avaliarCupom: a loja que ainda não colou o schema
+       vê a lista de cupons como sempre viu, sem a coluna do raio, em
+       vez de uma tela de erro. */
+    const cupons = await semARaio(
+        () => db.prepare(
+            `SELECT c.codigo, c.tipo, c.valor, c.minimo, c.teto, c.inicio, c.fim,
+                    c.limite_total, c.limite_pessoa, c.usos, c.ativo, c.descricao,
+                    c.criado_em, r.raio_km,
+                    COALESCE((SELECT SUM(u.desconto) FROM cupom_usos u
+                               WHERE u.codigo = c.codigo), 0) AS descontado
+               FROM cupons c
+               LEFT JOIN cupom_raio r ON r.codigo = c.codigo
+              ORDER BY c.ativo DESC, c.criado_em DESC
+              LIMIT 100`
+        ).all(),
+        () => db.prepare(
+            `SELECT c.codigo, c.tipo, c.valor, c.minimo, c.teto, c.inicio, c.fim,
+                    c.limite_total, c.limite_pessoa, c.usos, c.ativo, c.descricao,
+                    c.criado_em,
+                    COALESCE((SELECT SUM(u.desconto) FROM cupom_usos u
+                               WHERE u.codigo = c.codigo), 0) AS descontado
+               FROM cupons c
+              ORDER BY c.ativo DESC, c.criado_em DESC
+              LIMIT 100`
+        ).all()
+    );
 
     return json({ cupons: cupons.results || [] });
 
@@ -1124,6 +1227,49 @@ async function tratarSalvarCupom(request, env, loja, db) {
         texto(corpo.descricao, 120),
         Date.now()
     ).run();
+
+    /* O raio mora em tabela própria (ver schema-cupom-raio.sql), e é
+       por isso que ele é gravado num segundo comando em vez de entrar
+       no INSERT acima.
+
+       Vazio, zero ou negativo APAGA a linha, e isso é o que faz o campo
+       funcionar como o usuário espera: editar o cupom e limpar o campo
+       tem de tirar o limite, não deixar o antigo valendo em silêncio.
+       Sem este DELETE, o ON CONFLICT lá em cima atualizaria o cupom e a
+       restrição de distância ficaria para trás, invisível na tela e
+       ativa na validação. */
+    const raio = numero(corpo.raioKm);
+
+    /* Aqui a rede responde diferente das outras duas, e de propósito.
+
+       Ler sem a tabela é "esta loja não usa raio", e seguir em frente é
+       a resposta certa. GRAVAR sem a tabela é a loja pedindo um raio
+       que não tem onde morar — dizer "ok" criaria um cupom que a tela
+       mostra como "até 3 km" e o site trata como sem limite. Então o
+       salvamento recusa, e diz o que fazer.
+
+       Zerar o raio numa loja sem a tabela não é erro nenhum: não havia
+       nada para apagar. */
+    const guardarRaio = raio > 0
+        ? () => db.prepare(
+              `INSERT INTO cupom_raio (codigo, raio_km, criado_em)
+               VALUES (?1,?2,?3)
+               ON CONFLICT(codigo) DO UPDATE SET raio_km = excluded.raio_km`
+          ).bind(codigo, raio, Date.now()).run()
+        : () => db.prepare(`DELETE FROM cupom_raio WHERE codigo = ?1`).bind(codigo).run();
+
+    const faltaTabela = await semARaio(
+        async () => { await guardarRaio(); return false; },
+        async () => raio > 0
+    );
+
+    if (faltaTabela) {
+        return json({
+            erro: "Esta farmácia ainda não tem a tabela do raio de entrega. "
+                + "Rode o schema-cupom-raio.sql no banco dela e salve de novo. "
+                + `O cupom ${codigo} foi gravado sem o limite de distância.`
+        }, 409);
+    }
 
     return json({ ok: true, codigo });
 
