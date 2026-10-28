@@ -98,6 +98,76 @@ export async function salvarImagemManual(ean, url) {
 }
 
 /**
+ * A mesma gravação, carimbada como vinda da listagem da distribuidora.
+ *
+ * A origem não é enfeite: ela fica na coluna `origem` da tabela
+ * `imagens` e é o que responde, seis meses depois, "de onde saiu esta
+ * foto?". Uma leva inteira da DPCNET se acha - e se refaz - por essa
+ * coluna; uma imagem que alguém escolheu a mão, olhando a embalagem,
+ * não se mexe.
+ *
+ * É export próprio em vez de um parâmetro em salvarImagemManual porque
+ * quem chama é o painel da loja: são dois botões com dois significados,
+ * não uma função com um campo livre de texto.
+ */
+export async function salvarImagemDaDistribuidora(ean, url) {
+
+    return salvarImagemHospedada(ean, url, "dpcnet");
+
+}
+
+/* A listagem da distribuidora, do servidor, pronta para consulta por
+   EAN - para o painel da loja poder preencher as fotos que faltam sem
+   abrir o padronizador e sem gastar cota de busca de imagem.
+
+   A loja nova de Prudente entrou com 2.000 produtos sem foto. Isso não
+   é falha de casamento: é fila. E a foto de boa parte da perfumaria já
+   estava no servidor desde que alguém subiu a planilha da DPCNET - era
+   só ninguém ter ligado as duas pontas.
+
+   Fica no módulo, não na tela, porque a lista tem 2,6 MB: buscá-la uma
+   vez por sessão do painel é barato, uma vez por produto não seria.
+
+   A consulta é a MESMA do padronizador (consultarEanDistribuidor),
+   inclusive o jeito de tratar EAN de 12 dígitos. Se as duas divergirem,
+   o painel começa a achar imagem para produto que a importação depois
+   não acha, e a conta nunca fecha. */
+let listaDaDistribuidora;
+let listaJaBuscada = false;
+
+export async function imagensDaDistribuidora() {
+
+    if (!listaJaBuscada) {
+        listaDaDistribuidora = await buscarReferencia("distribuidor");
+        listaJaBuscada = true;
+    }
+
+    const indice = listaDaDistribuidora;
+
+    return {
+
+        total: indice ? indice.totalLinhas || 0 : 0,
+        importadoEm: indice ? indice.importadoEm || null : null,
+
+        /** O link da foto desse EAN na listagem, ou null. */
+        imagemDe(ean) {
+
+            const dados = consultarEanDistribuidor(indice, ean);
+            const url = typeof dados?.imagem === "string" ? dados.imagem.trim() : "";
+
+            /* Nem toda linha da planilha tem foto, e as que não têm vêm
+               com o texto da célula vazia ou com um "-". Mandar isso
+               para o banco de imagens seria gravar um link quebrado,
+               que depois ninguém sabe distinguir de foto de verdade. */
+            return /^https?:\/\//i.test(url) ? url : null;
+
+        }
+
+    };
+
+}
+
+/**
  * Apaga um produto do catálogo - usado pelo botão "Apagar" do painel
  * da loja (aba Catálogo).
  *
