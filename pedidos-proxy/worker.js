@@ -2507,22 +2507,35 @@ async function tratarResumo(request, env, loja, db) {
               WHERE tem_receita = 1 AND status = 'novo'`
         ),
 
-        // o que mais procuram, com quantas dessas vezes não acharam nada
+        /* O que mais procuram: continua ordenado por QUANTIDADE, porque
+           é isso que o título promete. O `ultima` entra só para a tela
+           poder mostrar quando foi — um termo com 113 buscas que parou
+           há três semanas conta uma história diferente de um com 113
+           buscas ontem. */
         db.prepare(
             `SELECT termo,
                     COUNT(*) AS buscas,
-                    SUM(CASE WHEN resultados = 0 THEN 1 ELSE 0 END) AS vazias
+                    SUM(CASE WHEN resultados = 0 THEN 1 ELSE 0 END) AS vazias,
+                    MAX(criado_em) AS ultima
                FROM buscas WHERE criado_em >= ?1
               GROUP BY termo ORDER BY buscas DESC, termo
               LIMIT 10`
         ).bind(desde),
 
-        // procuraram e o site não tinha: cada linha é uma venda perdida
+        /* Procuraram e o site não tinha: cada linha é uma venda perdida,
+           e aqui a ordem é por DATA, da mais recente para a mais antiga.
+
+           Era por quantidade, e isso punha no topo o que mais se repetiu
+           no período inteiro — um termo de 20/10 ficava acima de um de
+           28/10 por ter sido buscado duas vezes em vez de uma. Mas esta
+           lista não é um ranking: é uma fila de coisas para a loja
+           resolver, e o que chegou hoje é o que ainda dá para atender.
+           Quem procurou na semana passada já comprou em outro lugar. */
         db.prepare(
             `SELECT termo, COUNT(*) AS buscas, MAX(criado_em) AS ultima
                FROM buscas
               WHERE criado_em >= ?1 AND resultados = 0
-              GROUP BY termo ORDER BY buscas DESC, ultima DESC
+              GROUP BY termo ORDER BY ultima DESC, buscas DESC
               LIMIT 10`
         ).bind(desde)
 
