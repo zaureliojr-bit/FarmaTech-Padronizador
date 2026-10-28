@@ -8,7 +8,7 @@ import { importarListaDistribuidor, consultarEanDistribuidor } from "../services
 import { carregarIndiceDistribuidor, salvarIndiceDistribuidor } from "../services/distribuidorStorage";
 import { salvarCorrecao } from "../services/correcoesService";
 import { buscarFamiliasOverride, salvarFamiliaOverride } from "../services/familiasOverrideService";
-import { salvarReferencia } from "../services/referenciasService";
+import { salvarReferencia, referenciaDoServidor } from "../services/referenciasService";
 import { excluirProdutoDefinitivamente } from "../services/produtosExcluidosService";
 
 // Só estes três campos são "correção" compartilhável entre lojas -
@@ -58,9 +58,11 @@ export function useProdutos() {
 
         let ativo = true;
 
-        carregarIndiceCmed().then((indice) => {
-            if (ativo && indice) setIndiceCmed(indice);
-        });
+        carregarIndiceCmed()
+            .then((indice) => indice || referenciaDoServidor("cmed", salvarIndiceCmed))
+            .then((indice) => {
+                if (ativo && indice) setIndiceCmed(indice);
+            });
 
         return () => { ativo = false; };
 
@@ -118,9 +120,11 @@ export function useProdutos() {
 
         let ativo = true;
 
-        carregarIndiceDistribuidor().then((indice) => {
-            if (ativo && indice) setIndiceDistribuidor(indice);
-        });
+        carregarIndiceDistribuidor()
+            .then((indice) => indice || referenciaDoServidor("distribuidor", salvarIndiceDistribuidor))
+            .then((indice) => {
+                if (ativo && indice) setIndiceDistribuidor(indice);
+            });
 
         return () => { ativo = false; };
 
