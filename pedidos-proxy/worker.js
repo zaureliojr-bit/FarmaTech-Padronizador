@@ -2546,6 +2546,100 @@ async function tratarClientes(request, env, loja, db) {
 
 }
 
+/* O art. 18 da LGPD, com máquina atrás.
+
+   A política de privacidade promete: o cliente pode pedir a eliminação
+   dos dados dele, e a loja responde em até 15 dias. Até aqui isso era
+   uma frase — o painel não tinha como cumprir, e a loja teria de mexer
+   no banco à mão.
+
+   O QUE É APAGADO E O QUE É ANONIMIZADO, E POR QUÊ
+
+   Apagar o histórico de pedidos seria o errado, e não por conveniência
+   nossa: a venda de medicamento é registro que a farmácia é obrigada a
+   guardar — fiscal e sanitário —, e o próprio art. 16, II da LGPD
+   manda conservar o que a lei exige. Apagar a nota é problema maior
+   que o que se queria resolver.
+
+   Então o pedido FICA e o nome sai dele. O que resta é o que a
+   obrigação legal pede (o que foi vendido, quando, por quanto) sem o
+   que identifica a pessoa (nome, telefone, endereço).
+
+   O cadastro de cliente, esse some inteiro: ele existe só para a loja
+   chamar de volta, e é exatamente isso que a pessoa pediu para parar.
+
+   O BLOQUEIO DE REATIVAÇÃO FICA, E É DE PROPÓSITO
+
+   Parece contraditório guardar o telefone de quem pediu para ser
+   esquecido. Mas é o telefone que impede a loja de mandar mensagem
+   para ele de novo — e sem a linha de bloqueio, o próximo pedido
+   feito por essa mesma pessoa recriaria o cadastro e ela voltaria para
+   a fila de reativação. Guardar o mínimo para honrar o "não me
+   procure" é a leitura corrente do legítimo interesse; apagar tudo
+   seria apagar a própria recusa. */
+async function tratarApagarCliente(request, env, loja, db) {
+
+    const corpo = await request.json().catch(() => null);
+    const fone = soDigitos(corpo && corpo.telefone);
+
+    if (!fone) return json({ erro: "Informe o telefone do cliente." }, 400);
+
+    const cliente = await db.prepare(
+        `SELECT telefone, nome FROM clientes WHERE telefone = ?1`
+    ).bind(fone).first();
+
+    const SEM_NOME = "Removido a pedido do cliente";
+
+    /* Uma consulta por vez, e não um batch: cupons e reativação são
+       schemas OPCIONAIS, e a farmácia que não os rodou não pode ficar
+       sem conseguir atender um pedido de exclusão por causa deles. No
+       batch, a primeira tabela ausente derrubaria o conjunto inteiro —
+       inclusive o apagamento do cadastro, que é o que importa. */
+    const correr = async (sql, ...valores) => {
+        try {
+            const r = await db.prepare(sql).bind(...valores).run();
+            return r.meta?.changes ?? 0;
+        } catch (erro) {
+            /* Só a tabela ausente é tolerada. Qualquer outro erro sobe:
+               uma exclusão que falha em silêncio é pior que uma que
+               falha com aviso, porque a loja responde ao cliente que
+               apagou. */
+            if (/no such table/i.test(String(erro && erro.message))) return 0;
+            throw erro;
+        }
+    };
+
+    await correr(`DELETE FROM clientes WHERE telefone = ?1`, fone);
+
+    /* O pedido fica; o que identifica sai. */
+    const pedidosAnonimizados = await correr(
+        `UPDATE pedidos SET cliente = ?2, telefone = '', endereco = ''
+          WHERE telefone = ?1`, fone, SEM_NOME);
+
+    /* O uso do cupom continua contando para o relatório — quanto a
+       promoção custou —, sem dizer de quem foi. */
+    await correr(`UPDATE cupom_usos SET telefone = '' WHERE telefone = ?1`, fone);
+
+    await correr(`DELETE FROM reativacao_fila WHERE telefone = ?1`, fone);
+
+    /* E entra no bloqueio, para não voltar à fila no próximo pedido.
+       "pediu" é o motivo que a tela de bloqueados mostra. */
+    await correr(
+        `INSERT INTO reativacao_bloqueio (telefone, motivo, criado_em)
+         VALUES (?1,'pediu',?2)
+         ON CONFLICT(telefone) DO UPDATE SET motivo = 'pediu'`,
+        fone, Date.now());
+
+    return json({
+        sucesso: true,
+        telefone: fone,
+        nome: cliente ? cliente.nome : "",
+        cadastroApagado: !!cliente,
+        pedidosAnonimizados
+    });
+
+}
+
 async function tratarPedido(request, env, loja, db, ref) {
 
     const [pedido, itens] = await db.batch([
@@ -4849,6 +4943,14 @@ export default {
             if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env, loja, db);
             if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env, loja, db);
             if (request.method === "GET" && rota === "/clientes") return await tratarClientes(request, env, loja, db);
+
+            /* O art. 18 da LGPD. Não é rota de dono: o pedido de
+               exclusão chega à FARMÁCIA, e é ela que tem 15 dias para
+               responder. Trancá-la atrás da chave da plataforma faria
+               a loja depender de nós para cumprir a própria lei. */
+            if (request.method === "POST" && rota === "/clientes/apagar") {
+                return await tratarApagarCliente(request, env, loja, db);
+            }
             if (request.method === "POST" && rota === "/status")  return await tratarStatus(request, env, loja, db);
 
             if (request.method === "GET"  && rota === "/banners/todos")   return await tratarBannersDaLoja(request, env, loja, db);

@@ -146,6 +146,12 @@ outra.
    não se distingue de "esta farmácia não tem ruptura" nem de "ninguém
    entrou no site". Rode os oito de uma vez.
 
+   O `schema-reativacao` deixou de ser opcional para quem leva a LGPD a
+   sério: é nele que mora a lista de bloqueio, e o botão **Apagar
+   dados** da aba Relatórios põe o telefone do cliente ali para ele não
+   voltar a receber mensagem. Sem a tabela, o pedido de exclusão é
+   atendido mesmo assim — só não fica o bloqueio.
+
    **Não** rode o `schema-lojas` nem o `schema-acesso` aqui — o cadastro
    de lojas é um só, e fica no banco principal.
 

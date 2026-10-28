@@ -90,7 +90,13 @@ console.log("\n1. o schema-cupons.sql roda como o console do D1 manda");
        estava, e o cadastro de lojas nasceu ao lado dela. */
     const sql = ler("schema-lojas-colar.sql") + "\n" + ler("schema-acesso-colar.sql")
         + "\n" + ler("schema-colar.sql") + "\n" + ler("schema-cupons-colar.sql")
-        + "\n" + ler("schema-cupom-raio-colar.sql");
+        + "\n" + ler("schema-cupom-raio-colar.sql")
+        /* A reativação entra porque a seção 13 passa por ela: apagar os
+           dados de um cliente põe o telefone no bloqueio, para ele não
+           voltar à fila no próximo pedido. Uma farmácia de verdade tem
+           todos os schemas; o teste de exclusão precisa do mesmo
+           terreno. */
+        + "\n" + ler("schema-reativacao-colar.sql");
     const achatado = sql.replace(/\r?\n/g, " ");
 
     try {
@@ -461,6 +467,75 @@ console.log("\n12. recurso novo não derruba quem ainda não o tem");
         { codigo: "NORMAL", tipo: "frete", minimo: 0, raioKm: 0 });
     conferir("e criar cupom SEM raio continua funcionando",
         semRaio.status === 200, String(semRaio.status));
+}
+
+/* ---- 13. o art. 18 da LGPD, com máquina atrás ------------------------ */
+console.log("\n13. apagar os dados de um cliente a pedido");
+{
+    /* A política promete ao cliente que ele pode pedir a eliminação dos
+       dados e a loja responde em 15 dias. Era uma frase: o painel não
+       tinha como cumprir.
+
+       O que este teste guarda é a parte difícil — o que NÃO é apagado.
+       Venda de medicamento é registro que a farmácia é obrigada a
+       conservar, fiscal e sanitário, e o próprio art. 16, II da LGPD
+       manda guardar o que a lei exige. Apagar a nota seria criar um
+       problema maior que o que se queria resolver. */
+    await pedido({ ref: "LGPD-1", subtotal: 40, telefone: "11954664429", cliente: "Joana" });
+
+    const antes = await (await pedir("/clientes")).json();
+    conferir("o cliente está no cadastro",
+        (antes.clientes || []).some((c) => c.telefone === "11954664429"),
+        JSON.stringify(antes.clientes));
+
+    const r = await pedir("/clientes/apagar", {
+        metodo: "POST", corpo: { telefone: "(11) 95466-4429" }
+    });
+    const saida = await r.json();
+
+    /* O telefone chega como a atendente copiou, com máscara. */
+    conferir("aceita o telefone com máscara", r.status === 200 && saida.sucesso === true,
+        JSON.stringify(saida));
+
+    conferir("e diz quantos pedidos foram anonimizados",
+        saida.pedidosAnonimizados >= 1, JSON.stringify(saida));
+
+    const depois = await (await pedir("/clientes")).json();
+    conferir("o cadastro sumiu",
+        !(depois.clientes || []).some((c) => c.telefone === "11954664429"),
+        JSON.stringify(depois.clientes));
+
+    /* O PEDIDO FICA. Esta é a asserção que separa "apagar os dados" de
+       "apagar o histórico da farmácia". */
+    const fila = await (await pedir("/fila")).json();
+    const continua = (fila.pedidos || []).find((p) => p.ref === "LGPD-1");
+
+    conferir("mas o pedido continua na fila", !!continua,
+        JSON.stringify((fila.pedidos || []).map((p) => p.ref)));
+
+    conferir("sem o nome de quem comprou",
+        continua && /removido a pedido/i.test(continua.cliente || ""),
+        JSON.stringify(continua && continua.cliente));
+
+    conferir("e sem o telefone",
+        continua && !continua.telefone, JSON.stringify(continua && continua.telefone));
+
+    /* O bloqueio é o que impede a pessoa de voltar à fila de
+       reativação no próximo pedido — apagar tudo apagaria a própria
+       recusa. */
+    const bloqueados = await (await pedir("/reativacao/bloqueados")).json();
+    conferir("o telefone entra no bloqueio da reativação",
+        (bloqueados.bloqueados || []).some((b) => b.telefone === "11954664429"),
+        JSON.stringify(bloqueados));
+
+    const semNada = await pedir("/clientes/apagar", { metodo: "POST", corpo: {} });
+    conferir("sem telefone, recusa", semNada.status === 400, String(semNada.status));
+
+    const semSenha = await pedir("/clientes/apagar", {
+        metodo: "POST", corpo: { telefone: "11954664429" }, semSenha: true
+    });
+    conferir("e sem senha, não apaga nada", semSenha.status === 401,
+        String(semSenha.status));
 }
 
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
