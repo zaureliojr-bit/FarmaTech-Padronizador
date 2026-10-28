@@ -42,7 +42,7 @@ const GRUPOS = {
     operacao: ["schema.sql", "schema-estoque.sql", "schema-reativacao.sql",
                "schema-cupons.sql", "schema-funil.sql",
                "schema-campanhas.sql", "schema-promo-quantidade.sql",
-               "schema-cupom-raio.sql"],
+               "schema-cupom-raio.sql", "schema-banner-entrada.sql"],
     /* Não é schema: é a limpeza dos pedidos de teste, que se roda uma
        vez por loja, no dia em que cai o primeiro pedido de verdade.
        Entra aqui pelo mesmo motivo que os outros — o console do D1 não

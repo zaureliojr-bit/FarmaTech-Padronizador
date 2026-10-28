@@ -956,6 +956,22 @@ async function semARaio(comRaio, sem) {
     }
 }
 
+/* A mesma rede do semARaio(), para a banner_entrada.
+
+   Duas funções quase iguais em vez de uma genérica de propósito: cada
+   uma nomeia a tabela que tolera faltar. Uma versão genérica
+   engoliria, calada, o "no such table" de QUALQUER tabela — inclusive
+   a de pedidos, no dia em que alguém errasse o nome dela numa
+   consulta. */
+async function semAEntrada(comEntrada, sem) {
+    try {
+        return await comEntrada();
+    } catch (erro) {
+        if (!/no such table:?\s*(main\.)?banner_entrada/i.test(String(erro && erro.message))) throw erro;
+        return await sem();
+    }
+}
+
 async function avaliarCupom(db, codigoBruto, { subtotal, frete, telefone, km }) {
 
     const codigo = limparCupom(codigoBruto);
@@ -2672,14 +2688,30 @@ async function tratarBannersPublicos(request, env, db) {
 
     const hoje = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
 
-    const { results } = await db.prepare(
-        `SELECT id, imagem, alt, link
-           FROM banners
-          WHERE ativo = 1
-            AND (inicio IS NULL OR inicio = '' OR inicio <= ?1)
-            AND (fim    IS NULL OR fim    = '' OR fim    >= ?1)
-          ORDER BY ordem, id`
-    ).bind(hoje).all();
+    /* `entrada` diz quais desses também aparecem como aviso por cima
+       da vitrine. Vem junto da faixa, e não numa rota própria: é a
+       mesma lista, e uma segunda chamada só para saber "e tem pop-up?"
+       seria uma ida à rede a mais na primeira pintura da home. */
+    const { results } = await semAEntrada(
+        () => db.prepare(
+            `SELECT b.id, b.imagem, b.alt, b.link,
+                    CASE WHEN e.banner_id IS NULL THEN 0 ELSE 1 END AS entrada
+               FROM banners b
+               LEFT JOIN banner_entrada e ON e.banner_id = b.id
+              WHERE b.ativo = 1
+                AND (b.inicio IS NULL OR b.inicio = '' OR b.inicio <= ?1)
+                AND (b.fim    IS NULL OR b.fim    = '' OR b.fim    >= ?1)
+              ORDER BY b.ordem, b.id`
+        ).bind(hoje).all(),
+        () => db.prepare(
+            `SELECT id, imagem, alt, link
+               FROM banners
+              WHERE ativo = 1
+                AND (inicio IS NULL OR inicio = '' OR inicio <= ?1)
+                AND (fim    IS NULL OR fim    = '' OR fim    >= ?1)
+              ORDER BY ordem, id`
+        ).bind(hoje).all()
+    );
 
     return json({ banners: results || [] });
 
@@ -2689,10 +2721,20 @@ async function tratarBannersPublicos(request, env, db) {
    é justamente isso que a loja precisa ver para editar. */
 async function tratarBannersDaLoja(request, env, loja, db) {
 
-    const { results } = await db.prepare(
-        `SELECT id, imagem, alt, link, inicio, fim, ativo, ordem, criado_em, r2_chave
-           FROM banners ORDER BY ordem, id`
-    ).all();
+    const { results } = await semAEntrada(
+        () => db.prepare(
+            `SELECT b.id, b.imagem, b.alt, b.link, b.inicio, b.fim, b.ativo,
+                    b.ordem, b.criado_em, b.r2_chave,
+                    CASE WHEN e.banner_id IS NULL THEN 0 ELSE 1 END AS entrada
+               FROM banners b
+               LEFT JOIN banner_entrada e ON e.banner_id = b.id
+              ORDER BY b.ordem, b.id`
+        ).all(),
+        () => db.prepare(
+            `SELECT id, imagem, alt, link, inicio, fim, ativo, ordem, criado_em, r2_chave
+               FROM banners ORDER BY ordem, id`
+        ).all()
+    );
 
     return json({ banners: results || [], podeEnviarArquivo: !!env.BANNERS_BUCKET });
 
@@ -2732,7 +2774,8 @@ async function tratarSalvarBanner(request, env, loja, db) {
         ).bind(id, imagem, alt, link, inicio, fim, ativo, ordem,
                texto(corpo.r2Chave, 200) || null).run();
 
-        return json({ sucesso: true, id });
+        const recado = await marcarEntrada(db, id, corpo.entrada);
+        return json({ sucesso: true, id, aviso: recado || undefined });
     }
 
     const r = await db.prepare(
@@ -2741,7 +2784,52 @@ async function tratarSalvarBanner(request, env, loja, db) {
     ).bind(imagem, alt, link, inicio, fim, ativo, ordem, Date.now(),
            texto(corpo.r2Chave, 200) || null).run();
 
-    return json({ sucesso: true, id: r.meta?.last_row_id ?? null });
+    const novoId = r.meta?.last_row_id ?? null;
+    const recado = novoId ? await marcarEntrada(db, novoId, corpo.entrada) : null;
+
+    return json({ sucesso: true, id: novoId, aviso: recado || undefined });
+
+}
+
+/* Liga ou desliga o aviso de entrada deste banner.
+
+   Desmarcar APAGA a linha, e é isso que faz a caixinha funcionar como
+   a loja espera: editar o banner e tirar a marca tem de tirar o
+   pop-up, não deixar o antigo valendo em silêncio.
+
+   Devolve um recado quando a farmácia ainda não tem a tabela — e só
+   quando a loja PEDIU a marca. Desmarcar numa loja sem a tabela não é
+   erro nenhum: não havia nada para apagar. É a mesma distinção do
+   cupom com raio: ler sem a tabela é "esta loja não usa"; gravar sem
+   ela é pedir o que não tem onde morar.
+
+   Recado, e não 409: aqui o banner em si foi salvo com sucesso, e
+   recusar a gravação inteira por causa do pop-up faria a loja perder o
+   banner que ela acabou de montar. */
+async function marcarEntrada(db, bannerId, querEntrada) {
+
+    return await semAEntrada(
+
+        async () => {
+            if (querEntrada) {
+                await db.prepare(
+                    `INSERT INTO banner_entrada (banner_id, criado_em) VALUES (?1,?2)
+                     ON CONFLICT(banner_id) DO NOTHING`
+                ).bind(bannerId, Date.now()).run();
+            } else {
+                await db.prepare(
+                    `DELETE FROM banner_entrada WHERE banner_id = ?1`
+                ).bind(bannerId).run();
+            }
+            return null;
+        },
+
+        async () => querEntrada
+            ? "O banner foi salvo, mas o aviso de entrada não: esta farmácia "
+              + "ainda não tem a tabela. Rode o schema-banner-entrada.sql no "
+              + "banco dela e marque de novo."
+            : null
+    );
 
 }
 
@@ -2763,6 +2851,15 @@ async function tratarExcluirBanner(request, env, loja, db) {
     }
 
     const r = await db.prepare(`DELETE FROM banners WHERE id = ?1`).bind(alvo).run();
+
+    /* A marca de aviso de entrada vai junto. O id é AUTOINCREMENT, mas
+       o SQLite reaproveita o maior id livre depois de um DELETE — uma
+       linha órfã aqui faria o PRÓXIMO banner cadastrado nascer já com
+       pop-up ligado, sem ninguém ter pedido. */
+    await semAEntrada(
+        () => db.prepare(`DELETE FROM banner_entrada WHERE banner_id = ?1`).bind(alvo).run(),
+        async () => null
+    );
 
     return json({ sucesso: true, apagados: r.meta?.changes ?? 0 });
 
