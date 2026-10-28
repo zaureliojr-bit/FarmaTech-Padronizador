@@ -68,6 +68,40 @@ function numero(valor) {
 /* Só dígitos, para o telefone virar identidade estável do cliente:
    quem digita "(11) 98765-4321" hoje e "11987654321" amanhã é a mesma
    pessoa, e sem isto viraria dois cadastros. */
+/* Latitude e longitude NÃO passam pelo numero().
+
+   O numero() devolve 0 para qualquer valor negativo, porque nasceu
+   para dinheiro e quantidade, onde negativo não existe. Coordenada no
+   Brasil é sempre negativa nos dois eixos.
+
+   O resultado, visto no ar: a filial de Diadema foi salva com
+   latitude 0 e longitude 0 — o Golfo da Guiné, na costa da África. O
+   site calculou direitinho a distância até lá e disse ao cliente
+   "endereço fora da área de entrega (5672,1 km)". Nenhum erro, nenhum
+   aviso: só uma farmácia no meio do oceano.
+
+   Pior que o valor errado foi ele ser PLAUSÍVEL para o resto do
+   sistema: 0 é um número finito, então a bandeira de "esta loja não
+   tem coordenada" não disparou. O site mediu com confiança.
+
+   Aqui a faixa é conferida de verdade. Fora dela, nulo — e nulo o site
+   reconhece como "não dá para calcular" e manda combinar a taxa no
+   WhatsApp, que é o certo. */
+function coordenada(valor, limite) {
+
+    if (valor === "" || valor === null || valor === undefined) return null;
+
+    /* Vírgula aceita: quem copia do Google Maps em português às vezes
+       traz "-23,697469". */
+    const n = Number(String(valor).trim().replace(",", "."));
+
+    if (!Number.isFinite(n)) return null;
+    if (n < -limite || n > limite) return null;
+
+    return n;
+
+}
+
 function soDigitos(valor) {
 
     return String(valor ?? "").replace(/\D/g, "").slice(0, 15);
@@ -3875,8 +3909,8 @@ const CAMPOS_DA_FILIAL = {
     cidade:             (v) => texto(v, 80),
     uf:                 (v) => texto(v, 2).toUpperCase(),
     cep:                (v) => texto(v, 12),
-    latitude:           (v) => (v === "" || v === null ? null : numero(v)),
-    longitude:          (v) => (v === "" || v === null ? null : numero(v)),
+    latitude:           (v) => coordenada(v, 90),
+    longitude:          (v) => coordenada(v, 180),
     whatsapp:           (v) => soDigitos(v),
     telefone:           (v) => texto(v, 24),
     email:              (v) => texto(v, 120),

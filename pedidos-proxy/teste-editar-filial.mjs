@@ -429,5 +429,44 @@ console.log("\n9. as travas");
         String(comSenhaDaLoja.status));
 }
 
+/* ---- a coordenada negativa, que virava zero ------------------------- */
+console.log("\nlatitude e longitude não passam pelo numero()");
+{
+    /* O numero() devolve 0 para qualquer negativo — nasceu para
+       dinheiro, onde negativo não existe. Coordenada no Brasil é
+       negativa nos dois eixos.
+
+       Visto no ar: a filial de Diadema salva em latitude 0, longitude
+       0 (o Golfo da Guiné), e o site dizendo ao cliente "endereço fora
+       da área de entrega (5672,1 km)". Nenhum erro na tela: só uma
+       farmácia no meio do oceano. */
+    const editar = (campos) => pedir("/lojas/farma-centro",
+        { metodo: "POST", corpo: campos });
+
+    await editar({ latitude: "-23.697469", longitude: "-46.597316" });
+
+    const l = noBanco("farma-centro");
+
+    conferir("a latitude negativa é guardada como negativa",
+        l.latitude === -23.697469, String(l.latitude));
+
+    conferir("e a longitude também",
+        l.longitude === -46.597316, String(l.longitude));
+
+    /* Quem copia do Google Maps em português às vezes traz vírgula. */
+    await editar({ latitude: "-23,5", longitude: "-46,6" });
+    const comVirgula = noBanco("farma-centro");
+    conferir("vírgula decimal também entra certo",
+        comVirgula.latitude === -23.5 && comVirgula.longitude === -46.6,
+        JSON.stringify([comVirgula.latitude, comVirgula.longitude]));
+
+    /* Fora da faixa vira nulo, e nulo o site reconhece como "não dá
+       para calcular" — em vez de medir a partir de um ponto inventado. */
+    await editar({ latitude: "999", longitude: "-46.6" });
+    const fora = noBanco("farma-centro");
+    conferir("valor fora da faixa vira nulo, não zero",
+        fora.latitude === null, String(fora.latitude));
+}
+
 console.log(falhas === 0 ? "\nTudo certo.\n" : `\n${falhas} falha(s).\n`);
 process.exit(falhas === 0 ? 0 : 1);
