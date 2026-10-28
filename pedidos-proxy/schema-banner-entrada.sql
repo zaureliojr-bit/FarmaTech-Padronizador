@@ -26,6 +26,27 @@ CREATE TABLE IF NOT EXISTS banner_entrada (
     -- marcado ou não está — não existe "meio marcado".
     banner_id  INTEGER PRIMARY KEY,
 
+    -- A ARTE DO AVISO, que é outra arte.
+    --
+    -- O banner da faixa é deitado, 1200x400. Num celular de 390px de
+    -- largura, 3:1 vira uma tira de 119px de altura no meio da tela —
+    -- medido, não estimado. Não é defeito de CSS: é geometria, e
+    -- nenhum ajuste de largura resolve. Pop-up quer formato em pé.
+    --
+    -- Então o aviso tem a imagem dele, em 4:5 (1080x1350 serve), e a
+    -- faixa continua com a dela. Mesma campanha, mesmo link, mesmo
+    -- prazo; duas artes, porque são dois lugares com formatos
+    -- diferentes.
+    --
+    -- Vazio é permitido: aí o aviso usa a imagem da faixa mesmo,
+    -- deitada. Fica pior, e é melhor que não aparecer.
+    imagem     TEXT,
+
+    -- A chave do arquivo no R2, para ele ser apagado junto quando o
+    -- banner for apagado — senão o balde vira depósito de arte de
+    -- campanha antiga que ninguém sabe se ainda serve.
+    r2_chave   TEXT,
+
     criado_em  INTEGER NOT NULL
 );
 
@@ -48,3 +69,21 @@ CREATE TABLE IF NOT EXISTS banner_entrada (
 -- Nada disso mora aqui porque nada disso é do banco: é do navegador de
 -- quem visita. Aqui mora só a decisão da loja — "esta campanha merece
 -- um aviso de entrada".
+
+-- SE VOCÊ JÁ RODOU A VERSÃO ANTERIOR DESTE ARQUIVO
+--
+-- A primeira versão desta tabela não tinha as colunas `imagem` e
+-- `r2_chave`. O CREATE TABLE IF NOT EXISTS não acrescenta coluna a uma
+-- tabela que já existe, então rodar este arquivo de novo não basta.
+--
+-- O site e o painel funcionam assim mesmo: o worker percebe a falta e
+-- trata como "esta farmácia não usa arte própria", usando a imagem da
+-- faixa. Então não há pressa nem risco.
+--
+-- Para ganhar o recurso, apague a tabela e rode este arquivo de novo.
+-- O que se perde são as marcas de "mostrar como aviso de entrada", que
+-- são uma caixinha por banner:
+--
+--     DROP TABLE banner_entrada;
+--
+-- Farmácia nova não precisa de nada disso — já nasce com as colunas.

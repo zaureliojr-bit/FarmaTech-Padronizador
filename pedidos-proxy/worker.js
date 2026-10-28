@@ -967,7 +967,30 @@ async function semAEntrada(comEntrada, sem) {
     try {
         return await comEntrada();
     } catch (erro) {
-        if (!/no such table:?\s*(main\.)?banner_entrada/i.test(String(erro && erro.message))) throw erro;
+        const msg = String(erro && erro.message);
+
+        /* Duas faltas possíveis, e as duas caem na mesma rede:
+
+           - a TABELA não existe: a farmácia nunca rodou o schema;
+           - a COLUNA não existe: ela rodou a primeira versão do
+             arquivo, de antes de o aviso ganhar arte própria. O
+             CREATE TABLE IF NOT EXISTS não acrescenta coluna a tabela
+             que já existe, então essas farmácias ficam com a tabela
+             antiga até alguém apagá-la e rodar de novo.
+
+           A segunda é a razão de o teste de coluna estar aqui: sem
+           ele, publicar este worker quebraria o painel de banners de
+           toda loja que já tivesse rodado a versão anterior — e a
+           versão anterior saiu horas antes desta. */
+        const faltaTabela = /no such table:?\s*(main\.)?banner_entrada/i.test(msg);
+
+        /* `e.` é o apelido de banner_entrada em todas as consultas que
+           passam por aqui — é o que distingue a coluna que falta NESTA
+           tabela da coluna `imagem` da tabela `banners`, que existe
+           desde sempre e cuja falta seria defeito de verdade. */
+        const faltaColuna = /no such column:?\s*e\.(imagem|r2_chave)\b/i.test(msg);
+
+        if (!faltaTabela && !faltaColuna) throw erro;
         return await sem();
     }
 }
@@ -2695,7 +2718,8 @@ async function tratarBannersPublicos(request, env, db) {
     const { results } = await semAEntrada(
         () => db.prepare(
             `SELECT b.id, b.imagem, b.alt, b.link,
-                    CASE WHEN e.banner_id IS NULL THEN 0 ELSE 1 END AS entrada
+                    CASE WHEN e.banner_id IS NULL THEN 0 ELSE 1 END AS entrada,
+                    e.imagem AS entrada_imagem
                FROM banners b
                LEFT JOIN banner_entrada e ON e.banner_id = b.id
               WHERE b.ativo = 1
@@ -2725,7 +2749,8 @@ async function tratarBannersDaLoja(request, env, loja, db) {
         () => db.prepare(
             `SELECT b.id, b.imagem, b.alt, b.link, b.inicio, b.fim, b.ativo,
                     b.ordem, b.criado_em, b.r2_chave,
-                    CASE WHEN e.banner_id IS NULL THEN 0 ELSE 1 END AS entrada
+                    CASE WHEN e.banner_id IS NULL THEN 0 ELSE 1 END AS entrada,
+                    e.imagem AS entrada_imagem
                FROM banners b
                LEFT JOIN banner_entrada e ON e.banner_id = b.id
               ORDER BY b.ordem, b.id`
@@ -2774,7 +2799,11 @@ async function tratarSalvarBanner(request, env, loja, db) {
         ).bind(id, imagem, alt, link, inicio, fim, ativo, ordem,
                texto(corpo.r2Chave, 200) || null).run();
 
-        const recado = await marcarEntrada(db, id, corpo.entrada);
+        const recado = await marcarEntrada(db, id, corpo.entrada, {
+            imagem: corpo.entradaImagem,
+            r2Chave: corpo.entradaR2,
+            limpar: corpo.entradaImagem === ""
+        });
         return json({ sucesso: true, id, aviso: recado || undefined });
     }
 
@@ -2785,7 +2814,13 @@ async function tratarSalvarBanner(request, env, loja, db) {
            texto(corpo.r2Chave, 200) || null).run();
 
     const novoId = r.meta?.last_row_id ?? null;
-    const recado = novoId ? await marcarEntrada(db, novoId, corpo.entrada) : null;
+    const recado = novoId
+        ? await marcarEntrada(db, novoId, corpo.entrada, {
+              imagem: corpo.entradaImagem,
+              r2Chave: corpo.entradaR2,
+              limpar: corpo.entradaImagem === ""
+          })
+        : null;
 
     return json({ sucesso: true, id: novoId, aviso: recado || undefined });
 
@@ -2806,16 +2841,34 @@ async function tratarSalvarBanner(request, env, loja, db) {
    Recado, e não 409: aqui o banner em si foi salvo com sucesso, e
    recusar a gravação inteira por causa do pop-up faria a loja perder o
    banner que ela acabou de montar. */
-async function marcarEntrada(db, bannerId, querEntrada) {
+async function marcarEntrada(db, bannerId, querEntrada, arte) {
+
+    const imagem = urlSegura(arte && arte.imagem, { permitirVazio: true }) || null;
+    const chave = texto(arte && arte.r2Chave, 200) || null;
 
     return await semAEntrada(
 
         async () => {
             if (querEntrada) {
+                /* COALESCE na arte: salvar o banner sem mexer na imagem
+                   do aviso não pode apagar a que já está lá. Quem quer
+                   tirar a arte limpa o campo, e aí vem string vazia —
+                   que o urlSegura devolve como null e o COALESCE
+                   preserva... então a limpeza é explícita, com o
+                   `arte.limpar`. Sem essa distinção, "não mandei nada"
+                   e "quero apagar" seriam a mesma coisa. */
                 await db.prepare(
-                    `INSERT INTO banner_entrada (banner_id, criado_em) VALUES (?1,?2)
-                     ON CONFLICT(banner_id) DO NOTHING`
-                ).bind(bannerId, Date.now()).run();
+                    arte && arte.limpar
+                        ? `INSERT INTO banner_entrada (banner_id, imagem, r2_chave, criado_em)
+                           VALUES (?1,?2,?3,?4)
+                           ON CONFLICT(banner_id) DO UPDATE
+                              SET imagem = excluded.imagem, r2_chave = excluded.r2_chave`
+                        : `INSERT INTO banner_entrada (banner_id, imagem, r2_chave, criado_em)
+                           VALUES (?1,?2,?3,?4)
+                           ON CONFLICT(banner_id) DO UPDATE
+                              SET imagem   = COALESCE(excluded.imagem, banner_entrada.imagem),
+                                  r2_chave = COALESCE(excluded.r2_chave, banner_entrada.r2_chave)`
+                ).bind(bannerId, imagem, chave, Date.now()).run();
             } else {
                 await db.prepare(
                     `DELETE FROM banner_entrada WHERE banner_id = ?1`
@@ -2857,7 +2910,22 @@ async function tratarExcluirBanner(request, env, loja, db) {
        linha órfã aqui faria o PRÓXIMO banner cadastrado nascer já com
        pop-up ligado, sem ninguém ter pedido. */
     await semAEntrada(
-        () => db.prepare(`DELETE FROM banner_entrada WHERE banner_id = ?1`).bind(alvo).run(),
+        async () => {
+            /* O arquivo da arte do aviso vai junto, como já ia o do
+               banner: balde não pode virar depósito de campanha de dois
+               anos atrás. */
+            const arte = await db.prepare(
+                `SELECT r2_chave FROM banner_entrada WHERE banner_id = ?1`
+            ).bind(alvo).first();
+
+            if (arte && arte.r2_chave && env.BANNERS_BUCKET) {
+                await env.BANNERS_BUCKET.delete(arte.r2_chave).catch(() => {});
+            }
+
+            return await db.prepare(
+                `DELETE FROM banner_entrada WHERE banner_id = ?1`
+            ).bind(alvo).run();
+        },
         async () => null
     );
 
