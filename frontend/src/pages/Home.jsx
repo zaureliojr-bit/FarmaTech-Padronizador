@@ -49,6 +49,9 @@ function Home() {
         filtroImagem,
         setFiltroImagem,
 
+        filtroTarja,
+        setFiltroTarja,
+
         laboratorios,
         categorias,
         classes,
@@ -197,6 +200,9 @@ function Home() {
 
                         filtroImagem={filtroImagem}
                         setFiltroImagem={setFiltroImagem}
+
+                        filtroTarja={filtroTarja}
+                        setFiltroTarja={setFiltroTarja}
 
                         total={produtosFiltrados.length}
 

@@ -20,6 +20,8 @@ function Toolbar({
     setAba,
     filtroImagem,
     setFiltroImagem,
+    filtroTarja,
+    setFiltroTarja,
     total,
     limparFiltros,
     produtos,
@@ -144,6 +146,17 @@ function Toolbar({
                     <option value="">Todos (com ou sem imagem)</option>
                     <option value="sem">Só sem imagem</option>
                     <option value="com">Só com imagem</option>
+                </select>
+
+                <select
+                    value={filtroTarja}
+                    onChange={(e) => setFiltroTarja(e.target.value)}
+                    title="Mesmo filtro do painel: tarjado fica de propósito com a caixa neutra (RDC 96/2008), não é falta de foto"
+                >
+                    <option value="">Todas as tarjas</option>
+                    <option value="mip">Só venda livre (MIP)</option>
+                    <option value="naomed">Sem tarja conhecida</option>
+                    <option value="tarjado">Só tarjados</option>
                 </select>
 
                 <button className="btn btn-ghost" onClick={limparFiltros}>
