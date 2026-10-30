@@ -80,6 +80,14 @@ function montarProdutoSite(produto, imagensHospedadas) {
     // dito por extenso diz mais ao cliente do que a substância sozinha.
     if (produto.classeTerapeutica) base.classeTerapeutica = produto.classeTerapeutica;
 
+    // Grupo/Subgrupo/Classe farmacológica por substância (MyMedFarma, ver
+    // grupoFarmacologicoService.js) - classificação à parte da CMED
+    // acima, útil pra ficha técnica mais rica ou, no futuro, um filtro
+    // tipo "Antibióticos" na vitrine.
+    if (produto.grupoFarmacologico) base.grupoFarmacologico = produto.grupoFarmacologico;
+    if (produto.subgrupoFarmacologico) base.subgrupoFarmacologico = produto.subgrupoFarmacologico;
+    if (produto.classeFarmacologica) base.classeFarmacologica = produto.classeFarmacologica;
+
     // Filtro de subcategoria dentro da família, no site (ver
     // extrairCategoria.js - vem só de quem a Lista da distribuidora
     // trouxer, a maioria do catálogo não vai ter).

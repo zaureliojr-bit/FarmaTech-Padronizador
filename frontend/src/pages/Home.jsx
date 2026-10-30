@@ -6,6 +6,7 @@ import NovaExtracaoBox from "../components/NovaExtracaoBox/NovaExtracaoBox";
 import ImportSummary from "../components/ImportSummary/ImportSummary";
 import CmedBox from "../components/CmedBox/CmedBox";
 import DistribuidorBox from "../components/DistribuidorBox/DistribuidorBox";
+import GrupoFarmacologicoBox from "../components/GrupoFarmacologicoBox/GrupoFarmacologicoBox";
 import MigrarImagensBox from "../components/MigrarImagensBox/MigrarImagensBox";
 import BuscaLoteImagensBox from "../components/BuscaLoteImagensBox/BuscaLoteImagensBox";
 import BuscaLoteDescricoesBox from "../components/BuscaLoteDescricoesBox/BuscaLoteDescricoesBox";
@@ -84,7 +85,12 @@ function Home() {
         indiceDistribuidor,
         carregandoDistribuidor,
         erroDistribuidor,
-        carregarListaDistribuidor
+        carregarListaDistribuidor,
+
+        indiceGrupoFarmacologico,
+        carregandoGrupoFarmacologico,
+        erroGrupoFarmacologico,
+        carregarListaGrupoFarmacologico
 
     } = useProdutos();
 
@@ -139,6 +145,14 @@ function Home() {
                 carregando={carregandoDistribuidor}
                 erro={erroDistribuidor}
                 carregarLista={carregarListaDistribuidor}
+                mostrarToast={mostrarToast}
+            />
+
+            <GrupoFarmacologicoBox
+                indice={indiceGrupoFarmacologico}
+                carregando={carregandoGrupoFarmacologico}
+                erro={erroGrupoFarmacologico}
+                carregarLista={carregarListaGrupoFarmacologico}
                 mostrarToast={mostrarToast}
             />
 

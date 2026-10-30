@@ -9,10 +9,11 @@
 // dele inexistente pra sempre (erro silencioso só na hora de usar).
 
 const DB_NAME = "farmatech";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export const STORE_CMED = "cmed";
 export const STORE_DISTRIBUIDOR = "distribuidor";
+export const STORE_GRUPO_FARMACOLOGICO = "grupoFarmacologico";
 
 export function abrirBanco() {
 
@@ -38,6 +39,13 @@ export function abrirBanco() {
             // localmente pra não precisar reimportar toda vez.
             if (!db.objectStoreNames.contains(STORE_DISTRIBUIDOR)) {
                 db.createObjectStore(STORE_DISTRIBUIDOR);
+            }
+
+            // Classificação farmacológica por substância (Grupo/Subgrupo/
+            // Classe, ver mymedfarma-extrator/) - mesmo motivo da CMED e
+            // da distribuidora: guardada localmente pra não reimportar.
+            if (!db.objectStoreNames.contains(STORE_GRUPO_FARMACOLOGICO)) {
+                db.createObjectStore(STORE_GRUPO_FARMACOLOGICO);
             }
 
         };
