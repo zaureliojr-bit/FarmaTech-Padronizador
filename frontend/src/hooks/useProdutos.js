@@ -16,6 +16,17 @@ import { excluirProdutoDefinitivamente } from "../services/produtosExcluidosServ
 // ir pro banco de correções.
 const CAMPOS_DE_CORRECAO = ["descricaoManual", "classe", "categoria"];
 
+// Mesma regra do painel (ver classeDeTarja em painel.html): "mip" é
+// venda livre, "tarjado" é V/R/P, e "naomed" é tarja desconhecida -
+// perfumaria, higiene e o medicamento que não cruzou com a CMED.
+function classeDeTarja(produto) {
+
+    if (!produto.tarja) return "naomed";
+
+    return produto.tarja === "L" ? "mip" : "tarjado";
+
+}
+
 export function useProdutos() {
 
     const [resultadoImportacao, setResultadoImportacao] = useState(null);
@@ -29,6 +40,14 @@ export function useProdutos() {
     // "" = todos, "sem" = só sem imagem, "com" = só com imagem.
     const [filtroImagem, setFiltroImagem] = useState("");
 
+    // "" = todos, "mip" = venda livre, "naomed" = sem tarja conhecida,
+    // "tarjado" = V/R/P. Mesma classificação do filtro "Mostrar:" do
+    // painel (classeDeTarja em painel.html) - útil aqui pra restringir
+    // antes de rodar troca de imagem/descrição em lote, já que tarjado
+    // é pra ficar com a caixa neutra de propósito (RDC 96/2008), não
+    // pra entrar numa busca de foto de verdade.
+    const [filtroTarja, setFiltroTarja] = useState("");
+
     const [paginaAtual, setPaginaAtual] = useState(1);
 
     const itensPorPagina = 50;
@@ -37,7 +56,7 @@ export function useProdutos() {
 
         setPaginaAtual(1);
 
-    }, [pesquisa, laboratorio, categoria, classe, aba, filtroImagem]);
+    }, [pesquisa, laboratorio, categoria, classe, aba, filtroImagem, filtroTarja]);
 
     // =====================================================
     // CMED (tarja, exigência de receita, preço máximo legal)
@@ -379,6 +398,12 @@ export function useProdutos() {
 
                 (filtroImagem === "com" && produto.statusImagem === "salva");
 
+            const filtroTarjaAtivo =
+
+                !filtroTarja ||
+
+                classeDeTarja(produto) === filtroTarja;
+
             return (
 
                 busca &&
@@ -391,7 +416,9 @@ export function useProdutos() {
 
                 filtroAba &&
 
-                filtroImagemAtivo
+                filtroImagemAtivo &&
+
+                filtroTarjaAtivo
 
             );
 
@@ -411,7 +438,9 @@ export function useProdutos() {
 
         aba,
 
-        filtroImagem
+        filtroImagem,
+
+        filtroTarja
 
     ]);
 
@@ -464,6 +493,8 @@ export function useProdutos() {
         setAba("");
 
         setFiltroImagem("");
+
+        setFiltroTarja("");
 
     }
 
@@ -600,6 +631,10 @@ export function useProdutos() {
         filtroImagem,
 
         setFiltroImagem,
+
+        filtroTarja,
+
+        setFiltroTarja,
 
         laboratorios,
 
