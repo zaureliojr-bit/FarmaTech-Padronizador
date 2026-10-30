@@ -144,11 +144,47 @@ async function buscarCategorias() {
 
     const dados = await resposta.json();
 
-    if (Array.isArray(dados)) return dados;
-    if (Array.isArray(dados?.categorias)) return dados.categorias;
-    if (Array.isArray(dados?.data)) return dados.data;
+    const raiz =
+        Array.isArray(dados) ? dados :
+        Array.isArray(dados?.categorias) ? dados.categorias :
+        Array.isArray(dados?.data) ? dados.data :
+        null;
 
-    throw new Error("Não reconheci o formato da resposta de categorias - confere manualmente no navegador (DevTools -> Network -> categoria/showall) se o site mudou algo.");
+    if (!raiz) {
+        throw new Error("Não reconheci o formato da resposta de categorias - confere manualmente no navegador (DevTools -> Network -> categoria/showall) se o site mudou algo.");
+    }
+
+    // "retfilhos: 1" devolve árvore ANINHADA (cada categoria carrega os
+    // filhos dentro dela, não uma lista única) - achata tudo numa lista
+    // só antes de seguir, senão só as ~18 categorias do topo aparecem e
+    // a subcategoria nunca é encontrada. Tenta os nomes mais prováveis
+    // pro campo de filhos; se a API usar outro nome, ajusta aqui.
+    const CHAVES_FILHOS = ["filhos", "subcategorias", "children", "categoriasFilhas"];
+
+    const achatada = [];
+
+    function visitar(lista) {
+
+        for (const no of lista) {
+
+            achatada.push(no);
+
+            for (const chave of CHAVES_FILHOS) {
+
+                if (Array.isArray(no[chave]) && no[chave].length) {
+                    visitar(no[chave]);
+                    break;
+                }
+
+            }
+
+        }
+
+    }
+
+    visitar(raiz);
+
+    return achatada;
 
 }
 
@@ -198,6 +234,15 @@ async function main() {
     let folhas = calcularFolhas(categorias);
 
     console.log(`${categorias.length} categorias no total, ${folhas.length} são folha (onde os produtos realmente estão).`);
+
+    // Se TODAS vieram como folha, a árvore não tem ligação pai/filho
+    // nenhuma detectada - ou o site só tem categoria de um nível (raro),
+    // ou o nome do campo de filhos mudou e achatarArvore não achou (ver
+    // CHAVES_FILHOS em buscarCategorias). Categoria e Subcategoria saem
+    // iguais nesse caso - funciona, só não tem o detalhe de subcategoria.
+    if (folhas.length === categorias.length && categorias.length < 50) {
+        console.warn("Aviso: nenhuma categoria tem subcategoria detectada - Categoria e Subcategoria vão sair iguais. Se o site mostra subcategorias (ex.: Fralda > Fita), confere no DevTools o nome do campo que carrega os filhos dentro de cada categoria na resposta de categoria/showall, e ajusta CHAVES_FILHOS em extrair.js.");
+    }
 
     if (LIMITE_CATEGORIAS > 0) {
         folhas = folhas.slice(0, LIMITE_CATEGORIAS);
