@@ -80,6 +80,11 @@ function montarProdutoSite(produto, imagensHospedadas) {
     // dito por extenso diz mais ao cliente do que a substância sozinha.
     if (produto.classeTerapeutica) base.classeTerapeutica = produto.classeTerapeutica;
 
+    // Filtro de subcategoria dentro da família, no site (ver
+    // extrairCategoria.js - vem só de quem a Lista da distribuidora
+    // trouxer, a maioria do catálogo não vai ter).
+    if (produto.subcategoria) base.subcategoria = produto.subcategoria;
+
     return base;
 
 }
