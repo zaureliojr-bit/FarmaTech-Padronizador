@@ -140,6 +140,15 @@ export function criarProdutoInteligente(produto = {}) {
 
         classeTerapeutica: produto.classeTerapeutica || "",
 
+        // Grupo/Subgrupo/Classe farmacológica por substância (MyMedFarma,
+        // ver grupoFarmacologicoService.js) - diferente de classeTerapeutica
+        // acima, que é a classificação da própria CMED.
+        grupoFarmacologico: produto.grupoFarmacologico || "",
+
+        subgrupoFarmacologico: produto.subgrupoFarmacologico || "",
+
+        classeFarmacologica: produto.classeFarmacologica || "",
+
         tipoProduto: produto.tipoProduto || "",
 
         registroAnvisa: produto.registroAnvisa || "",

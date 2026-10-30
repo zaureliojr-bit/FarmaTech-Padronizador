@@ -386,7 +386,7 @@ async function tratarDescartarExtracao(request, env) {
 // pra não virar um balde genérico de qualquer coisa que alguém queira
 // guardar (a rota tem a mesma IMAGENS_KEY das outras, então travar o
 // nome limita o estrago de uma chave vazada).
-const CHAVES_REFERENCIA_VALIDAS = new Set(["cmed", "distribuidor"]);
+const CHAVES_REFERENCIA_VALIDAS = new Set(["cmed", "distribuidor", "grupo-farmacologico"]);
 
 function caminhoReferencia(chave) {
 

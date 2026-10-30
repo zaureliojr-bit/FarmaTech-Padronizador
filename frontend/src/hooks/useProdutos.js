@@ -6,6 +6,8 @@ import { carregarIndiceCmed, salvarIndiceCmed } from "../services/cmedStorage";
 import { padronizarComCmed } from "../services/padronizarCmed";
 import { importarListaDistribuidor, consultarEanDistribuidor } from "../services/distribuidorService";
 import { carregarIndiceDistribuidor, salvarIndiceDistribuidor } from "../services/distribuidorStorage";
+import { importarGrupoFarmacologico, consultarSubstancia } from "../services/grupoFarmacologicoService";
+import { carregarIndiceGrupoFarmacologico, salvarIndiceGrupoFarmacologico } from "../services/grupoFarmacologicoStorage";
 import { salvarCorrecao } from "../services/correcoesService";
 import { buscarFamiliasOverride, salvarFamiliaOverride } from "../services/familiasOverrideService";
 import { salvarReferencia, referenciaDoServidor } from "../services/referenciasService";
@@ -182,6 +184,64 @@ export function useProdutos() {
     }
 
     // =====================================================
+    // Grupo farmacológico (Grupo/Subgrupo/Classe por substância)
+    // =====================================================
+    // Mesmo padrão da distribuidora, mas cruzado pela substância (CMED),
+    // não pelo EAN - ver grupoFarmacologicoService.js. Não mexe em
+    // família/categoria nenhuma, só acrescenta campos pra ficha técnica
+    // do site (grupoFarmacologico/subgrupoFarmacologico/classeFarmacologica).
+
+    const [indiceGrupoFarmacologico, setIndiceGrupoFarmacologico] = useState(null);
+    const [carregandoGrupoFarmacologico, setCarregandoGrupoFarmacologico] = useState(false);
+    const [erroGrupoFarmacologico, setErroGrupoFarmacologico] = useState("");
+
+    useEffect(() => {
+
+        let ativo = true;
+
+        carregarIndiceGrupoFarmacologico()
+            .then((indice) => indice || referenciaDoServidor("grupo-farmacologico", salvarIndiceGrupoFarmacologico))
+            .then((indice) => {
+                if (ativo && indice) setIndiceGrupoFarmacologico(indice);
+            });
+
+        return () => { ativo = false; };
+
+    }, []);
+
+    async function carregarListaGrupoFarmacologico(arquivo) {
+
+        setErroGrupoFarmacologico("");
+        setCarregandoGrupoFarmacologico(true);
+
+        try {
+
+            const indice = await importarGrupoFarmacologico(arquivo);
+
+            setIndiceGrupoFarmacologico(indice);
+
+            const guardou = await salvarIndiceGrupoFarmacologico(indice);
+
+            // Mesmo espelho do CMED/distribuidora, ver comentário lá em cima.
+            salvarReferencia("grupo-farmacologico", indice);
+
+            return { sucesso: true, guardou, totalLinhas: indice.totalLinhas };
+
+        } catch (erro) {
+
+            setErroGrupoFarmacologico(erro.message || "Não consegui ler esta planilha de classificação farmacológica.");
+
+            return { sucesso: false };
+
+        } finally {
+
+            setCarregandoGrupoFarmacologico(false);
+
+        }
+
+    }
+
+    // =====================================================
     // Correções de categoria -> família (banco compartilhado)
     // =====================================================
     // Carregadas uma vez ao abrir o padronizador - definirOverridesCategoria
@@ -276,17 +336,44 @@ export function useProdutos() {
 
     }, [resultadoCmed, indiceDistribuidor]);
 
+    // Cruza com a classificação farmacológica (se a planilha já estiver
+    // carregada) pela substância que a CMED gravou - só entra em
+    // medicamento com CMED e com substância reconhecida na árvore do
+    // MyMedFarma; o resto do catálogo passa direto.
+    const produtosComGrupoFarmacologico = useMemo(() => {
+
+        if (!produtosComDistribuidor.length) return produtosComDistribuidor;
+
+        if (!indiceGrupoFarmacologico) return produtosComDistribuidor;
+
+        return produtosComDistribuidor.map((produto) => {
+
+            const info = consultarSubstancia(indiceGrupoFarmacologico, produto.substancia);
+
+            if (!info?.grupo) return produto;
+
+            return {
+                ...produto,
+                grupoFarmacologico: info.grupo,
+                ...(info.subgrupo && { subgrupoFarmacologico: info.subgrupo }),
+                ...(info.classe && { classeFarmacologica: info.classe })
+            };
+
+        });
+
+    }, [produtosComDistribuidor, indiceGrupoFarmacologico]);
+
     const produtos = useMemo(() => {
 
-        if (!produtosComDistribuidor.length) return [];
+        if (!produtosComGrupoFarmacologico.length) return [];
 
-        return produtosComDistribuidor.map(analisarProduto);
+        return produtosComGrupoFarmacologico.map(analisarProduto);
 
         // overridesVersao não é usado no corpo, mas precisa recalcular
         // a família de cada produto assim que os overrides carregam (ou
         // mudam) - análise já rodou com o Map de overrides ainda vazio.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [produtosComDistribuidor, overridesVersao]);
+    }, [produtosComGrupoFarmacologico, overridesVersao]);
 
     // =====================================================
     // Filtros
@@ -690,7 +777,15 @@ export function useProdutos() {
 
         erroDistribuidor,
 
-        carregarListaDistribuidor
+        carregarListaDistribuidor,
+
+        indiceGrupoFarmacologico,
+
+        carregandoGrupoFarmacologico,
+
+        erroGrupoFarmacologico,
+
+        carregarListaGrupoFarmacologico
 
     };
 

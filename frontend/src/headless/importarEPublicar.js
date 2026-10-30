@@ -11,6 +11,7 @@
 import { importarPlanilha } from "../services/importador";
 import { padronizarComCmed } from "../services/padronizarCmed";
 import { consultarEanDistribuidor } from "../services/distribuidorService";
+import { consultarSubstancia } from "../services/grupoFarmacologicoService";
 import { analisarProduto } from "../intelligence/core";
 import { definirOverridesCategoria } from "../intelligence/dictionary/familias";
 import { buscarFamiliasOverride } from "../services/familiasOverrideService";
@@ -35,10 +36,11 @@ export async function importarEPublicarExtracao({ modo = "mesclar" } = {}) {
 
     if (!pendente) return null;
 
-    const [overrides, indiceCmed, indiceDistribuidor] = await Promise.all([
+    const [overrides, indiceCmed, indiceDistribuidor, indiceGrupoFarmacologico] = await Promise.all([
         buscarFamiliasOverride(),
         buscarReferencia("cmed"),
-        buscarReferencia("distribuidor")
+        buscarReferencia("distribuidor"),
+        buscarReferencia("grupo-farmacologico")
     ]);
 
     definirOverridesCategoria(overrides);
@@ -72,7 +74,24 @@ export async function importarEPublicarExtracao({ modo = "mesclar" } = {}) {
         })
         : comCmed;
 
-    const produtosFinais = comDistribuidor.map(analisarProduto);
+    const comGrupoFarmacologico = indiceGrupoFarmacologico
+        ? comDistribuidor.map((produto) => {
+
+            const info = consultarSubstancia(indiceGrupoFarmacologico, produto.substancia);
+
+            if (!info?.grupo) return produto;
+
+            return {
+                ...produto,
+                grupoFarmacologico: info.grupo,
+                ...(info.subgrupo && { subgrupoFarmacologico: info.subgrupo }),
+                ...(info.classe && { classeFarmacologica: info.classe })
+            };
+
+        })
+        : comDistribuidor;
+
+    const produtosFinais = comGrupoFarmacologico.map(analisarProduto);
 
     const resultadoPublicacao = await publicarNoSite(produtosFinais, modo);
 

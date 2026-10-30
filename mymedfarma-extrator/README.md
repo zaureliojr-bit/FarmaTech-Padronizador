@@ -70,9 +70,14 @@ próprio texto (ex.: `<p>3.1.1. Digitálicos</p>`, depois
 Qualquer coisa diferente disso, ajusta `extrair.js` de acordo (ou pede
 ajuda de novo com os prints atualizados).
 
-## Ainda não ligado ao padronizador
+## Ligado ao padronizador
 
-Esta é só a parte de buscar o dado. Usar essa planilha pra
-automaticamente ajudar a classificar os medicamentos no padronizador
-(tipo a CMED/distribuidora já fazem) é um passo seguinte, ainda não
-implementado.
+A planilha gerada aqui (`grupos_farmacologicos.xlsx`) pode ser
+carregada na caixa "💊 Grupo farmacológico" do padronizador (mesmo
+lugar da lista da CMED/distribuidora). De lá pra frente, todo produto
+com substância reconhecida na árvore ganha `grupoFarmacologico`/
+`subgrupoFarmacologico`/`classeFarmacologica`, publicados no
+produtos.json do site - ver `grupoFarmacologicoService.js` no
+frontend. Não mexe em família/categoria, só acrescenta campos pra
+ficha técnica (e, no futuro, um filtro tipo "Antibióticos" na
+vitrine).
