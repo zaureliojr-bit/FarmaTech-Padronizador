@@ -60,6 +60,11 @@ export function criarProdutoInteligente(produto = {}) {
 
         categoria: "",
 
+        // Filtro dentro da família (ex.: "Fita" dentro de Fralda) -
+        // vem só de categoriaDistribuidor/subcategoriaDistribuidor
+        // (ver extrairCategoria.js), não existe no PDV.
+        subcategoria: "",
+
         familia: "",
 
         familiaNome: "",
@@ -149,6 +154,14 @@ export function criarProdutoInteligente(produto = {}) {
         // de busca de descrição, por ser dado direto do setor (sem
         // cota, sem depender de banco de código de barras genérico).
         descricaoDistribuidor: produto.descricaoDistribuidor || "",
+
+        // Categoria/subcategoria da distribuidora, cruzadas por EAN -
+        // pista extra pra extrairCategoria.js quando o PDV não resolve
+        // sozinho. Cruas (como vieram da planilha); categoria/
+        // subcategoria acima são o resultado já decidido.
+        categoriaDistribuidor: produto.categoriaDistribuidor || "",
+
+        subcategoriaDistribuidor: produto.subcategoriaDistribuidor || "",
 
         pmc: produto.pmc ?? "",
 

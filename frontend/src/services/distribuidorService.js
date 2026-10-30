@@ -1,16 +1,19 @@
 /**
- * Lista de produtos de uma distribuidora (relatório de preços/pedido),
- * cruzada pelo EAN - mesma ideia da CMED, mas sem regra de negócio
- * nenhuma (não mexe em tarja/receita/PMC). Serve de fonte extra de
- * descrição/laboratório/categoria/imagem, útil justamente onde a CMED
- * e as bases de código de barras (Cosmos, Open Facts) são mais fracas:
- * genérico e produto sem embalagem fotografada em lugar nenhum. Coluna
- * "Imagem" (URL) é opcional - sem ela, só entra descrição/lab/categoria.
+ * Lista de produtos de uma distribuidora (relatório de preços/pedido,
+ * ou a planilha gerada por um extrator tipo dpcnet-extrator/), cruzada
+ * pelo EAN - mesma ideia da CMED, mas sem regra de negócio nenhuma
+ * (não mexe em tarja/receita/PMC). Serve de fonte extra de descrição/
+ * laboratório/categoria/subcategoria/imagem, útil justamente onde a
+ * CMED e as bases de código de barras (Cosmos, Open Facts) são mais
+ * fracas: genérico e produto sem embalagem fotografada em lugar
+ * nenhum. Colunas "Imagem"/"Subcategoria" são opcionais - sem elas, só
+ * entra o resto.
  *
- * Formato esperado (testado com relatório de distribuidora real): um
- * cabeçalho "Código / EAN / Descrição / ... / Laboratório / Categoria"
- * em algum lugar das primeiras linhas (antes dele vem texto solto tipo
- * "Condição:", "Prazo:", "Filial:"), igual a CMED faz com o dela.
+ * Formato esperado (testado com relatório de distribuidora real e com
+ * o dpcnet-extrator): um cabeçalho "Código / EAN / Descrição / ... /
+ * Laboratório / Categoria" em algum lugar das primeiras linhas (antes
+ * dele vem texto solto tipo "Condição:", "Prazo:", "Filial:"), igual a
+ * CMED faz com o dela.
  */
 
 import * as XLSX from "xlsx";
@@ -21,6 +24,7 @@ const COLUNAS = {
     descricao: "DESCRIÇÃO",
     laboratorio: "LABORATÓRIO",
     categoria: "CATEGORIA",
+    subcategoria: "SUBCATEGORIA",
     precoFabrica: "PREÇO FÁBRICA",
     pmc: "PMC",
     imagem: "IMAGEM"
@@ -134,6 +138,7 @@ export function lerPlanilhaDistribuidor(dados) {
             descricao,
             laboratorio: celula(bruta, COLUNAS.laboratorio),
             categoria: celula(bruta, COLUNAS.categoria),
+            subcategoria: celula(bruta, COLUNAS.subcategoria),
             precoFabrica: paraNumero(celula(bruta, COLUNAS.precoFabrica)),
             pmc: paraNumero(celula(bruta, COLUNAS.pmc)),
             imagem: celula(bruta, COLUNAS.imagem)

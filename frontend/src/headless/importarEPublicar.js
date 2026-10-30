@@ -60,9 +60,14 @@ export async function importarEPublicarExtracao({ modo = "mesclar" } = {}) {
 
             const info = consultarEanDistribuidor(indiceDistribuidor, produto.ean);
 
-            return info?.descricao
-                ? { ...produto, descricaoDistribuidor: info.descricao }
-                : produto;
+            if (!info?.descricao && !info?.categoria) return produto;
+
+            return {
+                ...produto,
+                ...(info.descricao && { descricaoDistribuidor: info.descricao }),
+                ...(info.categoria && { categoriaDistribuidor: info.categoria }),
+                ...(info.subcategoria && { subcategoriaDistribuidor: info.subcategoria })
+            };
 
         })
         : comCmed;

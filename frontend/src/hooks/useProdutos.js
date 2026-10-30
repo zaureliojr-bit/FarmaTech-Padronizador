@@ -230,7 +230,9 @@ export function useProdutos() {
 
     // Cruza com a distribuidora (se a lista já estiver carregada) -
     // acrescenta descricaoDistribuidor e, se a lista trouxer, uma URL
-    // de imagem pronta (imagemDistribuidor) - sem regra de negócio.
+    // de imagem pronta (imagemDistribuidor) e categoria/subcategoria
+    // (categoriaDistribuidor/subcategoriaDistribuidor, usadas como
+    // pista extra em extrairCategoria.js) - sem regra de negócio.
     const produtosComDistribuidor = useMemo(() => {
 
         if (!resultadoCmed) return [];
@@ -241,12 +243,14 @@ export function useProdutos() {
 
             const info = consultarEanDistribuidor(indiceDistribuidor, produto.ean);
 
-            if (!info?.descricao && !info?.imagem) return produto;
+            if (!info?.descricao && !info?.imagem && !info?.categoria) return produto;
 
             return {
                 ...produto,
                 ...(info.descricao && { descricaoDistribuidor: info.descricao }),
-                ...(info.imagem && { imagemDistribuidor: info.imagem })
+                ...(info.imagem && { imagemDistribuidor: info.imagem }),
+                ...(info.categoria && { categoriaDistribuidor: info.categoria }),
+                ...(info.subcategoria && { subcategoriaDistribuidor: info.subcategoria })
             };
 
         });
