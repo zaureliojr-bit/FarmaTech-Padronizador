@@ -386,7 +386,17 @@ async function tratarDescartarExtracao(request, env) {
 // pra não virar um balde genérico de qualquer coisa que alguém queira
 // guardar (a rota tem a mesma IMAGENS_KEY das outras, então travar o
 // nome limita o estrago de uma chave vazada).
-const CHAVES_REFERENCIA_VALIDAS = new Set(["cmed", "distribuidor", "grupo-farmacologico"]);
+// "grupo-farmacologico": a classificação vinda do MyMedFarma, subida
+// pelo padronizador.
+//
+// "subcategorias": os nomes que a loja escreve por cima dos rótulos da
+// barra de subcategoria do site (painel -> aba Catálogo). Diferente das
+// outras, que são listas de fora, esta nasce no painel - mas mora aqui
+// pelo mesmo motivo: é global, não por loja, e o site precisa lê-la sem
+// chave nenhuma.
+const CHAVES_REFERENCIA_VALIDAS = new Set([
+    "cmed", "distribuidor", "grupo-farmacologico", "subcategorias"
+]);
 
 function caminhoReferencia(chave) {
 
