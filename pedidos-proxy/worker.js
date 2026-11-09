@@ -5052,6 +5052,18 @@ export default {
                Vazio para a farmácia original, de propósito: o catálogo
                dela continua em produtos.json, onde o site dela aponta e
                onde o endereço está em cache no navegador de cliente. */
+            if (request.method === "POST" && rota === "/catalogo/editar-rede") {
+                if (!porta.dono) return json({ erro: "A edição em rede exige a chave de dono." }, 403);
+                const corpo = await request.clone().json().catch(() => null);
+                if (!corpo?.edicao || typeof corpo.edicao !== "object") {
+                    return json({ erro: "Informe a edição do produto." }, 400);
+                }
+                const primeira = loja.slug === loja.primeira;
+                if (!loja.slug || !loja.primeira) return json({ erro: "Selecione uma filial válida." }, 400);
+                const qual = primeira ? "" : "?loja=" + encodeURIComponent(loja.slug);
+                return await encaminhar(request, env, { ...publicacao(env), caminho: "/editar-rede" + qual });
+            }
+
             if (request.method === "POST" && rota === "/catalogo/publicar") {
                 const daPrimeira = !loja.slug || !loja.primeira || loja.slug === loja.primeira;
                 const qual = daPrimeira ? "" : `?loja=${encodeURIComponent(loja.slug)}`;

@@ -151,7 +151,27 @@ export default {
             return jsonResponse({ erro: "JSON inválido." }, 400);
         }
 
-        const produtos = corpo?.produtos;
+        const edicao = new URL(request.url).pathname === "/editar-rede" ? corpo?.edicao : null;
+        if (new URL(request.url).pathname === "/editar-rede" && (!edicao || typeof edicao !== "object")) {
+            return jsonResponse({ erro: "Informe a edição do produto." }, 400);
+        }
+        const produtos = edicao ? [edicao] : corpo?.produtos;
+        const campos = {};
+        if (edicao) {
+            if (!/^\d{8,14}$/.test(String(edicao.ean || ""))) {
+                return jsonResponse({ erro: "EAN inválido." }, 400);
+            }
+            for (const campo of ["nome", "descricao", "categoria", "imagem"]) {
+                if (!(campo in edicao)) continue;
+                const valor = edicao[campo];
+                if (typeof valor !== "string" || !valor.trim() || valor.length > 1500
+                    || (campo === "imagem" && !/^https:\/\/[^\s]+$/i.test(valor))) {
+                    return jsonResponse({ erro: "Valor inválido para " + campo + "." }, 400);
+                }
+                campos[campo] = valor.trim();
+            }
+            if (!Object.keys(campos).length) return jsonResponse({ erro: "Informe um campo para editar." }, 400);
+        }
 
         // "mesclar" (padrão): atualiza/acrescenta pelo EAN, mantém quem
         // não veio na planilha atual do jeito que estava. "encomenda":
@@ -284,7 +304,15 @@ export default {
 
         let produtosFinais;
 
-        if (modo === "remover") {
+        if (edicao) {
+            const corresponde = p => String(p?.ean || "") === String(edicao.ean);
+            if (!produtosExistentes.some(corresponde)) {
+                return jsonResponse({ erro: "O produto não está publicado nesta loja." }, 404);
+            }
+            produtosFinais = produtosExistentes.map(p => corresponde(p) ? {
+                ...p, ...campos, edicaoRede: { ...p.edicaoRede, ...campos }
+            } : p);
+        } else if (modo === "remover") {
 
             /* Pelos dois, EAN e código: o painel tem os dois à mão, e há
                produto no catálogo com EAN vazio (item interno da loja),
@@ -313,6 +341,15 @@ export default {
             produtosFinais = mesclarMarcandoAusentesSemEstoque(produtosExistentes, produtos);
         } else {
             produtosFinais = mesclarPorEan(produtosExistentes, produtos);
+        }
+
+        if (!edicao && modo !== "remover") {
+            const ajustes = new Map(produtosExistentes.filter(p => p?.ean && p.edicaoRede)
+                .map(p => [String(p.ean), p.edicaoRede]));
+            produtosFinais = produtosFinais.map(p => {
+                const ajuste = ajustes.get(String(p?.ean || ""));
+                return ajuste ? { ...p, ...ajuste, edicaoRede: ajuste } : p;
+            });
         }
 
         const conteudoJson = JSON.stringify({ produtos: produtosFinais }, null, 2);
