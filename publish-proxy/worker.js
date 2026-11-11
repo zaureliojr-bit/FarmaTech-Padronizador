@@ -139,7 +139,11 @@ export default {
             return jsonResponse({ erro: "Método não permitido." }, 405);
         }
 
-        if (!env.PUBLISH_KEY || request.headers.get("X-Publish-Key") !== env.PUBLISH_KEY) {
+        const url = new URL(request.url);
+        const sincronizar = url.pathname === "/estoque";
+        const chave = sincronizar ? env.ESTOQUE_SYNC_KEY : env.PUBLISH_KEY;
+        const cabecalho = sincronizar ? "X-Estoque-Sync-Key" : "X-Publish-Key";
+        if (!chave || request.headers.get(cabecalho) !== chave) {
             return jsonResponse({ erro: "Não autorizado." }, 401);
         }
 
@@ -165,13 +169,28 @@ export default {
         // teste, cadastro duplicado. Publicar a lista inteira só para
         // remover um item seria mandar 3 MB e arriscar o catálogo
         // inteiro num clique de limpeza.
-        const modo = ["substituir", "encomenda", "remover"].includes(corpo?.modo) ? corpo.modo : "mesclar";
+        const modo = sincronizar ? "estoque" : ["substituir", "encomenda", "remover"].includes(corpo?.modo) ? corpo.modo : "mesclar";
 
         if (!Array.isArray(produtos) || !produtos.length) {
             return jsonResponse({ erro: "Lista de produtos vazia ou inválida." }, 400);
         }
 
-        const arquivo = arquivoDaLoja(new URL(request.url).searchParams.get("loja"));
+        const arquivo = sincronizar ? env.ESTOQUE_SYNC_ARQUIVO : arquivoDaLoja(url.searchParams.get("loja"));
+        if (sincronizar && !/^produtos(?:-[a-z0-9-]{1,60})?\.json$/.test(arquivo || "")) {
+            return jsonResponse({ erro: "Configure o arquivo de catálogo da filial." }, 503);
+        }
+
+        const saldos = new Map();
+        if (sincronizar) {
+            for (const produto of produtos) {
+                const codigo = String(produto?.codigo ?? "").trim();
+                const saldo = produto?.estoque;
+                if (!codigo || saldos.has(codigo) || typeof saldo !== "number" || !Number.isFinite(saldo)) {
+                    return jsonResponse({ erro: "A extração contém códigos duplicados ou saldos inválidos." }, 400);
+                }
+                saldos.set(codigo, Math.max(0, saldo));
+            }
+        }
 
         const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${arquivo}`;
 
@@ -219,6 +238,7 @@ export default {
 
         let shaAtual;
         let produtosExistentes = [];
+        let catalogoAtual = {};
 
         if (atual.ok) {
 
@@ -259,6 +279,7 @@ export default {
                 if (!Array.isArray(jsonAtual.produtos)) throw new Error("sem lista de produtos");
 
                 produtosExistentes = jsonAtual.produtos;
+                catalogoAtual = jsonAtual;
 
             } catch (erro) {
 
@@ -284,7 +305,28 @@ export default {
 
         let produtosFinais;
 
-        if (modo === "remover") {
+        if (sincronizar) {
+            if (!shaAtual || !produtosExistentes.length) {
+                return jsonResponse({ erro: "O catálogo da filial precisa estar publicado antes de sincronizar." }, 409);
+            }
+            let correspondencias = 0;
+            let alterados = 0;
+            produtosFinais = produtosExistentes.map(produto => {
+                const codigo = String(produto?.codigo ?? "").trim();
+                if (!saldos.has(codigo)) return produto;
+                correspondencias++;
+                const estoque = saldos.get(codigo);
+                if (produto.estoque === estoque) return produto;
+                alterados++;
+                const atualizado = { ...produto, estoque };
+                if (estoque > 0 && Number(produto.estoque) <= 0) delete atualizado.encomenda;
+                return atualizado;
+            });
+            if (!correspondencias) {
+                return jsonResponse({ erro: "Nenhum código da extração corresponde ao catálogo da filial." }, 409);
+            }
+            if (!alterados) return jsonResponse({ ok: true, total: produtosExistentes.length, enviados: produtos.length, modo, arquivo, alterados });
+        } else if (modo === "remover") {
 
             /* Pelos dois, EAN e código: o painel tem os dois à mão, e há
                produto no catálogo com EAN vazio (item interno da loja),
@@ -315,7 +357,7 @@ export default {
             produtosFinais = mesclarPorEan(produtosExistentes, produtos);
         }
 
-        const conteudoJson = JSON.stringify({ produtos: produtosFinais }, null, 2);
+        const conteudoJson = JSON.stringify({ ...catalogoAtual, produtos: produtosFinais }, null, 2);
 
         const resposta = await fetch(apiUrl, {
 
