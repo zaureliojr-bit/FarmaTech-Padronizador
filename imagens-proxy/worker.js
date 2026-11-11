@@ -292,6 +292,11 @@ async function tratarStatusExtracao(env) {
 
     if (!pendente) return json({ pendente: false });
 
+    // O histórico no D1 pode sobreviver à remoção do arquivo no R2.
+    // Só anuncie a extração se o objeto ainda estiver disponível.
+    const arquivo = await env.IMAGENS_BUCKET.head(CHAVE_ARQUIVO_EXTRACAO);
+    if (!arquivo) return json({ pendente: false });
+
     return json({
         pendente: true,
         nomeArquivo: pendente.nome_arquivo,
