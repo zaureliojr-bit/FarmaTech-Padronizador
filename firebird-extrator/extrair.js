@@ -27,7 +27,7 @@ const XLSX = require("xlsx");
 // foto do terminal mandada por WhatsApp. Sobe quando o que o extrator
 // MANDA pra fora muda (colunas da planilha, fotografia de estoque) -
 // não a cada ajuste interno.
-const VERSAO = "2.0 (catálogo + fotografia de estoque)";
+const VERSAO = "2.1 (sincronização de estoque da vitrine)";
 
 console.log(`Extrator DrogaLink ${VERSAO}`);
 
@@ -287,6 +287,36 @@ async function enviarEstoque(linhas) {
 
 }
 
+async function sincronizarEstoqueVitrine(linhas) {
+    const url = (process.env.ESTOQUE_SYNC_URL || "").trim();
+
+    try {
+        const destino = new URL(url);
+        const chave = (process.env.ESTOQUE_SYNC_KEY || "").trim();
+        if (destino.protocol !== "https:" || destino.pathname !== "/estoque" || !chave) {
+            throw new Error("Configure a URL HTTPS de estoque e a chave da filial.");
+        }
+        if (!linhas?.length) throw new Error("A consulta de estoque não trouxe produtos.");
+        const produtos = linhas.map(linha => ({
+            codigo: linha.CODIGO,
+            estoque: linha.ESTOQUE == null ? null : Number(linha.ESTOQUE)
+        }));
+        const resposta = await fetch(destino, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Estoque-Sync-Key": chave },
+            body: JSON.stringify({ produtos }),
+            signal: AbortSignal.timeout(60000),
+            redirect: "error"
+        });
+        const dados = await resposta.json().catch(() => null);
+        if (!resposta.ok || !dados?.ok) throw new Error(dados?.erro || `HTTP ${resposta.status}`);
+        console.log(`Estoque da vitrine confirmado em ${dados.arquivo}: ${dados.enviados} saldos recebidos.`);
+    } catch (erro) {
+        console.error("Falha na sincronização da vitrine:", erro.message);
+        process.exitCode = 1;
+    }
+}
+
 Firebird.attach(OPCOES, (erro, db) => {
 
     if (erro) {
@@ -295,6 +325,19 @@ Firebird.attach(OPCOES, (erro, db) => {
         console.error("Confere: Firebird rodando, caminho do arquivo, usuário/senha no .env.");
         process.exit(1);
 
+    }
+
+    if (process.argv.includes("--estoque-vitrine")) {
+        db.query(CONSULTA_ESTOQUE, [], async (erroEstoque, linhas) => {
+            db.detach();
+            if (erroEstoque) {
+                console.error("Não consegui ler o estoque:", erroEstoque.message);
+                process.exitCode = 1;
+                return;
+            }
+            await sincronizarEstoqueVitrine(linhas);
+        });
+        return;
     }
 
     // node-firebird 2.x exige o array de parâmetros (mesmo vazio) -
@@ -332,7 +375,7 @@ Firebird.attach(OPCOES, (erro, db) => {
 
         if (!linhas || !linhas.length) {
             console.warn("A consulta não trouxe nenhuma linha - confere o filtro STATUS = 'A' e o FB_FILIAL no .env.");
-            process.exit(0);
+            return;
         }
 
         const planilha = linhas.map(paraLinhaPlanilha);
