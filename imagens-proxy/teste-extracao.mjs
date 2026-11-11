@@ -17,6 +17,7 @@ function fazerBucket() {
   return {
     _arq: arq,
     async put(k, v, o) { arq.set(k, { bytes: v, o }); },
+    async head(k) { return arq.get(k) || null; },
     async get(k) {
       const a = arq.get(k);
       return a ? { body: "(corpo)", httpMetadata: a.o?.httpMetadata } : null;
@@ -222,6 +223,18 @@ async function enviar(env, nome = "produtos_extraidos.xlsx") {
     env.IMAGENS_BUCKET._arq.set("extracoes/pendente.xlsx", { bytes: planilha(), o: {} });
     const r = await chamar(env, "GET", "/extracao/arquivo", { chave: "qualquer" });
     r.status === 401 ? ok("401, e não liberado") : nao("LIBEROU (" + r.status + ")");
+  }
+
+  console.log("\n10 · Registro sem arquivo não aparece como pendente");
+  {
+    const env = novoEnv();
+    await enviar(env);
+    await env.IMAGENS_BUCKET.delete("extracoes/pendente.xlsx");
+    const s = await chamar(env, "GET", "/extracao");
+    s.dados?.pendente === false ? ok("esconde o aviso quando o R2 não tem o arquivo") : nao("aviso sem arquivo");
+    await enviar(env, "nova.xlsx");
+    const nova = await chamar(env, "GET", "/extracao");
+    nova.dados?.nomeArquivo === "nova.xlsx" ? ok("um novo envio volta a aparecer") : nao("novo envio não apareceu");
   }
 
   console.log("\n" + (falhas ? falhas + " FALHA(S)" : "tudo passou"));
