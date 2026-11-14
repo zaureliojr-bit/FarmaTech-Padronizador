@@ -155,7 +155,28 @@ export default {
             return jsonResponse({ erro: "JSON inválido." }, 400);
         }
 
-        const produtos = corpo?.produtos;
+        const editar = url.pathname === "/editar" || url.pathname === "/catalogo/editar-rede";
+        const produtos = editar ? [corpo?.edicao] : corpo?.produtos;
+        const camposEditados = {};
+        if (editar) {
+            const edicao = corpo?.edicao;
+            if (typeof edicao?.ean !== "string" || !/^\d{8,14}$/.test(edicao.ean)) {
+                return jsonResponse({ erro: "EAN inválido." }, 400);
+            }
+            for (const campo of ["imagem", "nome", "descricao", "categoria"]) {
+                const valor = typeof edicao[campo] === "string" ? edicao[campo].trim() : "";
+                if (valor) camposEditados[campo] = valor;
+            }
+            if (!Object.keys(camposEditados).length) {
+                return jsonResponse({ erro: "Informe pelo menos um campo para editar." }, 400);
+            }
+            if (camposEditados.imagem && !URL.canParse(camposEditados.imagem)) {
+                return jsonResponse({ erro: "Informe uma URL HTTPS válida para a foto." }, 400);
+            }
+            if (camposEditados.imagem && new URL(camposEditados.imagem).protocol !== "https:") {
+                return jsonResponse({ erro: "Informe uma URL HTTPS válida para a foto." }, 400);
+            }
+        }
 
         // "mesclar" (padrão): atualiza/acrescenta pelo EAN, mantém quem
         // não veio na planilha atual do jeito que estava. "encomenda":
@@ -305,7 +326,14 @@ export default {
 
         let produtosFinais;
 
-        if (sincronizar) {
+        if (editar) {
+            const ean = produtos[0].ean;
+            if (!produtosExistentes.some(produto => String(produto.ean) === ean)) {
+                return jsonResponse({ erro: "Produto não encontrado no catálogo da filial." }, 404);
+            }
+            produtosFinais = produtosExistentes.map(produto =>
+                String(produto.ean) === ean ? { ...produto, ...camposEditados } : produto);
+        } else if (sincronizar) {
             if (!shaAtual || !produtosExistentes.length) {
                 return jsonResponse({ erro: "O catálogo da filial precisa estar publicado antes de sincronizar." }, 409);
             }

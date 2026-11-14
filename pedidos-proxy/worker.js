@@ -5052,10 +5052,12 @@ export default {
                Vazio para a farmácia original, de propósito: o catálogo
                dela continua em produtos.json, onde o site dela aponta e
                onde o endereço está em cache no navegador de cliente. */
-            if (request.method === "POST" && rota === "/catalogo/publicar") {
+            if (request.method === "POST" &&
+                (rota === "/catalogo/publicar" || rota === "/catalogo/editar-rede")) {
                 const daPrimeira = !loja.slug || !loja.primeira || loja.slug === loja.primeira;
                 const qual = daPrimeira ? "" : `?loja=${encodeURIComponent(loja.slug)}`;
-                return await encaminhar(request, env, { ...publicacao(env), caminho: "/" + qual });
+                const caminho = rota === "/catalogo/editar-rede" ? "/editar" : "/";
+                return await encaminhar(request, env, { ...publicacao(env), caminho: caminho + qual });
             }
 
             // a extração do PDV, que traz preço de custo e por isso não
