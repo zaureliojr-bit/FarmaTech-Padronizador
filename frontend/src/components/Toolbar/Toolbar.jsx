@@ -31,11 +31,11 @@ function Toolbar({
 
     const [publicando, setPublicando] = useState(false);
 
-    // "mesclar" (padrão): atualiza/acrescenta, sem mexer em quem não veio.
-    // "encomenda": pra planilha só dos itens com estoque - quem não veio
+    // "mesclar": atualiza/acrescenta, sem mexer em quem não veio.
+    // "encomenda" (padrão): pra planilha só dos itens com estoque - quem não veio
     // fica marcado sem estoque/pra encomendar, sem sumir do site.
     // "substituir": apaga do site quem não estiver nesta planilha.
-    const [modoPublicacao, setModoPublicacao] = useState("mesclar");
+    const [modoPublicacao, setModoPublicacao] = useState("encomenda");
 
     async function handlePublicar() {
 
