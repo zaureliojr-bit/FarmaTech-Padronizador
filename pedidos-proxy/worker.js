@@ -1477,7 +1477,8 @@ async function registrarVisitaCampanha(db, id, quando) {
         if (!existe) return;
 
         await db.prepare(
-            `INSERT INTO campanha_dia (dia, campanha, visitas) VALUES (?1, ?2, 1)
+            `INSERT INTO campanha_dia (dia, campanha, visitas)
+             SELECT ?1, ?2, 1 WHERE EXISTS (SELECT 1 FROM campanhas WHERE id = ?2)
              ON CONFLICT(dia, campanha) DO UPDATE SET visitas = visitas + 1`
         ).bind(diaEmSP(quando), id).run();
 
@@ -1523,7 +1524,8 @@ async function registrarPedidoDeCampanha(db, ref, id, quando) {
         if (!existe) return;
 
         await db.prepare(
-            `INSERT INTO pedido_campanha (ref, campanha, quando) VALUES (?1,?2,?3)
+            `INSERT INTO pedido_campanha (ref, campanha, quando)
+             SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM campanhas WHERE id = ?2)
              ON CONFLICT(ref) DO NOTHING`
         ).bind(ref, id, quando).run();
 
@@ -1637,6 +1639,22 @@ async function tratarExcluirCampanha(request, env, loja, db) {
     if (!id) return json({ erro: "Qual campanha?" }, 400);
 
     await db.prepare(`UPDATE campanhas SET ativa = 0 WHERE id = ?1`).bind(id).run();
+
+    return json({ ok: true });
+
+}
+
+async function tratarApagarCampanha(request, db) {
+
+    const corpo = await request.json().catch(() => null);
+    const id = limparIdCampanha(corpo?.id);
+    if (!id || id !== corpo.id) return json({ erro: "Qual campanha?" }, 400);
+
+    await db.batch([
+        db.prepare(`DELETE FROM campanhas WHERE id = ?1`).bind(id),
+        db.prepare(`DELETE FROM campanha_dia WHERE campanha = ?1`).bind(id),
+        db.prepare(`DELETE FROM pedido_campanha WHERE campanha = ?1`).bind(id)
+    ]);
 
     return json({ ok: true });
 
@@ -5020,6 +5038,7 @@ export default {
             if (request.method === "GET"  && rota === "/campanhas")         return await tratarCampanhasDaLoja(request, env, loja, db);
             if (request.method === "POST" && rota === "/campanhas")         return await tratarSalvarCampanha(request, env, loja, db);
             if (request.method === "POST" && rota === "/campanhas/excluir") return await tratarExcluirCampanha(request, env, loja, db);
+            if (request.method === "POST" && rota === "/campanhas/apagar")  return await tratarApagarCampanha(request, db);
 
             if (request.method === "GET"  && rota === "/promocoes/todas")   return await tratarPromocoesDaLoja(request, env, loja, db);
             if (request.method === "POST" && rota === "/promocoes")         return await tratarSalvarPromocoes(request, env, loja, db);
