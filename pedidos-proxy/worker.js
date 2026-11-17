@@ -2956,8 +2956,8 @@ async function tratarSalvarBanner(request, env, loja, db) {
         return json({ erro: "Ative o campo faixa_mobile no banco D1 desta filial." }, 409);
     }
     const faixaMobile = corpo.faixaMobile == null ? null : urlSegura(corpo.faixaMobile, { permitirVazio: true });
-    if (corpo.faixaMobile != null && (faixaMobile === null || !link)) {
-        return json({ erro: "Informe um link de destino e use HTTPS na arte para celular." }, 400);
+    if (corpo.faixaMobile != null && faixaMobile === null) {
+        return json({ erro: "Use uma URL HTTPS na arte para celular." }, 400);
     }
     const campoFaixa = podeFaixa ? [faixaMobile] : [];
     const ativo = corpo.ativo ? 1 : 0;
