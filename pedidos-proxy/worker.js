@@ -2876,7 +2876,7 @@ async function tratarBannersPublicos(request, env, db) {
        seria uma ida à rede a mais na primeira pintura da home. */
     const { results } = await semAEntrada(
         () => db.prepare(
-            `SELECT b.id, b.imagem, b.alt, b.link,
+            `SELECT b.*,
                     CASE WHEN e.banner_id IS NULL THEN 0 ELSE 1 END AS entrada,
                     e.imagem AS entrada_imagem
                FROM banners b
@@ -2887,7 +2887,7 @@ async function tratarBannersPublicos(request, env, db) {
               ORDER BY b.ordem, b.id`
         ).bind(hoje).all(),
         () => db.prepare(
-            `SELECT id, imagem, alt, link
+            `SELECT *
                FROM banners
               WHERE ativo = 1
                 AND (inicio IS NULL OR inicio = '' OR inicio <= ?1)
@@ -2896,7 +2896,8 @@ async function tratarBannersPublicos(request, env, db) {
         ).bind(hoje).all()
     );
 
-    return json({ banners: results || [] });
+    return json({ banners: (results || []).map(({ id, imagem, alt, link, entrada, entrada_imagem, faixa_mobile }) =>
+        ({ id, imagem, alt, link, entrada, entrada_imagem, faixa_mobile })) });
 
 }
 
@@ -2906,8 +2907,7 @@ async function tratarBannersDaLoja(request, env, loja, db) {
 
     const { results } = await semAEntrada(
         () => db.prepare(
-            `SELECT b.id, b.imagem, b.alt, b.link, b.inicio, b.fim, b.ativo,
-                    b.ordem, b.criado_em, b.r2_chave,
+            `SELECT b.*,
                     CASE WHEN e.banner_id IS NULL THEN 0 ELSE 1 END AS entrada,
                     e.imagem AS entrada_imagem
                FROM banners b
@@ -2915,13 +2915,19 @@ async function tratarBannersDaLoja(request, env, loja, db) {
               ORDER BY b.ordem, b.id`
         ).all(),
         () => db.prepare(
-            `SELECT id, imagem, alt, link, inicio, fim, ativo, ordem, criado_em, r2_chave
+            `SELECT *
                FROM banners ORDER BY ordem, id`
         ).all()
     );
 
-    return json({ banners: results || [], podeEnviarArquivo: !!env.BANNERS_BUCKET });
+    const podeFaixa = await bancoTemFaixa(db);
+    return json({ banners: results || [], podeFaixa, podeEnviarArquivo: !!env.BANNERS_BUCKET });
 
+}
+
+async function bancoTemFaixa(db) {
+    const { results } = await db.prepare("PRAGMA table_info(banners)").all();
+    return (results || []).some(coluna => coluna.name === "faixa_mobile");
 }
 
 async function tratarSalvarBanner(request, env, loja, db) {
@@ -2945,6 +2951,15 @@ async function tratarSalvarBanner(request, env, loja, db) {
         return json({ erro: "A data final não pode ser antes da inicial." }, 400);
     }
 
+    const podeFaixa = Object.hasOwn(corpo, "faixaMobile") && await bancoTemFaixa(db);
+    if (corpo.faixaMobile != null && !podeFaixa) {
+        return json({ erro: "Ative o campo faixa_mobile no banco D1 desta filial." }, 409);
+    }
+    const faixaMobile = corpo.faixaMobile == null ? null : urlSegura(corpo.faixaMobile, { permitirVazio: true });
+    if (corpo.faixaMobile != null && (faixaMobile === null || !link)) {
+        return json({ erro: "Informe um link de destino e use HTTPS na arte para celular." }, 400);
+    }
+    const campoFaixa = podeFaixa ? [faixaMobile] : [];
     const ativo = corpo.ativo ? 1 : 0;
     const ordem = Math.round(numero(corpo.ordem));
     const id = Math.round(numero(corpo.id));
@@ -2953,12 +2968,12 @@ async function tratarSalvarBanner(request, env, loja, db) {
         await db.prepare(
             `UPDATE banners
                 SET imagem = ?2, alt = ?3, link = ?4, inicio = ?5, fim = ?6,
-                    ativo = ?7, ordem = ?8, r2_chave = COALESCE(?9, r2_chave)
+                    ativo = ?7, ordem = ?8, r2_chave = COALESCE(?9, r2_chave)${podeFaixa ? ', faixa_mobile = ?10' : ''}
               WHERE id = ?1`
         ).bind(id, imagem, alt, link, inicio, fim, ativo, ordem,
-               texto(corpo.r2Chave, 200) || null).run();
+               texto(corpo.r2Chave, 200) || null, ...campoFaixa).run();
 
-        const recado = await marcarEntrada(db, id, corpo.entrada, {
+        const recado = await marcarEntrada(db, id, faixaMobile === null && corpo.entrada, {
             imagem: corpo.entradaImagem,
             r2Chave: corpo.entradaR2,
             limpar: corpo.entradaImagem === ""
@@ -2967,14 +2982,14 @@ async function tratarSalvarBanner(request, env, loja, db) {
     }
 
     const r = await db.prepare(
-        `INSERT INTO banners (imagem, alt, link, inicio, fim, ativo, ordem, criado_em, r2_chave)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`
+        `INSERT INTO banners (imagem, alt, link, inicio, fim, ativo, ordem, criado_em, r2_chave${podeFaixa ? ", faixa_mobile" : ""})
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9${podeFaixa ? ",?10" : ""})`
     ).bind(imagem, alt, link, inicio, fim, ativo, ordem, Date.now(),
-           texto(corpo.r2Chave, 200) || null).run();
+           texto(corpo.r2Chave, 200) || null, ...campoFaixa).run();
 
     const novoId = r.meta?.last_row_id ?? null;
     const recado = novoId
-        ? await marcarEntrada(db, novoId, corpo.entrada, {
+        ? await marcarEntrada(db, novoId, faixaMobile === null && corpo.entrada, {
               imagem: corpo.entradaImagem,
               r2Chave: corpo.entradaR2,
               limpar: corpo.entradaImagem === ""
