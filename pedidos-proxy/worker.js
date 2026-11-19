@@ -1660,7 +1660,7 @@ async function tratarApagarCampanha(request, db) {
 
 }
 
-async function tratarNovoPedido(request, env, db) {
+async function tratarNovoPedido(request, env, db, loja) {
 
     const corpo = await request.json().catch(() => null);
 
@@ -1850,12 +1850,14 @@ async function tratarNovoPedido(request, env, db) {
         db, ref, limparIdCampanha(corpo.campanha), criadoEm
     );
 
+    const pix = await pixDoPedido(env, loja, texto(corpo.pagamento, 40));
     return json({
         sucesso: true, ref, itens: linhas.length,
         cupom: cupom ? cupom.codigo : null,
         desconto,
-        total
-    });
+        total,
+        ...(pix ? { pix } : {})
+    }, 200, { "Cache-Control": "no-store" });
 
 }
 
@@ -3551,6 +3553,46 @@ async function tratarListarLojas(request, env, dono) {
    passa depois de o worker conferir que o banco dela está no ar — ver
    tratarAtivarLoja. Sem isso, o caminho mais curto entre "cadastrei" e
    "a dona entrou e viu a fila da farmácia errada" seria um esquecimento. */
+// Chave Pix por filial: fica fora do cadastro público (/loja) e só
+// é devolvida ao cliente no retorno de um pedido Pix gravado.
+async function garantirTabelaPix(db) {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS lojas_pix (
+        slug TEXT PRIMARY KEY, chave TEXT NOT NULL
+    )`).run();
+}
+
+function chavePixValida(valor) {
+    return typeof valor === "string" && valor.length <= 140 &&
+        !/[\x00-\x1f\x7f]/.test(valor);
+}
+
+function comandoPix(db, slug, chave) {
+    return chave.trim()
+        ? db.prepare(`INSERT INTO lojas_pix (slug, chave) VALUES (?1, ?2)
+            ON CONFLICT(slug) DO UPDATE SET chave = excluded.chave`).bind(slug, chave.trim())
+        : db.prepare(`DELETE FROM lojas_pix WHERE slug = ?1`).bind(slug);
+}
+
+async function pixDoPedido(env, loja, pagamento) {
+    if (!loja?.slug || pagamento !== "Pix") return null;
+    try {
+        const dados = await env.DB.prepare(
+            `SELECT p.chave, l.nome, l.whatsapp FROM lojas_pix p
+               JOIN lojas l ON l.slug = p.slug
+              WHERE p.slug = ?1 AND l.ativo = 1`
+        ).bind(loja.slug).first();
+        if (!dados?.chave) return null;
+        const whats = soDigitos(dados.whatsapp);
+        const whatsapp = /^\d{10,11}$/.test(whats) ? "55" + whats : whats;
+        if (!/^55[1-9]\d{9,10}$/.test(whatsapp)) return null;
+        return { chave: dados.chave, slug: loja.slug, loja: dados.nome, whatsapp };
+    } catch (erro) {
+        // Banco anterior à instalação ou indisponível: nunca empresta a chave
+        // de outra filial. O pedido continua registrado.
+        return null;
+    }
+}
+
 async function tratarCriarLoja(request, env, dono) {
 
     if (!dono) return json({ erro: "Só o dono da plataforma cadastra filial." }, 403);
@@ -3563,6 +3605,9 @@ async function tratarCriarLoja(request, env, dono) {
 
     if (!slug) return json({ erro: "Escolha o apelido da filial (só letra, número e hífen)." }, 400);
     if (!nome) return json({ erro: "Escreva o nome da farmácia." }, 400);
+
+    if (corpo.chavePix !== undefined && !chavePixValida(corpo.chavePix)) return json({ erro: "Chave Pix inválida (máximo 140 caracteres)." }, 400);
+    if (corpo.chavePix !== undefined) await garantirTabelaPix(env.DB);
 
     const jaExiste = await env.DB.prepare(`SELECT slug FROM lojas WHERE slug = ?1`).bind(slug).first();
     if (jaExiste) return json({ erro: `Já existe uma filial com o apelido "${slug}".` }, 409);
@@ -3623,6 +3668,8 @@ async function tratarCriarLoja(request, env, dono) {
             ).bind(slug, dia, abre, fecha)
         );
     }
+
+    if (corpo.chavePix !== undefined) comandos.push(comandoPix(env.DB, slug, corpo.chavePix));
 
     comandos.push(
         env.DB.prepare(
@@ -3996,7 +4043,9 @@ async function tratarLerFilial(request, env, dono, slug) {
         `SELECT dia, abre, fecha FROM lojas_horario WHERE slug = ?1 ORDER BY dia`
     ).bind(slug).all();
 
-    return json({ loja, horario: horario.results || [] });
+    await garantirTabelaPix(env.DB);
+    const pix = await env.DB.prepare(`SELECT chave FROM lojas_pix WHERE slug = ?1`).bind(slug).first();
+    return json({ loja: { ...loja, chave_pix: pix?.chave || "" }, horario: horario.results || [] });
 
 }
 
@@ -4022,6 +4071,9 @@ async function tratarEditarFilial(request, env, dono, slug) {
         }, 400);
     }
 
+    if (corpo.chavePix !== undefined && !chavePixValida(corpo.chavePix)) return json({ erro: "Chave Pix inválida (máximo 140 caracteres)." }, 400);
+    if (corpo.chavePix !== undefined) await garantirTabelaPix(env.DB);
+
     const colunas = [];
     const valores = [];
 
@@ -4033,7 +4085,7 @@ async function tratarEditarFilial(request, env, dono, slug) {
 
     const horarioNovo = Array.isArray(corpo.horario) ? corpo.horario : null;
 
-    if (!colunas.length && !horarioNovo) {
+    if (!colunas.length && !horarioNovo && corpo.chavePix === undefined) {
         return json({ erro: "Nada para alterar." }, 400);
     }
 
@@ -4050,6 +4102,8 @@ async function tratarEditarFilial(request, env, dono, slug) {
             ).bind(...valores, slug)
         );
     }
+
+    if (corpo.chavePix !== undefined) comandos.push(comandoPix(env.DB, slug, corpo.chavePix));
 
     /* O horário vem inteiro ou não vem. Alterar um dia só exigiria saber
        quais vieram e quais não, e "segunda sumiu porque a tela não a
@@ -4168,7 +4222,9 @@ async function tratarApagarFilial(request, env, dono, slug) {
     /* As quatro linhas que o cadastro espalha. Numa transação só: meio
        cadastro apagado deixaria a filial fora da lista e a senha dela
        ainda valendo. */
+    await garantirTabelaPix(env.DB);
     await env.DB.batch([
+        env.DB.prepare(`DELETE FROM lojas_pix WHERE slug = ?1`).bind(slug),
         env.DB.prepare(`DELETE FROM lojas_horario WHERE slug = ?1`).bind(slug),
         env.DB.prepare(`DELETE FROM lojas_visual  WHERE slug = ?1`).bind(slug),
         env.DB.prepare(`DELETE FROM lojas_acesso  WHERE slug = ?1`).bind(slug),
@@ -4800,7 +4856,7 @@ export default {
                 if (cheio) return cheio;
                 const alvo = await lojaPublicaDaURL(request, env);
                 if (alvo.recusa) return alvo.recusa;
-                return await tratarNovoPedido(request, env, alvo.db);
+                return await tratarNovoPedido(request, env, alvo.db, alvo.loja);
             }
 
             /* Conferir cupom: público, porque quem pergunta é o carrinho

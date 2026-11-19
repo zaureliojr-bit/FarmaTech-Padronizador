@@ -153,6 +153,42 @@ console.log("\n0. cadastrando a filial de teste");
         JSON.stringify({ b: loja.banco, p: loja.prefixo_r2 }));
 }
 
+/* Pix pertence à filial e só o dono altera. */
+console.log("\nPix por filial");
+{
+    const editarPix = (slug, chavePix) => pedir("/lojas/" + slug, { metodo: "POST", corpo: { chavePix } });
+    conferir("grava chave da filial", (await editarPix("farma-centro", "pix-filial@example.test")).status === 200);
+    conferir("grava chave da matriz", (await editarPix("mais-barato", "pix-matriz@example.test")).status === 200);
+    conferir("cada filial lê apenas a própria chave",
+        (await lerFilial("farma-centro")).loja.chave_pix === "pix-filial@example.test" &&
+        (await lerFilial("mais-barato")).loja.chave_pix === "pix-matriz@example.test");
+    const leituraPublica = await (await pedir("/loja?loja=mais-barato", { chave: null })).json();
+    conferir("chave não é publicada no cadastro público", !JSON.stringify(leituraPublica).includes("pix-matriz@example.test"));
+    conferir("chave inválida é recusada", (await editarPix("farma-centro", "x".repeat(141))).status === 400);
+    conferir("balcão não pode trocar chave", (await pedir("/lojas/farma-centro", {
+        metodo: "POST", chave: SENHA_DA_LOJA, corpo: { chavePix: "outra@example.test" }
+    })).status === 403);
+    // Ativação direta só no banco de teste para simular dois sites em produção.
+    banco.prepare("UPDATE lojas SET ativo = 1 WHERE slug = ?").run("farma-centro");
+    const pedido = (slug, pagamento, ref) => pedir("/pedidos?loja=" + slug, {
+        metodo: "POST", chave: null, corpo: { ref, cliente: "Teste", telefone: "11912345678",
+            pagamento, subtotal: 25, frete: 0, total: 25, itens: [{ codigo: "1", descricao: "Teste", qtd: 1, preco: 25 }] }
+    });
+    for (const [slug, chave, ref] of [["farma-centro", "pix-filial@example.test", "PIX-F"], ["mais-barato", "pix-matriz@example.test", "PIX-M"]]) {
+        const r = await pedido(slug, "Pix", ref);
+        const dados = await r.json();
+        conferir("retorno de pedido Pix " + slug, r.ok && dados.pix?.chave === chave && dados.pix?.slug === slug, JSON.stringify(dados));
+    }
+    const dinheiro = await (await pedido("farma-centro", "Dinheiro", "PIX-D")).json();
+    conferir("pedido em dinheiro não recebe chave", dinheiro.sucesso && !dinheiro.pix);
+    conferir("remover chave", (await editarPix("farma-centro", "")).status === 200 && (await lerFilial("farma-centro")).loja.chave_pix === "");
+    const semPix = await (await pedido("farma-centro", "Pix", "PIX-S")).json();
+    conferir("sem chave, nunca herda da matriz", semPix.sucesso && !semPix.pix);
+    banco.prepare("UPDATE lojas SET ativo = 0 WHERE slug = ?").run("farma-centro");
+    banco.exec("DELETE FROM pedido_itens WHERE ref LIKE 'PIX-%'; DELETE FROM pedidos WHERE ref LIKE 'PIX-%';");
+    bancoDaFilial.exec("DELETE FROM pedido_itens WHERE ref LIKE 'PIX-%'; DELETE FROM pedidos WHERE ref LIKE 'PIX-%';");
+}
+
 /* ---- 1. mudar o que muda na vida real -------------------------------- */
 console.log("\n1. a farmácia mudou de rua e de WhatsApp");
 {
