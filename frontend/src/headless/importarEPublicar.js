@@ -17,6 +17,7 @@ import { definirOverridesCategoria } from "../intelligence/dictionary/familias";
 import { buscarFamiliasOverride } from "../services/familiasOverrideService";
 import { buscarReferencia } from "../services/referenciasService";
 import { publicarNoSite, removerDoSite } from "../services/exportSiteService";
+import { buscarImagensEmLote } from "../services/buscaLoteImagensService";
 import { salvarImagemHospedada } from "../services/imagemHostingService";
 import { excluirProdutoDefinitivamente } from "../services/produtosExcluidosService";
 import {
@@ -226,4 +227,17 @@ export async function apagarProdutoCatalogo(ean, codigo, motivo) {
 
     return doSite;
 
+}
+
+/** Busca do catálogo com o mesmo serviço e as mesmas fontes do padronizador. */
+export async function buscarImagensCatalogoEmLote(produtos, callbacks = {}) {
+    const lista = await imagensDaDistribuidora().catch(() => null);
+    return buscarImagensEmLote(produtos.map(p => ({
+        ean: String(p.ean),
+        descricaoOriginal: p.nome,
+        descricaoSite: p.nome,
+        marca: p.marca,
+        pesquisaImagem: { principal: [p.marca, p.nome, "embalagem"].filter(Boolean).join(" ") },
+        imagemDistribuidor: lista?.imagemDe(p.ean)
+    })), callbacks);
 }

@@ -11,12 +11,12 @@ import { salvarImagem } from "./downloadService";
 // não sobrecarregar as APIs de origem.
 const CONCORRENCIA = 3;
 
-async function executarComConcorrenciaLimitada(itens, tarefa, limite) {
+async function executarComConcorrenciaLimitada(itens, tarefa, limite, deveContinuar) {
 
     const fila = [...itens];
 
     async function trabalhador() {
-        while (fila.length) {
+        while (fila.length && deveContinuar()) {
             const item = fila.shift();
             await tarefa(item);
         }
@@ -32,7 +32,7 @@ async function executarComConcorrenciaLimitada(itens, tarefa, limite) {
  * @param {Array} produtos - lista já filtrada (ex: só uma classe/categoria)
  * @param {{ onProgresso?: Function, onProdutoResolvido?: Function }} callbacks
  */
-export async function buscarImagensEmLote(produtos, { onProgresso, onProdutoResolvido } = {}) {
+export async function buscarImagensEmLote(produtos, { onProgresso, onProdutoResolvido, deveContinuar = () => true } = {}) {
 
     const pendentes = produtos.filter(
         (produto) => produto.ean && produto.statusImagem !== "salva"
@@ -85,8 +85,8 @@ export async function buscarImagensEmLote(produtos, { onProgresso, onProdutoReso
 
         }
 
-    }, CONCORRENCIA);
+    }, CONCORRENCIA, deveContinuar);
 
-    return { total, sucesso, semResultado, falha, erros: erros.slice(0, 30) };
+    return { total, concluidos, sucesso, semResultado, falha, erros: erros.slice(0, 30) };
 
 }
