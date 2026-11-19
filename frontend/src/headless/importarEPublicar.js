@@ -17,6 +17,7 @@ import { definirOverridesCategoria } from "../intelligence/dictionary/familias";
 import { buscarFamiliasOverride } from "../services/familiasOverrideService";
 import { buscarReferencia } from "../services/referenciasService";
 import { publicarNoSite, removerDoSite } from "../services/exportSiteService";
+import { buscarImagens } from "../services/imagemService";
 import { buscarImagensEmLote } from "../services/buscaLoteImagensService";
 import { salvarImagemHospedada } from "../services/imagemHostingService";
 import { excluirProdutoDefinitivamente } from "../services/produtosExcluidosService";
@@ -232,12 +233,22 @@ export async function apagarProdutoCatalogo(ean, codigo, motivo) {
 /** Busca do catálogo com o mesmo serviço e as mesmas fontes do padronizador. */
 export async function buscarImagensCatalogoEmLote(produtos, callbacks = {}) {
     const lista = await imagensDaDistribuidora().catch(() => null);
-    return buscarImagensEmLote(produtos.map(p => ({
+    return buscarImagensEmLote(produtos.map(p => produtoParaBuscaCatalogo(p, lista)), callbacks);
+}
+
+function produtoParaBuscaCatalogo(p, lista) {
+    return {
         ean: String(p.ean),
         descricaoOriginal: p.nome,
         descricaoSite: p.nome,
         marca: p.marca,
         pesquisaImagem: { principal: [p.marca, p.nome, "embalagem"].filter(Boolean).join(" ") },
         imagemDistribuidor: lista?.imagemDe(p.ean)
-    })), callbacks);
+    };
+}
+
+/** Busca individual, sem gravar: o operador escolhe a imagem. */
+export async function buscarImagemCatalogo(produto) {
+    const lista = await imagensDaDistribuidora().catch(() => null);
+    return buscarImagens(produtoParaBuscaCatalogo(produto, lista));
 }
