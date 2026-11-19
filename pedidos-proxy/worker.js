@@ -1660,7 +1660,7 @@ async function tratarApagarCampanha(request, db) {
 
 }
 
-async function tratarNovoPedido(request, env, db, loja) {
+async function tratarNovoPedido(request, env, db, loja, somentePix = false) {
 
     const corpo = await request.json().catch(() => null);
 
@@ -1716,6 +1716,22 @@ async function tratarNovoPedido(request, env, db, loja) {
     const total = cupom
         ? Number(Math.max(subtotal + frete - desconto, 0).toFixed(2))
         : numero(corpo.total);
+
+    // Prévia de Pix: calcula sem gravar pedido, cliente ou consumo de cupom.
+    if (somentePix) {
+        if (texto(corpo.pagamento, 40) !== "Pix" || corpo.temReceita ||
+            !loja?.slug || !new URL(request.url).searchParams.get("loja")) {
+            return json({ erro: "Confirme o pagamento com a farmácia." }, 400, { "Cache-Control": "no-store" });
+        }
+        const valor = Number(Math.max(subtotal + frete - desconto, 0).toFixed(2));
+        if (valor <= 0 || Math.abs(valor - numero(corpo.total)) >= 0.005 ||
+            (limparCupom(corpo.cupom) && !cupom)) {
+            return json({ erro: "O valor precisa ser reconferido antes do pagamento." }, 409, { "Cache-Control": "no-store" });
+        }
+        const pix = await pixDoPedido(env, loja, "Pix");
+        if (!pix) return json({ erro: "Pix indisponível para esta filial." }, 404, { "Cache-Control": "no-store" });
+        return json({ sucesso: true, ref, total: valor, pix }, 200, { "Cache-Control": "no-store" });
+    }
 
     // Itens normalizados aqui, e não confiando no que chegou: o total de
     // cada linha é recalculado, para o relatório não herdar conta errada.
@@ -3553,8 +3569,8 @@ async function tratarListarLojas(request, env, dono) {
    passa depois de o worker conferir que o banco dela está no ar — ver
    tratarAtivarLoja. Sem isso, o caminho mais curto entre "cadastrei" e
    "a dona entrou e viu a fila da farmácia errada" seria um esquecimento. */
-// Chave Pix por filial: fica fora do cadastro público (/loja) e só
-// é devolvida ao cliente no retorno de um pedido Pix gravado.
+// Chave Pix por filial: fica fora do cadastro público (/loja).
+// É devolvida na prévia de pagamento e no retorno do pedido Pix.
 async function garantirTabelaPix(db) {
     await db.prepare(`CREATE TABLE IF NOT EXISTS lojas_pix (
         slug TEXT PRIMARY KEY, chave TEXT NOT NULL
@@ -4847,6 +4863,17 @@ export default {
 
             // gravar pedido: aberto, porque quem chama é o site público —
             // mas com teto por IP, senão qualquer um enche a fila da loja
+            if (request.method === "POST" && rota === "/pedidos/pix") {
+                const cheio = await barrarRotaPublica(
+                    env, request, "pedidos-pix", LIMITE_PEDIDOS_HORA,
+                    "Muitas consultas de pagamento. Tente mais tarde."
+                );
+                if (cheio) return cheio;
+                const alvo = await lojaPublicaDaURL(request, env);
+                if (alvo.recusa) return alvo.recusa;
+                return await tratarNovoPedido(request, env, alvo.db, alvo.loja, true);
+            }
+
             if (request.method === "POST" && rota === "/pedidos") {
                 const cheio = await barrarRotaPublica(
                     env, request, "pedidos", LIMITE_PEDIDOS_HORA,
