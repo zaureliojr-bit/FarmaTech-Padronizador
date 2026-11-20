@@ -1,0 +1,17 @@
+{
+  "name": "solfarma-extrator",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "extrair": "node extrair.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cheerio": "1.0.0",
+    "robots-parser": "^3.0.1",
+    "xlsx": "^0.18.5"
+  }
+}
