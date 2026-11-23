@@ -2789,6 +2789,23 @@ async function cuponsPorRef(db, refs) {
 
 }
 
+// Histórico separado da fila ativa: somente pedidos concluídos da filial autenticada.
+async function tratarHistoricoPedidos(request, env, loja, db) {
+    const url = new URL(request.url);
+    const pagina = Math.max(1, Math.min(100000, Math.floor(Number(url.searchParams.get("pagina")) || 1)));
+    const limite = 20;
+    const busca = texto(url.searchParams.get("busca"), 100).trim();
+    const termo = "%" + busca.replace(/[\\%_]/g, c => "\\" + c) + "%";
+    const filtro = "status = 'entregue'" + (busca ? " AND (ref LIKE ?1 ESCAPE '\\' OR cliente LIKE ?1 ESCAPE '\\' OR telefone LIKE ?1 ESCAPE '\\')" : "");
+    const args = busca ? [termo] : [];
+    const total = await db.prepare("SELECT COUNT(*) AS total FROM pedidos WHERE " + filtro).bind(...args).first();
+    const quantidade = Number(total?.total || 0);
+    const atual = Math.min(pagina, Math.max(1, Math.ceil(quantidade / limite)));
+    const params = [...args, limite, (atual - 1) * limite];
+    const lista = await db.prepare("SELECT ref, criado_em, cliente, telefone, entrega, endereco, pagamento, subtotal, frete, total, tem_receita, status FROM pedidos WHERE " + filtro + " ORDER BY criado_em DESC, ref DESC LIMIT ?" + (args.length + 1) + " OFFSET ?" + (args.length + 2)).bind(...params).all();
+    return json({ pedidos: lista.results || [], pagina: atual, limite, total: quantidade }, 200, { "Cache-Control": "no-store" });
+}
+
 async function tratarFila(request, env, loja, db) {
 
     const ABERTOS = ["novo", "separando", "receita-ok"];
@@ -5103,6 +5120,7 @@ export default {
             if (request.method === "POST" && rota === "/reativacao/parar")      return await tratarReativacaoParar(request, env, loja, db);
             if (request.method === "GET"  && rota === "/reativacao/bloqueados") return await tratarReativacaoBloqueados(request, env, loja, db);
 
+            if (request.method === "GET" && rota === "/pedidos/historico") return await tratarHistoricoPedidos(request, env, loja, db);
             if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env, loja, db);
             if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env, loja, db);
             if (request.method === "GET" && rota === "/clientes") return await tratarClientes(request, env, loja, db);
