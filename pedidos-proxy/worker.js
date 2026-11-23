@@ -5249,6 +5249,13 @@ export default {
                Vazio para a farmácia original, de propósito: o catálogo
                dela continua em produtos.json, onde o site dela aponta e
                onde o endereço está em cache no navegador de cliente. */
+            if (request.method === "POST" && rota === "/catalogo/duplicidades") {
+                if (!porta.dono) return json({erro:"Somente o master pode aplicar decisões de duplicidades."},403);
+                if (!loja?.slug || !loja.primeira) return json({erro:"Selecione uma filial."},400);
+                const qual = loja.slug === loja.primeira ? "" : "?loja=" + encodeURIComponent(loja.slug);
+                return await encaminhar(request, env, { ...publicacao(env), caminho:"/duplicidades"+qual });
+            }
+
             if (request.method === "POST" &&
                 (rota === "/catalogo/publicar" || rota === "/catalogo/editar-rede")) {
                 const daPrimeira = !loja.slug || !loja.primeira || loja.slug === loja.primeira;
