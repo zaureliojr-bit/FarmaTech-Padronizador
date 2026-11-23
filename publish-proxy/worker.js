@@ -144,16 +144,17 @@ function resolverDuplicidades(lista, decisoes, regras) {
         if(!index.has(k)) index.set(k,[]);
         index.get(k).push(p);
     }
-    const localizar = p => {
+    const localizar = (p, permiteJaExcluido = false) => {
         if(typeof p?.codigo!=="string" || !p.codigo.trim() || typeof p?.ean!=="string" || typeof p?.nome!=="string") throw Error("Cadastro inválido.");
-        const xs=index.get(chaveDuplicidade(p))||[];
+        const chave=chaveDuplicidade(p), xs=index.get(chave)||[];
+        if (!xs.length && permiteJaExcluido && regras.has(chave)) return p;
         if(xs.length!==1) throw Error("Cadastro alterado ou ambíguo. Atualize o diagnóstico.");
         const x=xs[0];
         if(String(x.descricao || x.nome || "").trim()!==p.nome.trim()) throw Error("Descrição alterada. Atualize o diagnóstico.");
         return x;
     };
     for(const d of decisoes) {
-        const fica=localizar(d.manter), sai=localizar(d.remover);
+        const fica=localizar(d.manter), sai=localizar(d.remover,true);
         const kf=chaveDuplicidade(fica), ks=chaveDuplicidade(sai);
         if(kf===ks || !["excluir","mesclar"].includes(d.acao)) throw Error("Escolha um cadastro distinto para manter.");
         if(d.acao==="mesclar" && (!eanDuplicidade(fica) || eanDuplicidade(fica)!==eanDuplicidade(sai))) throw Error("Mesclagem só é permitida para o mesmo EAN.");
@@ -371,6 +372,7 @@ export default {
             if (!shaAtual || !produtosExistentes.length) return jsonResponse({erro:"Catálogo não encontrado."},409);
             try { produtosFinais=resolverDuplicidades(produtosExistentes,produtos,regrasDuplicidades); }
             catch (erro) { return jsonResponse({erro:erro.message},409); }
+            if (produtosFinais.length === produtosExistentes.length) return jsonResponse({ok:true,total:produtosFinais.length,modo:"duplicidades",arquivo,jaAplicado:true});
         } else {
         // Filtra antes da mesclagem para impedir a volta do código descartado.
         if (!editar && !sincronizar && modo !== "remover") {
