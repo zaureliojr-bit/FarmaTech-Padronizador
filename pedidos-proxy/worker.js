@@ -2790,6 +2790,67 @@ async function cuponsPorRef(db, refs) {
 }
 
 // Histórico separado da fila ativa: somente pedidos concluídos da filial autenticada.
+// Consulta consolidada exclusivamente para o dono; não muda a filial de operação.
+async function tratarRedePedidos(request, env, dono) {
+    if (!dono) return json({ erro: "A visão da rede é exclusiva do master." }, 403);
+    const url = new URL(request.url);
+    const slug = texto(url.searchParams.get("filial"), 60);
+    const periodo = url.searchParams.get("dias") || "0";
+    if (!["0","7","30","90"].includes(periodo)) return json({erro:"Período inválido."},400);
+    const desde = periodo === "0" ? 0 : Date.now() - Number(periodo)*86400000;
+    const status = url.searchParams.get("status") || "todos";
+    if (!["todos","abertos","entregue","cancelado"].includes(status)) return json({erro:"Status inválido."},400);
+    let cursor = null;
+    if (url.searchParams.has("cursor")) {
+        try {
+            cursor = JSON.parse(url.searchParams.get("cursor"));
+            if (!Number.isSafeInteger(cursor.t) || cursor.t < 0 || typeof cursor.s !== "string" || typeof cursor.r !== "string" || cursor.s.length > 60 || cursor.r.length > 100) throw Error();
+        } catch { return json({erro:"Página inválida."},400); }
+    }
+    const dados = await env.DB.prepare(`SELECT l.slug,l.nome,l.ativo,a.banco,
+        (SELECT slug FROM lojas WHERE ativo=1 ORDER BY criado_em LIMIT 1) AS primeira
+        FROM lojas l LEFT JOIN lojas_acesso a ON a.slug=l.slug ORDER BY l.criado_em,l.slug`).all();
+    const lojas = dados.results || [];
+    if (slug && !lojas.some(l=>l.slug===slug)) return json({erro:"Filial não encontrada."},404);
+    const escolhidas = lojas.filter(l=>!slug || l.slug===slug);
+    const contas=[], pedidos=[], falhas=[];
+    const usados = new Set();
+    for (const l of escolhidas) {
+        try {
+            if (!l.banco && l.slug !== l.primeira) throw Error("Banco não cadastrado");
+            const db = bancoDaLoja(env,l);
+            if (usados.has(db)) throw Error("Banco compartilhado entre filiais");
+            usados.add(db);
+            const resumo = await db.prepare(`SELECT COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN status='entregue' THEN total ELSE 0 END),0) AS vendas,
+                SUM(CASE WHEN status='entregue' THEN 1 ELSE 0 END) AS concluidos,
+                SUM(CASE WHEN status IN ('novo','separando','receita-ok') THEN 1 ELSE 0 END) AS abertos,
+                SUM(CASE WHEN status='cancelado' THEN 1 ELSE 0 END) AS cancelados
+                FROM pedidos WHERE criado_em >= ?1`).bind(desde).first();
+            const filtros=["criado_em >= ?1"], args=[desde];
+            if (status === "abertos") filtros.push("status IN ('novo','separando','receita-ok')");
+            else if (status !== "todos") { args.push(status); filtros.push("status = ?"+args.length); }
+            if (cursor) {
+                args.push(cursor.t);
+                const t="?"+args.length;
+                if(l.slug < cursor.s) filtros.push("criado_em <= "+t);
+                else if(l.slug > cursor.s) filtros.push("criado_em < "+t);
+                else { args.push(cursor.r); filtros.push("(criado_em < "+t+" OR (criado_em = "+t+" AND ref < ?"+args.length+"))"); }
+            }
+            const lista = await db.prepare("SELECT ref,criado_em,cliente,pagamento,entrega,total,status FROM pedidos WHERE "+filtros.join(" AND ")+" ORDER BY criado_em DESC,ref DESC LIMIT 21").bind(...args).all();
+            contas.push({slug:l.slug,nome:l.nome,...resumo});
+            pedidos.push(...(lista.results||[]).map(p=>({...p,filial:l.slug,filialNome:l.nome})));
+        } catch (erro) { falhas.push({slug:l.slug,nome:l.nome}); console.error("rede-pedidos",l.slug,erro.message); }
+    }
+    const cmp=(a,b)=>a===b?0:a>b?-1:1;
+    pedidos.sort((a,b)=>b.criado_em-a.criado_em || cmp(a.filial,b.filial) || cmp(a.ref,b.ref));
+    const pagina=pedidos.slice(0,20), ultimo=pagina.at(-1);
+    const proximo=pedidos.length>20 && ultimo ? JSON.stringify({t:ultimo.criado_em,s:ultimo.filial,r:ultimo.ref}) : null;
+    const totais={total:0,vendas:0,concluidos:0,abertos:0,cancelados:0};
+    for (const l of contas) for (const k of Object.keys(totais)) totais[k]+=Number(l[k]||0);
+    return json({lojas:lojas.map(({slug,nome,ativo})=>({slug,nome,ativo})),contas,totais,pedidos:pagina,proximo,falhas},200,{"Cache-Control":"no-store"});
+}
+
 async function tratarHistoricoPedidos(request, env, loja, db) {
     const url = new URL(request.url);
     const pagina = Math.max(1, Math.min(100000, Math.floor(Number(url.searchParams.get("pagina")) || 1)));
@@ -5120,6 +5181,7 @@ export default {
             if (request.method === "POST" && rota === "/reativacao/parar")      return await tratarReativacaoParar(request, env, loja, db);
             if (request.method === "GET"  && rota === "/reativacao/bloqueados") return await tratarReativacaoBloqueados(request, env, loja, db);
 
+            if (request.method === "GET" && rota === "/rede/pedidos") return await tratarRedePedidos(request, env, porta.dono);
             if (request.method === "GET" && rota === "/pedidos/historico") return await tratarHistoricoPedidos(request, env, loja, db);
             if (request.method === "GET" && rota === "/fila")     return await tratarFila(request, env, loja, db);
             if (request.method === "GET" && rota === "/resumo")   return await tratarResumo(request, env, loja, db);
