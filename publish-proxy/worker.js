@@ -127,6 +127,46 @@ function mesclarMarcandoAusentesSemEstoque(existentes, novos) {
 
 }
 
+// Exclusões de duplicidades são específicas da filial e do par código/EAN.
+// Nunca removem imagens compartilhadas ou modificam o PDV.
+function chaveDuplicidade(p) {
+    return JSON.stringify([String(p?.codigo ?? "").trim(),String(p?.ean ?? "").trim()]);
+}
+function eanDuplicidade(p) {
+    const e = String(p?.ean ?? "").trim().replace(/[\s.-]/g,"");
+    return /^(?:\d{8}|\d{12,14})$/.test(e) && !/^0+$/.test(e) ? e.padStart(14,"0") : "";
+}
+function resolverDuplicidades(lista, decisoes, regras) {
+    if (!Array.isArray(decisoes) || !decisoes.length || decisoes.length>200) throw Error("Selecione entre 1 e 200 decisões.");
+    const index=new Map(), remover=new Map(), manter=new Set();
+    for(const p of lista) {
+        const k=chaveDuplicidade(p);
+        if(!index.has(k)) index.set(k,[]);
+        index.get(k).push(p);
+    }
+    const localizar = p => {
+        if(typeof p?.codigo!=="string" || !p.codigo.trim() || typeof p?.ean!=="string" || typeof p?.nome!=="string") throw Error("Cadastro inválido.");
+        const xs=index.get(chaveDuplicidade(p))||[];
+        if(xs.length!==1) throw Error("Cadastro alterado ou ambíguo. Atualize o diagnóstico.");
+        const x=xs[0];
+        if(String(x.descricao || x.nome || "").trim()!==p.nome.trim()) throw Error("Descrição alterada. Atualize o diagnóstico.");
+        return x;
+    };
+    for(const d of decisoes) {
+        const fica=localizar(d.manter), sai=localizar(d.remover);
+        const kf=chaveDuplicidade(fica), ks=chaveDuplicidade(sai);
+        if(kf===ks || !["excluir","mesclar"].includes(d.acao)) throw Error("Escolha um cadastro distinto para manter.");
+        if(d.acao==="mesclar" && (!eanDuplicidade(fica) || eanDuplicidade(fica)!==eanDuplicidade(sai))) throw Error("Mesclagem só é permitida para o mesmo EAN.");
+        if(remover.has(ks) && remover.get(ks)!==kf) throw Error("Decisões conflitantes.");
+        remover.set(ks,kf); manter.add(kf);
+    }
+    for(const k of manter) if(remover.has(k) || regras.has(k)) throw Error("Um cadastro escolhido para manter também está excluído.");
+    const produtos=lista.filter(p=>!remover.has(chaveDuplicidade(p)));
+    if(!produtos.length) throw Error("Não é permitido esvaziar o catálogo.");
+    for(const k of remover.keys()) regras.add(k);
+    return produtos;
+}
+
 export default {
 
     async fetch(request, env) {
@@ -155,8 +195,9 @@ export default {
             return jsonResponse({ erro: "JSON inválido." }, 400);
         }
 
+        const duplicidades = url.pathname === "/duplicidades";
         const editar = url.pathname === "/editar" || url.pathname === "/catalogo/editar-rede";
-        const produtos = editar ? [corpo?.edicao] : corpo?.produtos;
+        let produtos = duplicidades ? corpo?.decisoes : editar ? [corpo?.edicao] : corpo?.produtos;
         const camposEditados = {};
         if (editar) {
             const edicao = corpo?.edicao;
@@ -324,8 +365,18 @@ export default {
                 { erro: "Não consegui ler o catálogo atual, então não apaguei nada." }, 502);
         }
 
+        const regrasDuplicidades = new Set(Array.isArray(catalogoAtual.duplicidadesExcluidas) ? catalogoAtual.duplicidadesExcluidas.filter(k=>typeof k==="string") : []);
         let produtosFinais;
-
+        if (duplicidades) {
+            if (!shaAtual || !produtosExistentes.length) return jsonResponse({erro:"Catálogo não encontrado."},409);
+            try { produtosFinais=resolverDuplicidades(produtosExistentes,produtos,regrasDuplicidades); }
+            catch (erro) { return jsonResponse({erro:erro.message},409); }
+        } else {
+        // Filtra antes da mesclagem para impedir a volta do código descartado.
+        if (!editar && !sincronizar && modo !== "remover") {
+            produtos = produtos.filter(p=>!regrasDuplicidades.has(chaveDuplicidade(p)));
+            produtosExistentes = produtosExistentes.filter(p=>!regrasDuplicidades.has(chaveDuplicidade(p)));
+        }
         if (editar) {
             const ean = produtos[0].ean;
             if (!produtosExistentes.some(produto => String(produto.ean) === ean)) {
@@ -385,7 +436,10 @@ export default {
             produtosFinais = mesclarPorEan(produtosExistentes, produtos);
         }
 
-        const conteudoJson = JSON.stringify({ ...catalogoAtual, produtos: produtosFinais }, null, 2);
+        }
+        produtosFinais=produtosFinais.filter(p=>!regrasDuplicidades.has(chaveDuplicidade(p)));
+        if (!produtosFinais.length && (duplicidades || regrasDuplicidades.size)) return jsonResponse({erro:"A operação deixaria o catálogo vazio."},409);
+        const conteudoJson = JSON.stringify({ ...catalogoAtual, duplicidadesExcluidas:[...regrasDuplicidades], produtos: produtosFinais }, null, 2);
 
         const resposta = await fetch(apiUrl, {
 
@@ -396,7 +450,7 @@ export default {
                 /* O nome do arquivo vai na mensagem do commit: com uma
                    farmácia só dava para saber qual catálogo mudou pelo
                    contexto, com dez não dá. */
-                message: (modo === "substituir"
+                message: (duplicidades ? "Resolver duplicidades da filial" : modo === "substituir"
                     ? `Publicar catálogo completo (${produtos.length} produtos)`
                     : modo === "remover"
                         ? `Apagar ${produtos.length} produto(s)`
@@ -417,7 +471,7 @@ export default {
            sucesso" não diz se foi no catálogo da farmácia certa — e esse
            é o erro que ninguém percebe até um cliente estranhar o preço. */
         return jsonResponse({
-            ok: true, total: produtosFinais.length, enviados: produtos.length, modo, arquivo
+            ok: true, total: produtosFinais.length, enviados: produtos.length, modo: duplicidades ? "duplicidades" : modo, arquivo
         });
 
     }
