@@ -27,7 +27,7 @@ const XLSX = require("xlsx");
 // foto do terminal mandada por WhatsApp. Sobe quando o que o extrator
 // MANDA pra fora muda (colunas da planilha, fotografia de estoque) -
 // não a cada ajuste interno.
-const VERSAO = "3.0-beta (compras piloto local)";
+const VERSAO = "3.0-beta.2 (compras piloto local)";
 
 console.log(`Extrator DrogaLink ${VERSAO}`);
 
@@ -328,11 +328,14 @@ async function exportarCompras(db) {
     const tx = await new Promise((resolve, reject) =>
         db.transaction(isolation, (err, t) => err ? reject(err) : resolve(t)));
     const query = (sql) => new Promise((resolve, reject) =>
-        tx.query(sql, [FILIAL, dias], (err, rows) => err ? reject(err) : resolve(rows)));
-    const filtro = "C.CD_FILIAL = ? AND C.DT_ENTRADA >= CURRENT_DATE - ? AND C.DT_ENTRADA <= CURRENT_DATE";
+        tx.query(sql, [], (err, rows) => err ? reject(err) : resolve(rows)));
+    // Ambos os números foram validados como inteiros; evita inferência DATE no parâmetro do driver.
+    const filtro = `C.CD_FILIAL = ${FILIAL} AND C.DT_ENTRADA >= CURRENT_DATE - ${dias} AND C.DT_ENTRADA <= CURRENT_DATE`;
     let notas, itens;
     try {
+        console.log("Compras: consultando notas...");
         notas = await query(`SELECT C.CD_COMPRAS, C.CD_FILIAL, C.CD_DISTRIBUIDOR, D.NOME AS FORNECEDOR, D.CNPJ AS CNPJ_FORNECEDOR, C.DT_PEDIDO, C.DT_ENTRADA, C.DT_EMISSAO, C.NOTA_FISCAL, C.SERIE_NOTA_FISCAL, C.CHAVENFE, C.STATUS, C.CD_CFOP, C.BONIFICACAO, C.TRANSFERENCIA, C.CONSIGNACAO, C.TOTAL_NOTA, C.VL_TOTALPRODUTOS, C.VL_DESCONTO_NOTA, C.VL_FRETE, C.VL_SEGURO, C.OUTRAS_DESPESAS, C.VL_IPI, C.ICM_VALORSUBST, C.CD_USUARIO_CRIACAO, C.CD_USUARIO_CONCLUSAO FROM COMPRAS C LEFT JOIN DISTRIBUIDORES D ON D.CD_DISTRIBUIDOR = C.CD_DISTRIBUIDOR WHERE ${filtro} ORDER BY C.CD_COMPRAS`);
+        console.log("Compras: consultando itens...");
         itens = await query(`SELECT I.CD_ITENS_COMPRA, I.CD_COMPRAS, I.CD_FILIAL, I.ID_PRODUTO, I.CD_PRODUTO, I.CODIGO_BARRAS, I.DESCRICAO, I.QUANTIDADE, I.QT_EMBALAGEM, I.UNIDADE, I.VL_UNITARIO, I.VL_DESCONTO, I.VL_TOTAL, I.CUSTO_APLICADO, I.ULTIMOCUSTO, I.NOVO_CUSTO, I.VALOR_FRETE, I.VALOR_SEGURO, I.VALOR_OUTRASDESPESAS, I.VL_IPI, I.VALORICMSSUBTITUICAO, I.CFOP, I.LOTE, I.SALDO, I.ESTOQUE_MINIMO, I.ESTOQUE_MAXIMO FROM ITENS_COMPRA I JOIN COMPRAS C ON C.CD_COMPRAS = I.CD_COMPRAS AND C.CD_FILIAL = I.CD_FILIAL WHERE ${filtro} ORDER BY I.CD_COMPRAS, I.CD_ITENS_COMPRA`);
     } finally {
         await new Promise((resolve, reject) => tx.rollback(err => err ? reject(err) : resolve()));
