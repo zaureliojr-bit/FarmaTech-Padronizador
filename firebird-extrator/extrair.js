@@ -317,6 +317,43 @@ async function sincronizarEstoqueVitrine(linhas) {
     }
 }
 
+
+ // Piloto administrativo: somente leitura, sem envio para a vitrine.
+async function exportarCompras(db) {
+    const dias = Number(process.env.COMPRAS_DIAS || "90");
+    if (!Number.isInteger(dias) || dias < 1 || dias > 366 || FILIAL < 1)
+        throw new Error("Configure FB_FILIAL real e COMPRAS_DIAS entre 1 e 366.");
+    const isolation = Firebird.ISOLATION_READ_COMMITTED_READ_ONLY;
+    if (isolation == null) throw new Error("Driver sem isolamento somente leitura.");
+    const tx = await new Promise((resolve, reject) =>
+        db.transaction(isolation, (err, t) => err ? reject(err) : resolve(t)));
+    const query = (sql) => new Promise((resolve, reject) =>
+        tx.query(sql, [FILIAL, dias], (err, rows) => err ? reject(err) : resolve(rows)));
+    const filtro = "C.CD_FILIAL = ? AND C.DT_ENTRADA >= CURRENT_DATE - ? AND C.DT_ENTRADA <= CURRENT_DATE";
+    let notas, itens;
+    try {
+        notas = await query(`SELECT C.CD_COMPRAS, C.CD_FILIAL, C.CD_DISTRIBUIDOR, D.NOME AS FORNECEDOR, D.CNPJ AS CNPJ_FORNECEDOR, C.DT_PEDIDO, C.DT_ENTRADA, C.DT_EMISSAO, C.NOTA_FISCAL, C.SERIE_NOTA_FISCAL, C.CHAVENFE, C.STATUS, C.CD_CFOP, C.BONIFICACAO, C.TRANSFERENCIA, C.CONSIGNACAO, C.TOTAL_NOTA, C.VL_TOTALPRODUTOS, C.VL_DESCONTO_NOTA, C.VL_FRETE, C.VL_SEGURO, C.OUTRAS_DESPESAS, C.VL_IPI, C.ICM_VALORSUBST, C.CD_USUARIO_CRIACAO, C.CD_USUARIO_CONCLUSAO FROM COMPRAS C LEFT JOIN DISTRIBUIDORES D ON D.CD_DISTRIBUIDOR = C.CD_DISTRIBUIDOR WHERE ${filtro} ORDER BY C.CD_COMPRAS`);
+        itens = await query(`SELECT I.CD_ITENS_COMPRA, I.CD_COMPRAS, I.CD_FILIAL, I.ID_PRODUTO, I.CD_PRODUTO, I.CODIGO_BARRAS, I.DESCRICAO, I.QUANTIDADE, I.QT_EMBALAGEM, I.UNIDADE, I.VL_UNITARIO, I.VL_DESCONTO, I.VL_TOTAL, I.CUSTO_APLICADO, I.ULTIMOCUSTO, I.NOVO_CUSTO, I.VALOR_FRETE, I.VALOR_SEGURO, I.VALOR_OUTRASDESPESAS, I.VL_IPI, I.VALORICMSSUBTITUICAO, I.CFOP, I.LOTE, I.SALDO, I.ESTOQUE_MINIMO, I.ESTOQUE_MAXIMO FROM ITENS_COMPRA I JOIN COMPRAS C ON C.CD_COMPRAS = I.CD_COMPRAS AND C.CD_FILIAL = I.CD_FILIAL WHERE ${filtro} ORDER BY I.CD_COMPRAS, I.CD_ITENS_COMPRA`);
+    } finally {
+        await new Promise((resolve, reject) => tx.rollback(err => err ? reject(err) : resolve()));
+    }
+    // Mantém todos os status e itens originais; não deduz comprador nem elimina linhas.
+    const ids = new Set();
+    let idsAusentes = 0, idsRepetidos = 0;
+    for (const i of itens) {
+        if (i.CD_ITENS_COMPRA == null) { idsAusentes++; continue; }
+        const k = [i.CD_FILIAL, i.CD_COMPRAS, i.CD_ITENS_COMPRA].join(":");
+        if (ids.has(k)) idsRepetidos++;
+        ids.add(k);
+    }
+    const saida = "compras_piloto_filial_" + FILIAL + ".json";
+    const tmp = saida + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ schema: 1, filial: FILIAL, dias, extraido_em: new Date().toISOString(), diagnostico: { idsAusentes, idsRepetidos }, notas, itens }, null, 2), { encoding: "utf8" });
+    fs.renameSync(tmp, saida);
+    console.log("Compras piloto: " + notas.length + " notas, " + itens.length + " itens. Arquivo local: " + saida);
+    console.log("IDs ausentes: " + idsAusentes + "; IDs repetidos: " + idsRepetidos);
+}
+
 Firebird.attach(OPCOES, (erro, db) => {
 
     if (erro) {
@@ -325,6 +362,14 @@ Firebird.attach(OPCOES, (erro, db) => {
         console.error("Confere: Firebird rodando, caminho do arquivo, usuário/senha no .env.");
         process.exit(1);
 
+    }
+
+    if (process.argv.includes("--compras")) {
+        exportarCompras(db).catch(erro => {
+            console.error("Falha na extração de compras:", erro.message);
+            process.exitCode = 1;
+        }).finally(() => db.detach());
+        return;
     }
 
     if (process.argv.includes("--estoque-vitrine")) {
