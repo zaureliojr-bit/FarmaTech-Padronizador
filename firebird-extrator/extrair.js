@@ -27,7 +27,7 @@ const XLSX = require("xlsx");
 // foto do terminal mandada por WhatsApp. Sobe quando o que o extrator
 // MANDA pra fora muda (colunas da planilha, fotografia de estoque) -
 // não a cada ajuste interno.
-const VERSAO = "3.0-beta.2 (compras piloto local)";
+const VERSAO = "3.0-beta.3 (compras piloto e sincronização opcional)";
 
 console.log(`Extrator DrogaLink ${VERSAO}`);
 
@@ -349,12 +349,40 @@ async function exportarCompras(db) {
         if (ids.has(k)) idsRepetidos++;
         ids.add(k);
     }
+    const payload = { schema: 1, filial: FILIAL, dias, extraido_em: new Date().toISOString(), diagnostico: { idsAusentes, idsRepetidos }, notas, itens };
     const saida = "compras_piloto_filial_" + FILIAL + ".json";
     const tmp = saida + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify({ schema: 1, filial: FILIAL, dias, extraido_em: new Date().toISOString(), diagnostico: { idsAusentes, idsRepetidos }, notas, itens }, null, 2), { encoding: "utf8" });
+    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), { encoding: "utf8" });
     fs.renameSync(tmp, saida);
     console.log("Compras piloto: " + notas.length + " notas, " + itens.length + " itens. Arquivo local: " + saida);
     console.log("IDs ausentes: " + idsAusentes + "; IDs repetidos: " + idsRepetidos);
+    if (process.argv.includes("--enviar-compras")) {
+        if (idsAusentes || idsRepetidos) throw new Error("IDs inválidos; envio bloqueado.");
+        await enviarCompras(payload);
+    }
+}
+
+async function enviarCompras(payload) {
+    const destino = new URL((process.env.COMPRAS_URL || "").trim());
+    const chave = (process.env.COMPRAS_KEY || "").trim();
+    if (destino.protocol !== "https:" || destino.pathname !== "/" || destino.search || destino.hash || destino.username || destino.password || !chave)
+        throw new Error("Configure COMPRAS_URL HTTPS na raiz e COMPRAS_KEY exclusiva da filial.");
+    const lote = require("crypto").randomUUID();
+    const post = async (rota, dados) => {
+        const resp = await fetch(new URL(rota, destino), {
+            method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + chave },
+            body: JSON.stringify({ lote, ...dados }), signal: AbortSignal.timeout(60000), redirect: "error"
+        });
+        const r = await resp.json().catch(() => null);
+        if (!resp.ok || !r?.ok) throw new Error("Compras: " + rota + " HTTP " + resp.status);
+    };
+    await post("/compras/iniciar", { filial: FILIAL, extraido_em: payload.extraido_em, notas: payload.notas.length, itens: payload.itens.length });
+    for (const tipo of ["notas", "itens"]) {
+        for (let i = 0; i < payload[tipo].length; i += 100)
+            await post("/compras/parte", { tipo, pos: i / 100, dados: payload[tipo].slice(i, i + 100) });
+    }
+    await post("/compras/concluir", {});
+    console.log("Compras: lote publicado no banco administrativo.");
 }
 
 Firebird.attach(OPCOES, (erro, db) => {
