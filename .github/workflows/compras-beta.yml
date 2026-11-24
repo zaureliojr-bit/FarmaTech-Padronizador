@@ -1,0 +1,33 @@
+name: Extrator compras beta
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'firebird-extrator/**'
+      - '.github/workflows/compras-beta.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    if: github.head_ref == 'drogalink/compras-piloto'
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: firebird-extrator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: node --check extrair.js
+      - name: Verificar suporte a leitura
+        run: node -e "if (require('node-firebird').ISOLATION_READ_COMMITTED_READ_ONLY == null) process.exit(1)"
+      - run: npm run build:exe
+      - run: Rename-Item dist/extrator.exe extrator-compras-beta.exe
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extrator-compras-beta-windows
+          path: firebird-extrator/dist/extrator-compras-beta.exe
+          if-no-files-found: error
