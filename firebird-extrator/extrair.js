@@ -27,7 +27,7 @@ const XLSX = require("xlsx");
 // foto do terminal mandada por WhatsApp. Sobe quando o que o extrator
 // MANDA pra fora muda (colunas da planilha, fotografia de estoque) -
 // não a cada ajuste interno.
-const VERSAO = "2.1 (sincronização de estoque da vitrine)";
+const VERSAO = "3.0-beta (compras piloto local)";
 
 console.log(`Extrator DrogaLink ${VERSAO}`);
 
