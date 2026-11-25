@@ -108,6 +108,26 @@ async function migrarCompras(db,b,lojas){
  if(!r.ok)return r;
  return reply({ok:true,concluido:true,notas:check.notas,itens:check.itens,periodo_observado:{inicio,fim}});
 }
+// Leitura consolidada, ancorada em lote publicado. Ausência não equivale a cancelamento.
+const consolidadoCTE="WITH versoes AS (SELECT m.compra,m.hash,ROW_NUMBER() OVER(PARTITION BY m.compra ORDER BY p.extraido_em DESC,p.lote DESC) AS rn FROM compras_inc_manifesto m JOIN compras_inc_publicados p ON p.loja=m.loja AND p.lote=m.lote WHERE m.loja=? AND (p.extraido_em<? OR (p.extraido_em=? AND p.lote<=?))), atuais AS (SELECT v.compra,c.nota,c.itens FROM versoes v JOIN compras_inc_conteudo c ON c.loja=? AND c.compra=v.compra AND c.hash=v.hash WHERE v.rn=1) ";
+const consolidadoArgs=(loja,p)=>[loja,p.extraido_em,p.extraido_em,p.lote,loja];
+async function listarConsolidado(db){
+ const antigas=(await db.prepare("SELECT a.loja,a.lote,a.extraido_em,l.notas,l.itens FROM compras_ativos a JOIN compras_lotes l ON l.loja=a.loja AND l.lote=a.lote").all()).results;
+ const novas=(await db.prepare("SELECT loja,lote,extraido_em FROM (SELECT p.*,ROW_NUMBER() OVER(PARTITION BY loja ORDER BY extraido_em DESC,lote DESC) AS rn FROM compras_inc_publicados p) WHERE rn=1").all()).results;
+ const lojas=new Map(antigas.map(a=>[a.loja,{...a,fonte:"lote-original"}]));
+ for(const p of novas){
+  const contagem=await db.prepare(consolidadoCTE+"SELECT COUNT(*) AS notas,COALESCE(SUM(json_array_length(itens)),0) AS itens FROM atuais").bind(...consolidadoArgs(p.loja,p)).first();
+  lojas.set(p.loja,{...p,...contagem,fonte:"incremental",lote_original_mais_recente:lojas.get(p.loja)?.extraido_em||null});
+ }
+ return [...lojas.values()].sort((a,b)=>a.loja.localeCompare(b.loja));
+}
+async function parteConsolidada(db,loja,lote,tipo,pos){
+ const p=await db.prepare("SELECT lote,extraido_em FROM compras_inc_publicados WHERE loja=? AND lote=?").bind(loja,lote).first();
+ if(!p)return null;
+ const sql=tipo==="notas"?"SELECT nota AS dado FROM atuais ORDER BY compra LIMIT ? OFFSET ?":"SELECT j.value AS dado FROM atuais a,json_each(a.itens) j ORDER BY a.compra,CAST(j.key AS INTEGER) LIMIT ? OFFSET ?";
+ const rows=(await db.prepare(consolidadoCTE+sql).bind(...consolidadoArgs(loja,p),size,pos*size).all()).results;
+ return rows.map(r=>JSON.parse(r.dado));
+}
 export default {async fetch(req,env){
  try {
  const url=new URL(req.url), path=url.pathname, db=env.COMPRAS_DB;
@@ -121,11 +141,16 @@ export default {async fetch(req,env){
  const rows=(await db.prepare("SELECT h.loja,h.lote,h.extraido_em,l.notas,l.itens,CASE WHEN p.lote IS NULL THEN 0 ELSE 1 END AS migrado FROM compras_historico h JOIN compras_lotes l ON l.loja=h.loja AND l.lote=h.lote LEFT JOIN compras_inc_publicados p ON p.loja=h.loja AND p.lote=h.lote WHERE (h.loja||':'||h.lote)>? ORDER BY h.loja||':'||h.lote LIMIT 50").bind(cursor).all()).results;
  return reply({lotes:rows,cursor:rows.length===50?rows[49].loja+":"+rows[49].lote:null});
  }
+ if(path==="/compras"&&env.COMPRAS_LEITURA_INCREMENTAL==="1")return reply({lojas:await listarConsolidado(db)});
  if(path==="/compras")return reply({lojas:(await db.prepare("SELECT a.loja,a.lote,a.extraido_em,l.notas,l.itens FROM compras_ativos a JOIN compras_lotes l ON l.loja=a.loja AND l.lote=a.lote ORDER BY a.loja").all()).results});
  if(path==="/compras/historico")return reply({lotes:(await db.prepare("SELECT h.loja,h.lote,h.extraido_em,l.notas,l.itens FROM compras_historico h JOIN compras_lotes l ON l.loja=h.loja AND l.lote=h.lote ORDER BY h.extraido_em DESC LIMIT 500").all()).results});
  if(path!=="/compras/parte")return reply({erro:"Rota inexistente"},404);
  const loja=url.searchParams.get("loja"),lote=url.searchParams.get("lote"),tipo=url.searchParams.get("tipo"),pos=Number(url.searchParams.get("pos"));
  if(!slug.test(loja||"")||!uuid.test(lote||"")||!["notas","itens"].includes(tipo)||!integer(pos,0,9999))return reply({erro:"Parâmetros inválidos"},400);
+ if(env.COMPRAS_LEITURA_INCREMENTAL==="1"){
+ const dados=await parteConsolidada(db,loja,lote,tipo,pos);
+ if(dados!==null)return reply({dados});
+ }
  const row=await db.prepare("SELECT p.dados FROM compras_partes p JOIN compras_historico a ON a.loja=p.loja AND a.lote=p.lote WHERE p.loja=? AND p.lote=? AND p.tipo=? AND p.pos=?").bind(loja,lote,tipo,pos).first();
  return row?reply({dados:JSON.parse(row.dados)}):reply({erro:"Parte indisponível"},404);
  }
