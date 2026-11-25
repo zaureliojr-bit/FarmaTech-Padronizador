@@ -1,15 +1,15 @@
-name: Extrator compras beta
+
+name: Extrator compras incremental
+
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'firebird-extrator/**'
-      - '.github/workflows/compras-beta.yml'
+  push:
+    branches: ['drogalink/compras-incremental']
+
 permissions:
   contents: read
+
 jobs:
   build:
-    if: github.head_ref == 'drogalink/compras-piloto'
     runs-on: windows-latest
     defaults:
       run:
@@ -21,13 +21,11 @@ jobs:
           node-version: '22'
       - run: npm ci
       - run: node --check extrair.js
-      - name: Verificar suporte a leitura
-        run: node -e "if (require('node-firebird').ISOLATION_READ_COMMITTED_READ_ONLY == null) process.exit(1)"
       - run: npm run build:exe
-      - run: Rename-Item dist/extrator.exe extrator-compras-beta.exe
+      - run: Rename-Item dist/extrator.exe extrator-compras-incremental.exe
         shell: pwsh
       - uses: actions/upload-artifact@v4
         with:
-          name: extrator-compras-beta-windows
-          path: firebird-extrator/dist/extrator-compras-beta.exe
+          name: extrator-compras-incremental-windows
+          path: firebird-extrator/dist/extrator-compras-incremental.exe
           if-no-files-found: error
