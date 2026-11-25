@@ -331,8 +331,10 @@ async function exportarCompras(db) {
         tx.query(sql, [], (err, rows) => err ? reject(err) : resolve(rows)));
     // Ambos os números foram validados como inteiros; evita inferência DATE no parâmetro do driver.
     const filtro = `C.CD_FILIAL = ${FILIAL} AND C.DT_ENTRADA >= CURRENT_DATE - ${dias} AND C.DT_ENTRADA <= CURRENT_DATE`;
-    let notas, itens;
+    let notas, itens, janela;
     try {
+        const datas = await query(`SELECT CAST(CURRENT_DATE - ${dias} AS VARCHAR(10)) AS INICIO, CAST(CURRENT_DATE AS VARCHAR(10)) AS FIM FROM RDB$DATABASE`);
+        janela = { inicio: String(datas[0].INICIO).trim(), fim: String(datas[0].FIM).trim() };
         console.log("Compras: consultando notas...");
         notas = await query(`SELECT C.CD_COMPRAS, C.CD_FILIAL, C.CD_DISTRIBUIDOR, D.NOME AS FORNECEDOR, D.CNPJ AS CNPJ_FORNECEDOR, C.DT_PEDIDO, C.DT_ENTRADA, C.DT_EMISSAO, C.NOTA_FISCAL, C.SERIE_NOTA_FISCAL, C.CHAVENFE, C.STATUS, C.CD_CFOP, C.BONIFICACAO, C.TRANSFERENCIA, C.CONSIGNACAO, C.TOTAL_NOTA, C.VL_TOTALPRODUTOS, C.VL_DESCONTO_NOTA, C.VL_FRETE, C.VL_SEGURO, C.OUTRAS_DESPESAS, C.VL_IPI, C.ICM_VALORSUBST, C.CD_USUARIO_CRIACAO, C.CD_USUARIO_CONCLUSAO FROM COMPRAS C LEFT JOIN DISTRIBUIDORES D ON D.CD_DISTRIBUIDOR = C.CD_DISTRIBUIDOR WHERE ${filtro} ORDER BY C.CD_COMPRAS`);
         console.log("Compras: consultando itens...");
@@ -356,10 +358,62 @@ async function exportarCompras(db) {
     fs.renameSync(tmp, saida);
     console.log("Compras piloto: " + notas.length + " notas, " + itens.length + " itens. Arquivo local: " + saida);
     console.log("IDs ausentes: " + idsAusentes + "; IDs repetidos: " + idsRepetidos);
-    if (process.argv.includes("--enviar-compras")) {
+    if (process.argv.includes("--enviar-compras") || process.argv.includes("--enviar-compras-incremental")) {
         if (idsAusentes || idsRepetidos) throw new Error("IDs inválidos; envio bloqueado.");
-        await enviarCompras(payload);
+        if (process.argv.includes("--enviar-compras-incremental")) {
+            if (process.argv.includes("--enviar-compras")) throw new Error("Escolha apenas um modo de envio.");
+            await enviarComprasIncremental(payload, janela);
+        } else await enviarCompras(payload);
     }
+}
+
+// O servidor é a fonte de verdade dos hashes conhecidos; não depende de cache local.
+function canonCompras(v) {
+    if (Array.isArray(v)) return "[" + v.map(canonCompras).join(",") + "]";
+    if (v !== null && typeof v === "object") return "{" + Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + canonCompras(v[k])).join(",") + "}";
+    return JSON.stringify(v);
+}
+async function enviarComprasIncremental(payload, janela) {
+    const destino = new URL((process.env.COMPRAS_URL || "").trim());
+    const chave = (process.env.COMPRAS_KEY || "").trim();
+    if (destino.protocol !== "https:" || destino.pathname !== "/" || destino.search || destino.hash || destino.username || destino.password || !chave)
+        throw new Error("Configure COMPRAS_URL HTTPS e COMPRAS_KEY exclusiva da filial.");
+    if (!janela || !/^\d{4}-\d{2}-\d{2}$/.test(janela.inicio) || !/^\d{4}-\d{2}-\d{2}$/.test(janela.fim)) throw new Error("Janela de compras inválida.");
+    const crypto = require("crypto"), lote = crypto.randomUUID(), compras = new Map();
+    for (const original of payload.notas) {
+        const nota = JSON.parse(JSON.stringify(original)), compra = nota.CD_COMPRAS;
+        if (nota.CD_FILIAL !== FILIAL || !Number.isSafeInteger(compra) || compra < 1 || compras.has(compra)) throw new Error("Nota inválida ou repetida.");
+        compras.set(compra, { nota, itens: [] });
+    }
+    for (const original of payload.itens) {
+        const i = JSON.parse(JSON.stringify(original)), r = compras.get(i.CD_COMPRAS);
+        if (!r || i.CD_FILIAL !== FILIAL) throw new Error("Item sem nota correspondente.");
+        r.itens.push(i);
+    }
+    const registros = [];
+    for (const [compra, r] of compras) {
+        r.itens.sort((a,b)=>a.CD_ITENS_COMPRA-b.CD_ITENS_COMPRA);
+        r.hash = crypto.createHash("sha256").update(canonCompras({nota:r.nota,itens:r.itens}),"utf8").digest("hex");
+        registros.push({ compra, hash:r.hash });
+    }
+    async function post(rota,dados) {
+        const body=JSON.stringify({lote,...dados});
+        if(Buffer.byteLength(body,"utf8")>500000)throw new Error("Compra excede limite de envio; lote não publicado.");
+        const resp=await fetch(new URL("/compras/inc/"+rota,destino),{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+chave},body,signal:AbortSignal.timeout(60000),redirect:"error"});
+        const r=await resp.json().catch(()=>null);
+        if(!resp.ok||!r?.ok)throw new Error("Compras incremental: "+rota+" HTTP "+resp.status);
+        return r;
+    }
+    await post("iniciar",{filial:FILIAL,extraido_em:payload.extraido_em,...janela,quantidade:registros.length});
+    let enviados=0;
+    for(let i=0;i<registros.length;i+=40){
+        const bloco=registros.slice(i,i+40), resposta=await post("manifesto",{registros:bloco});
+        if(!Array.isArray(resposta.faltantes)||new Set(resposta.faltantes).size!==resposta.faltantes.length||resposta.faltantes.some(k=>!bloco.some(r=>r.compra===k)))throw new Error("Manifesto retornado inválido.");
+        for(const compra of resposta.faltantes){await post("conteudo",compras.get(compra));enviados++;}
+        console.log("Compras incremental: "+Math.min(i+40,registros.length)+"/"+registros.length+" verificadas, "+enviados+" enviadas.");
+    }
+    await post("concluir",{});
+    console.log("Lote incremental publicado: "+enviados+" novas/alteradas, "+(registros.length-enviados)+" reaproveitadas.");
 }
 
 async function enviarCompras(payload) {
