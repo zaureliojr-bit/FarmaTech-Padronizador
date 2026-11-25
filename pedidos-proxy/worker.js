@@ -5105,12 +5105,13 @@ export default {
                     }
                 }
                 try {
-                    const resposta = await fetch(destino.toString(), {headers:{Authorization:"Bearer "+env.COMPRAS_MASTER_KEY},redirect:"error"});
+                    if (!env.COMPRAS_SERVICE || typeof env.COMPRAS_SERVICE.fetch !== "function") return json({erro:"Binding COMPRAS_SERVICE não configurado"},503);
+                    const resposta = await env.COMPRAS_SERVICE.fetch(new Request(destino.toString(), {headers:{Authorization:"Bearer "+env.COMPRAS_MASTER_KEY},redirect:"error"}));
                     if (!resposta.ok) return json({erro:"API de compras indisponível",status:resposta.status},resposta.status === 404 ? 404 : 502);
                     const resultado=json(await resposta.json());
                     resultado.headers.set("Cache-Control","no-store");
                     return resultado;
-                } catch { return json({erro:"Falha na comunicação com compras"},502); }
+                } catch { return json({erro:"Falha na comunicação interna COMPRAS_SERVICE"},502); }
             }
 
 
