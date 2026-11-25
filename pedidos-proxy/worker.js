@@ -5106,11 +5106,11 @@ export default {
                 }
                 try {
                     if (!env.COMPRAS_SERVICE || typeof env.COMPRAS_SERVICE.fetch !== "function") return json({erro:"Binding COMPRAS_SERVICE não configurado"},503);
-                    const resposta = await env.COMPRAS_SERVICE.fetch(new Request(destino.toString(), {headers:{Authorization:"Bearer "+env.COMPRAS_MASTER_KEY},redirect:"error"}));
+                    const chaveCompras = String(env.COMPRAS_MASTER_KEY).trim();
+                    if (!/^[a-fA-F0-9]{64}$/.test(chaveCompras)) return json({erro:"COMPRAS_MASTER_KEY deve conter 64 caracteres hexadecimais"},503);
+                    const resposta = await env.COMPRAS_SERVICE.fetch(new Request(destino.toString(), {method:"GET",headers:{Authorization:"Bearer "+chaveCompras},redirect:"manual"}));
                     if (!resposta.ok) return json({erro:"API de compras indisponível",status:resposta.status},resposta.status === 404 ? 404 : 502);
-                    const resultado=json(await resposta.json());
-                    resultado.headers.set("Cache-Control","no-store");
-                    return resultado;
+                    return json(await resposta.json(),200,{"Cache-Control":"no-store"});
                 } catch { return json({erro:"Falha na comunicação interna COMPRAS_SERVICE"},502); }
             }
 
