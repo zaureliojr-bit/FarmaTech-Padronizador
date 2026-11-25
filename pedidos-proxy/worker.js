@@ -5090,6 +5090,29 @@ export default {
 
             const loja = porta.loja;
             const db = porta.db;
+            // Compras: somente dono, segredo exclusivo mantido no servidor.
+            if (rota === "/compras/rede" || rota === "/compras/rede/historico" || rota === "/compras/rede/parte") {
+                if (!porta.dono) return json({erro:"A gestão de compras é exclusiva do master."},403);
+                if (request.method !== "GET") return json({erro:"Método inválido"},405);
+                if (!env.COMPRAS_MASTER_KEY) return json({erro:"Integração de compras não configurada"},503);
+                const destino = new URL("https://drogalink-compras-proxy.zaureliojr.workers.dev");
+                destino.pathname = rota.replace("/compras/rede","/compras");
+                if (destino.pathname === "/compras/parte") {
+                    const origem = new URL(request.url);
+                    for (const k of ["loja","lote","tipo","pos"]) {
+                        const v=origem.searchParams.get(k);
+                        if (v!==null) destino.searchParams.set(k,v);
+                    }
+                }
+                try {
+                    const resposta = await fetch(destino.toString(), {headers:{Authorization:"Bearer "+env.COMPRAS_MASTER_KEY},redirect:"error"});
+                    if (!resposta.ok) return json({erro:"API de compras indisponível",status:resposta.status},resposta.status === 404 ? 404 : 502);
+                    const resultado=json(await resposta.json());
+                    resultado.headers.set("Cache-Control","no-store");
+                    return resultado;
+                } catch { return json({erro:"Falha na comunicação com compras"},502); }
+            }
+
 
             /* A trava de escopo, num lugar só e antes de qualquer rota.
 
