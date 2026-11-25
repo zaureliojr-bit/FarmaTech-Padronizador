@@ -36,11 +36,17 @@ async function incremental(db,path,b,loja,filial){
   const a=b.registros;
   if(!Array.isArray(a)||a.length<1||a.length>100||a.some(r=>!r||!integer(r.compra,1,Number.MAX_SAFE_INTEGER)||!hashValido.test(r.hash||""))||new Set(a.map(r=>r.compra)).size!==a.length)return reply({erro:"Registros inválidos"},400);
   await db.batch(a.map(r=>db.prepare("INSERT OR IGNORE INTO compras_inc_manifesto SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM compras_inc_publicados WHERE loja=? AND lote=?)").bind(loja,lote,r.compra,r.hash,loja,lote)));
+  // Consulta em grupos de 40: reduz subrequisições e respeita o limite de parâmetros.
   const faltantes=[];
-  for(const r of a){
-   const row=await db.prepare("SELECT m.hash,c.hash AS presente FROM compras_inc_manifesto m LEFT JOIN compras_inc_conteudo c ON c.loja=m.loja AND c.compra=m.compra AND c.hash=m.hash WHERE m.loja=? AND m.lote=? AND m.compra=?").bind(loja,lote,r.compra).first();
-   if(row?.hash!==r.hash)return reply({erro:"Manifesto divergente"},409);
-   if(!row.presente)faltantes.push(r.compra);
+  for(let pos=0;pos<a.length;pos+=40){
+   const grupo=a.slice(pos,pos+40);
+   const rows=(await db.prepare("SELECT m.compra,m.hash,c.hash AS presente FROM compras_inc_manifesto m LEFT JOIN compras_inc_conteudo c ON c.loja=m.loja AND c.compra=m.compra AND c.hash=m.hash WHERE m.loja=? AND m.lote=? AND m.compra IN ("+grupo.map(()=>"?").join(",")+")").bind(loja,lote,...grupo.map(r=>r.compra)).all()).results;
+   const mapa=new Map(rows.map(r=>[r.compra,r]));
+   for(const r of grupo){
+    const row=mapa.get(r.compra);
+    if(row?.hash!==r.hash)return reply({erro:"Manifesto divergente"},409);
+    if(!row.presente)faltantes.push(r.compra);
+   }
   }
   return reply({ok:true,faltantes});
  }
