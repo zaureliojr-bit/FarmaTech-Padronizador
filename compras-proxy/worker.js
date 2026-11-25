@@ -10,6 +10,56 @@ async function equal(a,b){
  const u=new Uint8Array(x),v=new Uint8Array(y);let d=0;
  for(let i=0;i<u.length;i++)d|=u[i]^v[i];return d===0;
 }
+// Protocolo paralelo ao piloto. O manifesto só é publicado quando completo.
+const hashValido=/^[a-f0-9]{64}$/;
+const dataValida=s=>typeof s==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s;
+function canon(v){
+ if(Array.isArray(v))return "["+v.map(canon).join(",")+"]";
+ if(v!==null&&typeof v==="object")return "{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+canon(v[k])).join(",")+"}";
+ return JSON.stringify(v);
+}
+async function hashCompra(nota,itens){
+ const bytes=new TextEncoder().encode(canon({nota,itens}));
+ return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)),x=>x.toString(16).padStart(2,"0")).join("");
+}
+async function incremental(db,path,b,loja,filial){
+ const lote=b.lote;
+ if(path==="/compras/inc/iniciar"){
+  if(b.filial!==filial||!integer(b.quantidade,0,100000)||!dataValida(b.inicio)||!dataValida(b.fim)||b.inicio>b.fim||typeof b.extraido_em!=="string"||!Number.isFinite(Date.parse(b.extraido_em))||new Date(b.extraido_em).toISOString()!==b.extraido_em||Date.parse(b.extraido_em)>Date.now()+300000)return reply({erro:"Manifesto inválido"},400);
+  await db.prepare("INSERT OR IGNORE INTO compras_inc_lotes VALUES (?,?,?,?,?,?)").bind(loja,lote,b.extraido_em,b.inicio,b.fim,b.quantidade).run();
+  const m=await db.prepare("SELECT * FROM compras_inc_lotes WHERE loja=? AND lote=?").bind(loja,lote).first();
+  return m.extraido_em===b.extraido_em&&m.inicio===b.inicio&&m.fim===b.fim&&m.quantidade===b.quantidade?reply({ok:true}):reply({erro:"Manifesto divergente"},409);
+ }
+ const m=await db.prepare("SELECT * FROM compras_inc_lotes WHERE loja=? AND lote=?").bind(loja,lote).first();
+ if(!m)return reply({erro:"Lote inexistente"},404);
+ if(path==="/compras/inc/manifesto"){
+  const a=b.registros;
+  if(!Array.isArray(a)||a.length<1||a.length>100||a.some(r=>!r||!integer(r.compra,1,Number.MAX_SAFE_INTEGER)||!hashValido.test(r.hash||""))||new Set(a.map(r=>r.compra)).size!==a.length)return reply({erro:"Registros inválidos"},400);
+  await db.batch(a.map(r=>db.prepare("INSERT OR IGNORE INTO compras_inc_manifesto SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM compras_inc_publicados WHERE loja=? AND lote=?)").bind(loja,lote,r.compra,r.hash,loja,lote)));
+  const faltantes=[];
+  for(const r of a){
+   const row=await db.prepare("SELECT m.hash,c.hash AS presente FROM compras_inc_manifesto m LEFT JOIN compras_inc_conteudo c ON c.loja=m.loja AND c.compra=m.compra AND c.hash=m.hash WHERE m.loja=? AND m.lote=? AND m.compra=?").bind(loja,lote,r.compra).first();
+   if(row?.hash!==r.hash)return reply({erro:"Manifesto divergente"},409);
+   if(!row.presente)faltantes.push(r.compra);
+  }
+  return reply({ok:true,faltantes});
+ }
+ if(path==="/compras/inc/conteudo"){
+  const {nota,itens,hash}=b,compra=nota?.CD_COMPRAS;
+  if(!nota||nota.CD_FILIAL!==filial||!integer(compra,1,Number.MAX_SAFE_INTEGER)||!hashValido.test(hash||"")||!Array.isArray(itens)||itens.some(i=>!i||i.CD_FILIAL!==filial||i.CD_COMPRAS!==compra||!integer(i.CD_ITENS_COMPRA,1,Number.MAX_SAFE_INTEGER))||new Set(itens.map(i=>i.CD_ITENS_COMPRA)).size!==itens.length)return reply({erro:"Conteúdo inválido"},400);
+  if(await hashCompra(nota,itens)!==hash)return reply({erro:"Hash divergente"},409);
+  const r=await db.prepare("SELECT hash FROM compras_inc_manifesto WHERE loja=? AND lote=? AND compra=?").bind(loja,lote,compra).first();
+  if(r?.hash!==hash)return reply({erro:"Compra não declarada"},409);
+  await db.prepare("INSERT OR IGNORE INTO compras_inc_conteudo VALUES (?,?,?,?,?)").bind(loja,compra,hash,canon(nota),canon(itens)).run();
+  return reply({ok:true});
+ }
+ if(path==="/compras/inc/concluir"){
+  await db.prepare("INSERT OR IGNORE INTO compras_inc_publicados SELECT l.loja,l.lote,l.extraido_em FROM compras_inc_lotes l WHERE l.loja=? AND l.lote=? AND l.quantidade=(SELECT COUNT(*) FROM compras_inc_manifesto m WHERE m.loja=l.loja AND m.lote=l.lote) AND NOT EXISTS (SELECT 1 FROM compras_inc_manifesto m LEFT JOIN compras_inc_conteudo c ON c.loja=m.loja AND c.compra=m.compra AND c.hash=m.hash WHERE m.loja=l.loja AND m.lote=l.lote AND c.hash IS NULL)").bind(loja,lote).run();
+  const r=await db.prepare("SELECT lote FROM compras_inc_publicados WHERE loja=? AND lote=?").bind(loja,lote).first();
+  return r?reply({ok:true}):reply({erro:"Lote incremental incompleto"},409);
+ }
+ return reply({erro:"Rota inexistente"},404);
+}
 export default {async fetch(req,env){
  try {
  const url=new URL(req.url), path=url.pathname, db=env.COMPRAS_DB;
@@ -33,6 +83,7 @@ export default {async fetch(req,env){
  const raw=await req.text();if(new TextEncoder().encode(raw).length>500000)return reply({erro:"Carga grande"},413);
  const b=JSON.parse(raw),lote=b.lote;
  if(!uuid.test(lote||""))return reply({erro:"Lote inválido"},400);
+ if(path.startsWith("/compras/inc/"))return await incremental(db,path,b,loja,filial);
  if(path==="/compras/iniciar"){
  if(b.filial!==filial||!integer(b.notas,0,100000)||!integer(b.itens,0,500000)||typeof b.extraido_em!=="string"||!Number.isFinite(Date.parse(b.extraido_em))||new Date(b.extraido_em).toISOString()!==b.extraido_em||Date.parse(b.extraido_em)>Date.now()+300000)return reply({erro:"Manifesto inválido"},400);
  await db.prepare("INSERT OR IGNORE INTO compras_lotes VALUES (?,?,?,?,?)").bind(loja,lote,b.extraido_em,b.notas,b.itens).run();
