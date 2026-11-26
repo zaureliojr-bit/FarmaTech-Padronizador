@@ -68,6 +68,7 @@ async function syncCmv(req,db){
   const k=d.filial+":"+d.dia;if(seen.has(k))fail("Dia duplicado");seen.add(k);filiais.add(d.filial);
   const groups=new Set();
   for(const g of [...d.grupos,...d.alertas]){
+   if(g&&typeof g.FAIXA==="string")g.FAIXA=g.FAIXA.trim();
    if(!g||g.FILIAL!==d.filial||g.DIA!==d.dia||!["INVALIDO","SUSPEITO","SEM_ALERTA"].includes(g.FAIXA)||!int(g.REGISTROS)||g.REGISTROS<1)fail("Grupo CMV inválido");
    amount(g.VENDAS);amount(g.CMV);
    if(g.CLASSE!=null&&(typeof g.CLASSE!=="string"||g.CLASSE.length>100))fail("Classe inválida");
