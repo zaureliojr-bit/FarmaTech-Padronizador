@@ -3,16 +3,18 @@ require("dotenv").config();
 const Firebird=require("node-firebird");
 const fs=require("fs");
 const path=require("path");
+const enviar=process.argv.includes("--enviar");
 const dias=Number(process.env.VENDAS_DIAS||90);
 const port=Number(process.env.FB_PORT||3050);
 const options={host:process.env.FB_HOST||"localhost",port,database:process.env.FB_DATABASE,user:process.env.FB_USER,password:process.env.FB_PASSWORD,lowercase_keys:false};
 const call=(obj,fn,...args)=>new Promise((resolve,reject)=>obj[fn](...args,(err,result)=>err?reject(err):resolve(result)));
 async function main(){
  if(!Number.isInteger(dias)||dias<1||dias>366||!Number.isInteger(port)||port<1||port>65535||!options.database||!options.user||!options.password)throw Error("Confira FB_DATABASE, FB_USER, FB_PASSWORD, FB_PORT e VENDAS_DIAS (1 a 366).");
+ if(enviar&&(!/^[a-fA-F0-9]{64}$/.test(process.env.VENDAS_SYNC_KEY||"")||process.env.VENDAS_URL!=="https://drogalink-vendas-proxy.zaureliojr.workers.dev"))throw Error("Configure VENDAS_URL e VENDAS_SYNC_KEY no .env.");
  const isolation=Firebird.ISOLATION_READ_COMMITTED_READ_ONLY;
  if(isolation==null)throw Error("Driver sem transação somente leitura.");
  const db=await call(Firebird,"attach",options);
- let tx;
+ let tx, payload, destino;
  try{
   tx=await call(db,"transaction",isolation);
   const q=sql=>call(tx,"query",sql,[]);
@@ -31,12 +33,25 @@ async function main(){
    const total=g.reduce((s,x)=>s+Number(x.VENDAS),0);
    if(!Number.isFinite(total)||r.VENDAS==null||Math.abs(total-Number(r.VENDAS))>0.02||g.reduce((s,x)=>s+Number(x.REGISTROS),0)!==Number(r.REGISTROS)||g.reduce((s,x)=>s+Number(x.REGISTROS_COM_VALOR),0)!==Number(r.REGISTROS_COM_VALOR))throw Error("Conciliação divergente na filial "+r.FILIAL);
   }
-  const payload={schema:1,fonte:"LANCAMENTOS",criterio:"ENTRADA_SAIDA=S; SUM(VALOR-DESCONTO), sem CMV",inicio,fim,extraido_em:new Date().toISOString(),resumo,registros,auditoria};
-  const destino=path.resolve("vendas-matriz.json"),temporario=destino+".tmp";
+  payload={schema:1,fonte:"LANCAMENTOS",criterio:"ENTRADA_SAIDA=S; SUM(VALOR-DESCONTO), sem CMV",inicio,fim,extraido_em:new Date().toISOString(),resumo,registros,auditoria};
+  destino=path.resolve("vendas-matriz.json"); const temporario=destino+".tmp";
   fs.writeFileSync(temporario,JSON.stringify(payload,null,2),"utf8");fs.renameSync(temporario,destino);
-  console.log("Drogalink Vendas Matriz beta.1 | "+inicio+" a "+fim);
+  console.log("Drogalink Vendas Matriz beta.2 | "+inicio+" a "+fim);
   console.table(resumo);console.log(registros.length+" grupos agregados. Arquivo: "+destino);
-  console.log("Somente leitura local; nenhum dado enviado ao D1.");
+
  }finally{if(tx)await call(tx,"rollback").catch(()=>{});await call(db,"detach");}
+ if(!enviar){console.log("Somente leitura local; nenhum dado enviado ao D1.");return;}
+ const body=fs.readFileSync(destino);
+ let last;
+ for(let tentativa=1;tentativa<=3;tentativa++){
+  try{
+   const response=await fetch(process.env.VENDAS_URL+"/vendas/sync",{method:"POST",headers:{"Authorization":"Bearer "+process.env.VENDAS_SYNC_KEY,"Content-Type":"application/json"},body,redirect:"error",signal:AbortSignal.timeout(120000)});
+   if(!response.ok){const e=Error("HTTP "+response.status);e.permanente=response.status<500&&response.status!==429;throw e;}
+   const r=await response.json();
+   if(r.ok!==true||r.grupos!==payload.registros.length||r.registros!==payload.resumo.reduce((s,x)=>s+Number(x.REGISTROS),0))throw Error("Confirmação do servidor divergente.");
+   console.log("D1 confirmado: "+JSON.stringify({lote:r.lote,duplicado:r.duplicado,grupos:r.grupos,registros:r.registros,alteracoes:r.alteracoes}));return;
+  }catch(e){last=e;console.error("Envio tentativa "+tentativa+": "+e.message);if(e.permanente)break;if(tentativa<3)await new Promise(r=>setTimeout(r,5000*tentativa));}
+ }
+ throw last;
 }
 main().catch(e=>{console.error("Falha no extrator:",e.message);process.exitCode=1;});
