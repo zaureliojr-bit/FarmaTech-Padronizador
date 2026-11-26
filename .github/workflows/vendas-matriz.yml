@@ -9,7 +9,7 @@ permissions:
   contents: read
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: firebird-extrator
@@ -21,7 +21,7 @@ jobs:
       - run: npm ci
       - run: node --check vendas-matriz.js
       - run: node -e "if (require('node-firebird').ISOLATION_READ_COMMITTED_READ_ONLY == null) process.exit(1)"
-      - run: npx --no-install pkg vendas-matriz.js --targets node18-win-x64 --output dist/extrator-vendas-matriz.exe
+      - run: npx --yes --package=@yao-pkg/pkg@6.6.0 -- pkg vendas-matriz.js --targets node22-win-x64 --no-bytecode --public-packages '*' --public --output dist/extrator-vendas-matriz.exe
       - uses: actions/upload-artifact@v4
         with:
           name: extrator-vendas-matriz-windows
