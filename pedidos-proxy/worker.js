@@ -5091,13 +5091,13 @@ export default {
             const loja = porta.loja;
             const db = porta.db;
             // Vendas da matriz: somente master, sem expor credenciais ao navegador.
-            if (["/vendas/rede","/vendas/rede/classes","/vendas/rede/status","/vendas/rede/metas"].includes(rota)) {
+            if (["/vendas/rede","/vendas/rede/classes","/vendas/rede/status","/vendas/rede/metas","/cmv/rede","/cmv/rede/status"].includes(rota)) {
                 if (!porta.dono) return json({erro:"Gestão de vendas exclusiva do master"},403);
                 if (request.method !== "GET" && !(rota === "/vendas/rede/metas" && request.method === "POST")) return json({erro:"Método inválido"},405);
                 const chave = String(env.VENDAS_MASTER_KEY || "").trim();
                 if (!env.VENDAS_SERVICE || !/^[a-fA-F0-9]{64}$/.test(chave)) return json({erro:"Integração de vendas não configurada"},503);
                 const destino = new URL("https://drogalink-vendas-proxy.zaureliojr.workers.dev");
-                destino.pathname = rota.replace("/vendas/rede","/vendas");
+                destino.pathname = rota.replace("/vendas/rede","/vendas").replace("/cmv/rede","/cmv");
                 const origem = new URL(request.url);
                 for (const k of ["inicio","fim","filial","ano","mes"]) {
                     const v=origem.searchParams.get(k);if(v!==null)destino.searchParams.set(k,v);
