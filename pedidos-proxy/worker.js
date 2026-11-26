@@ -5090,6 +5090,26 @@ export default {
 
             const loja = porta.loja;
             const db = porta.db;
+            // Vendas da matriz: somente master, sem expor credenciais ao navegador.
+            if (["/vendas/rede","/vendas/rede/classes","/vendas/rede/status","/vendas/rede/metas"].includes(rota)) {
+                if (!porta.dono) return json({erro:"Gestão de vendas exclusiva do master"},403);
+                if (request.method !== "GET" && !(rota === "/vendas/rede/metas" && request.method === "POST")) return json({erro:"Método inválido"},405);
+                const chave = String(env.VENDAS_MASTER_KEY || "").trim();
+                if (!env.VENDAS_SERVICE || !/^[a-fA-F0-9]{64}$/.test(chave)) return json({erro:"Integração de vendas não configurada"},503);
+                const destino = new URL("https://drogalink-vendas-proxy.zaureliojr.workers.dev");
+                destino.pathname = rota.replace("/vendas/rede","/vendas");
+                const origem = new URL(request.url);
+                for (const k of ["inicio","fim","filial","ano","mes"]) {
+                    const v=origem.searchParams.get(k);if(v!==null)destino.searchParams.set(k,v);
+                }
+                try {
+                    const opts={method:request.method,headers:{Authorization:"Bearer "+chave},redirect:"manual"};
+                    if(request.method==="POST"){opts.headers["Content-Type"]="application/json";opts.body=await request.text();}
+                    const resp=await env.VENDAS_SERVICE.fetch(new Request(destino,opts));
+                    const data=await resp.json();
+                    return json(resp.ok?data:{erro:data.erro||"API de vendas indisponível"},resp.ok?200:resp.status>=500?502:resp.status,{"Cache-Control":"no-store"});
+                } catch {return json({erro:"Falha na comunicação interna VENDAS_SERVICE"},502);}
+            }
             // Compras: somente dono, segredo exclusivo mantido no servidor.
             if (rota === "/compras/rede" || rota === "/compras/rede/historico" || rota === "/compras/rede/parte") {
                 if (!porta.dono) return json({erro:"A gestão de compras é exclusiva do master."},403);
