@@ -5091,6 +5091,20 @@ export default {
             const loja = porta.loja;
             const db = porta.db;
             // Compras: somente dono, segredo exclusivo mantido no servidor.
+            // Revisões de custos: somente master; chave interna nunca chega ao navegador.
+            if (rota === "/cmv/rede/revisoes") {
+                if (!porta.dono) return json({erro:"Auditoria de custos exclusiva do master"},403);
+                if (request.method !== "GET" && request.method !== "POST") return json({erro:"Método inválido"},405);
+                const chave = String(env.VENDAS_MASTER_KEY || "").trim();
+                if (!env.VENDAS_SERVICE || !/^[a-fA-F0-9]{64}$/.test(chave)) return json({erro:"Integração de vendas não configurada"},503);
+                try {
+                    const opts={method:request.method,headers:{Authorization:"Bearer "+chave},redirect:"manual"};
+                    if(request.method==="POST"){opts.headers["Content-Type"]="application/json";opts.body=await request.text();}
+                    const resp=await env.VENDAS_SERVICE.fetch(new Request("https://drogalink-vendas-proxy.zaureliojr.workers.dev/cmv/revisoes",opts));
+                    const data=await resp.json();
+                    return json(resp.ok?data:{erro:data.erro||"API de vendas indisponível"},resp.ok?200:resp.status>=500?502:resp.status,{"Cache-Control":"no-store"});
+                } catch {return json({erro:"Falha na comunicação interna VENDAS_SERVICE"},502);}
+            }
             if (rota === "/compras/rede" || rota === "/compras/rede/historico" || rota === "/compras/rede/parte") {
                 if (!porta.dono) return json({erro:"A gestão de compras é exclusiva do master."},403);
                 if (request.method !== "GET") return json({erro:"Método inválido"},405);

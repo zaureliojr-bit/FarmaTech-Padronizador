@@ -56,6 +56,20 @@ async function sync(req,db){
  if(!inserted){const old=await db.prepare("SELECT lote FROM vendas_sincronizacoes WHERE lote=?").bind(lote).first();if(!old)fail("Extração anterior ou concorrente",409)}
  return json({ok:true,lote,duplicado:!inserted,grupos:rows.length,registros:total,alteracoes:results.slice(0,-1).reduce((a,r)=>a+(r.meta.changes||0),0)});
 }
+async function revisoesCmv(req,db){
+ if(req.method==="GET"){
+  const resultado=await db.prepare("SELECT r.filial,r.produto,r.status,r.atualizado_em FROM cmv_revisoes r JOIN (SELECT MAX(id) AS id FROM cmv_revisoes GROUP BY filial,produto) u ON r.id=u.id ORDER BY r.filial,r.produto").all();
+  return json({ok:true,revisoes:resultado.results});
+ }
+ if(req.method!=="POST")fail("Método inválido",405);
+ const raw=await req.text();
+ if(raw.length>2048)fail("Registro de revisão grande",413);
+ let p;try{p=JSON.parse(raw)}catch{fail("JSON inválido")}
+ if(!p||![1,2,3].includes(p.filial)||typeof p.produto!=="string"||! /^(id|codigo):.{1,100}$/.test(p.produto)||[...p.produto].some(c=>c.charCodeAt(0)<32||c.charCodeAt(0)===127)||!["PENDENTE","EM_ANALISE","CORRIGIDO"].includes(p.status))fail("Revisão inválida");
+ const registro={filial:p.filial,produto:p.produto,status:p.status,atualizado_em:new Date().toISOString()};
+ await db.prepare("INSERT INTO cmv_revisoes(filial,produto,status,atualizado_em) VALUES (?,?,?,?)").bind(registro.filial,registro.produto,registro.status,registro.atualizado_em).run();
+ return json({ok:true,revisao:registro});
+}
 async function syncCmv(req,db){
  const raw=await req.text();if(raw.length>8000000)fail("Lote CMV grande",413);
  let p;try{p=JSON.parse(raw)}catch{fail("JSON inválido")}
@@ -92,6 +106,7 @@ export default {async fetch(req,env){
  const write=route==="/vendas/sync"||route==="/cmv/sync";
  if(!await authorized(req,write?env.VENDAS_SYNC_KEY:env.VENDAS_MASTER_KEY))return json({erro:"Não autorizado"},401);
  if(write&&req.method==="POST")return route==="/cmv/sync"?await syncCmv(req,db):await sync(req,db);
+ if(route==="/cmv/revisoes")return await revisoesCmv(req,db);
  if(route==="/cmv/status"&&req.method==="GET")return json({ok:true,ultimo:await db.prepare("SELECT * FROM cmv_lotes ORDER BY extraido_em DESC LIMIT 1").first()});
  if(route==="/cmv"&&req.method==="GET"){
  const a=u.searchParams.get("inicio"),b=u.searchParams.get("fim");windowOf(a,b);
