@@ -338,7 +338,7 @@ async function exportarCompras(db) {
         console.log("Compras: consultando notas...");
         notas = await query(`SELECT C.CD_COMPRAS, C.CD_FILIAL, C.CD_DISTRIBUIDOR, D.NOME AS FORNECEDOR, D.CNPJ AS CNPJ_FORNECEDOR, C.DT_PEDIDO, C.DT_ENTRADA, C.DT_EMISSAO, C.NOTA_FISCAL, C.SERIE_NOTA_FISCAL, C.CHAVENFE, C.STATUS, C.CD_CFOP, C.BONIFICACAO, C.TRANSFERENCIA, C.CONSIGNACAO, C.TOTAL_NOTA, C.VL_TOTALPRODUTOS, C.VL_DESCONTO_NOTA, C.VL_FRETE, C.VL_SEGURO, C.OUTRAS_DESPESAS, C.VL_IPI, C.ICM_VALORSUBST, C.CD_USUARIO_CRIACAO, C.CD_USUARIO_CONCLUSAO FROM COMPRAS C LEFT JOIN DISTRIBUIDORES D ON D.CD_DISTRIBUIDOR = C.CD_DISTRIBUIDOR WHERE ${filtro} ORDER BY C.CD_COMPRAS`);
         console.log("Compras: consultando itens...");
-        itens = await query(`SELECT I.CD_ITENS_COMPRA, I.CD_COMPRAS, I.CD_FILIAL, I.ID_PRODUTO, I.CD_PRODUTO, I.CODIGO_BARRAS, I.DESCRICAO, I.QUANTIDADE, I.QT_EMBALAGEM, I.UNIDADE, I.VL_UNITARIO, I.VL_DESCONTO, I.VL_TOTAL, I.CUSTO_APLICADO, I.ULTIMOCUSTO, I.NOVO_CUSTO, I.VALOR_FRETE, I.VALOR_SEGURO, I.VALOR_OUTRASDESPESAS, I.VL_IPI, I.VALORICMSSUBTITUICAO, I.CFOP, I.LOTE, I.SALDO, I.ESTOQUE_MINIMO, I.ESTOQUE_MAXIMO FROM ITENS_COMPRA I JOIN COMPRAS C ON C.CD_COMPRAS = I.CD_COMPRAS AND C.CD_FILIAL = I.CD_FILIAL WHERE ${filtro} ORDER BY I.CD_COMPRAS, I.CD_ITENS_COMPRA`);
+        itens = await query(`SELECT I.CD_ITENS_COMPRA, I.CD_COMPRAS, I.CD_FILIAL, I.ID_PRODUTO, I.CD_PRODUTO, I.CODIGO_BARRAS, I.DESCRICAO, I.QUANTIDADE, I.QT_EMBALAGEM, I.UNIDADE, I.VL_UNITARIO, I.VL_DESCONTO, I.VL_TOTAL, I.CUSTO_APLICADO, I.ULTIMOCUSTO, I.NOVO_CUSTO, I.VALOR_FRETE, I.VALOR_SEGURO, I.VALOR_OUTRASDESPESAS, I.VL_IPI, I.VALORICMSSUBTITUICAO, I.CFOP, I.LOTE, I.SALDO, I.ESTOQUE_MINIMO, I.ESTOQUE_MAXIMO, P.CD_CLASSE AS CD_CLASSE, CL.DESCRICAO AS CLASSE FROM ITENS_COMPRA I JOIN COMPRAS C ON C.CD_COMPRAS = I.CD_COMPRAS AND C.CD_FILIAL = I.CD_FILIAL LEFT JOIN PRODUTOS P ON P.ID_PRODUTO = I.ID_PRODUTO LEFT JOIN CLASSES CL ON CL.CD_CLASSE = P.CD_CLASSE WHERE ${filtro} ORDER BY I.CD_COMPRAS, I.CD_ITENS_COMPRA`);
     } finally {
         await new Promise((resolve, reject) => tx.rollback(err => err ? reject(err) : resolve()));
     }
@@ -358,6 +358,8 @@ async function exportarCompras(db) {
     fs.renameSync(tmp, saida);
     console.log("Compras piloto: " + notas.length + " notas, " + itens.length + " itens. Arquivo local: " + saida);
     console.log("IDs ausentes: " + idsAusentes + "; IDs repetidos: " + idsRepetidos);
+    const classificados = itens.filter(i => i.CD_CLASSE != null && String(i.CLASSE ?? "").trim()).length;
+    console.log("Classes Farmax: " + classificados + "/" + itens.length + " itens classificados; " + (itens.length - classificados) + " sem classe.");
     if (process.argv.includes("--enviar-compras") || process.argv.includes("--enviar-compras-incremental")) {
         if (idsAusentes || idsRepetidos) throw new Error("IDs inválidos; envio bloqueado.");
         if (process.argv.includes("--enviar-compras-incremental")) {
