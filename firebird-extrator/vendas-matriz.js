@@ -23,11 +23,14 @@ async function main(){
   const inicio=String(janela.INICIO).trim(),fim=String(janela.FIM).trim();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(inicio)||!/^\d{4}-\d{2}-\d{2}$/.test(fim))throw Error("Datas inválidas.");
   const filtro="L.CD_FILIAL IN (1,2,3) AND L.DATA_CAIXA BETWEEN DATE '"+inicio+"' AND DATE '"+fim+"'";
-  const valor="L.VALOR - L.DESCONTO";
-  const registros=await q("SELECT CAST(L.CD_FILIAL AS INTEGER) AS FILIAL, CAST(L.DATA_CAIXA AS VARCHAR(10)) AS DIA, L.CD_CLASSE AS CD_CLASSE, C.DESCRICAO AS CLASSE, L.TIPO_VENDA AS TIPO_VENDA, L.TROCA AS TROCA, COUNT(*) AS REGISTROS, COUNT("+valor+") AS REGISTROS_COM_VALOR, CAST(COALESCE(SUM("+valor+"),0) AS NUMERIC(18,4)) AS VENDAS FROM LANCAMENTOS L LEFT JOIN CLASSES C ON C.CD_CLASSE=L.CD_CLASSE WHERE "+filtro+" AND L.ENTRADA_SAIDA='S' GROUP BY L.CD_FILIAL,L.DATA_CAIXA,L.CD_CLASSE,C.DESCRICAO,L.TIPO_VENDA,L.TROCA ORDER BY 1,2,3,5,6");
-  const resumo=await q("SELECT CAST(L.CD_FILIAL AS INTEGER) AS FILIAL, COUNT(*) AS REGISTROS, COUNT("+valor+") AS REGISTROS_COM_VALOR, CAST(MAX(L.DATA_CAIXA) AS VARCHAR(10)) AS ULTIMA_DATA, CAST(SUM("+valor+") AS NUMERIC(18,2)) AS VENDAS FROM LANCAMENTOS L WHERE "+filtro+" AND L.ENTRADA_SAIDA='S' GROUP BY L.CD_FILIAL ORDER BY 1");
+  const filtroVendas="((L.TIPO_VENDA='V' AND L.ENTRADA_SAIDA='S') OR (L.TIPO_VENDA='D' AND L.ENTRADA_SAIDA='E'))";
+  const valor="CASE WHEN L.TIPO_VENDA='V' AND L.ENTRADA_SAIDA='S' THEN L.VALOR-COALESCE(L.ARREDONDAMENTO,0) WHEN L.TIPO_VENDA='D' AND L.ENTRADA_SAIDA='E' THEN -L.VALOR ELSE NULL END";
+  const registros=await q("SELECT CAST(L.CD_FILIAL AS INTEGER) AS FILIAL, CAST(L.DATA_CAIXA AS VARCHAR(10)) AS DIA, L.CD_CLASSE AS CD_CLASSE, C.DESCRICAO AS CLASSE, L.TIPO_VENDA AS TIPO_VENDA, L.TROCA AS TROCA, COUNT(*) AS REGISTROS, COUNT("+valor+") AS REGISTROS_COM_VALOR, CAST(COALESCE(SUM("+valor+"),0) AS NUMERIC(18,4)) AS VENDAS FROM LANCAMENTOS L LEFT JOIN CLASSES C ON C.CD_CLASSE=L.CD_CLASSE WHERE "+filtro+" AND "+filtroVendas+" GROUP BY L.CD_FILIAL,L.DATA_CAIXA,L.CD_CLASSE,C.DESCRICAO,L.TIPO_VENDA,L.TROCA ORDER BY 1,2,3,5,6");
+  const resumo=await q("SELECT CAST(L.CD_FILIAL AS INTEGER) AS FILIAL, COUNT(*) AS REGISTROS, COUNT("+valor+") AS REGISTROS_COM_VALOR, CAST(MAX(L.DATA_CAIXA) AS VARCHAR(10)) AS ULTIMA_DATA, CAST(SUM("+valor+") AS NUMERIC(18,2)) AS VENDAS FROM LANCAMENTOS L WHERE "+filtro+" AND "+filtroVendas+" GROUP BY L.CD_FILIAL ORDER BY 1");
   const auditoria=await q("SELECT CAST(L.CD_FILIAL AS INTEGER) AS FILIAL,L.ENTRADA_SAIDA,L.TIPO_VENDA,L.TROCA,COUNT(*) AS REGISTROS,COUNT("+valor+") AS REGISTROS_COM_VALOR,CAST(SUM("+valor+") AS NUMERIC(18,2)) AS TOTAL FROM LANCAMENTOS L WHERE "+filtro+" GROUP BY L.CD_FILIAL,L.ENTRADA_SAIDA,L.TIPO_VENDA,L.TROCA ORDER BY 1,2,3,4");
   if(cmvAtivo){
+   // CMV mantido no critério anterior até sua conciliação separada.
+   const valor="L.VALOR - L.DESCONTO";
    const custo="L.CUSTO_MEDIO*L.QUANTIDADE";
    const invalido="("+valor+" IS NULL OR L.CUSTO_MEDIO IS NULL OR L.CUSTO_MEDIO<=0 OR L.QUANTIDADE IS NULL OR L.QUANTIDADE<=0)";
    const suspeito="("+valor+" > 0 AND "+custo+" > ("+valor+")*2)";
@@ -49,15 +52,15 @@ async function main(){
    const total=g.reduce((s,x)=>s+Number(x.VENDAS),0);
    if(!Number.isFinite(total)||r.VENDAS==null||Math.abs(total-Number(r.VENDAS))>0.02||g.reduce((s,x)=>s+Number(x.REGISTROS),0)!==Number(r.REGISTROS)||g.reduce((s,x)=>s+Number(x.REGISTROS_COM_VALOR),0)!==Number(r.REGISTROS_COM_VALOR))throw Error("Conciliação divergente na filial "+r.FILIAL);
   }
-  payload={schema:1,fonte:"LANCAMENTOS",criterio:"ENTRADA_SAIDA=S; SUM(VALOR-DESCONTO), sem CMV",inicio,fim,extraido_em:new Date().toISOString(),resumo,registros,auditoria};
+  payload={schema:1,fonte:"LANCAMENTOS",criterio:"DATA_CAIXA; V/S: VALOR-ARREDONDAMENTO; D/E: -VALOR; sem CMV",inicio,fim,extraido_em:new Date().toISOString(),resumo,registros,auditoria};
   destino=path.resolve("vendas-matriz.json"); const temporario=destino+".tmp";
   fs.writeFileSync(temporario,JSON.stringify(payload,null,2),"utf8");fs.renameSync(temporario,destino);
-  console.log("Drogalink Vendas Matriz beta.3 | "+inicio+" a "+fim);
+  console.log("Drogalink Vendas Matriz beta.4 | "+inicio+" a "+fim);
   console.table(resumo);console.log(registros.length+" grupos agregados. Arquivo: "+destino);
 
  }finally{if(tx)await call(tx,"rollback").catch(()=>{});await call(db,"detach");}
  if(cmvPayload){const file=path.resolve("cmv-matriz.json");fs.writeFileSync(file+".tmp",JSON.stringify(cmvPayload,null,2),"utf8");fs.renameSync(file+".tmp",file);console.log("CMV local: "+cmvPayload.dias.length+" dias/filiais.");}
- if(!enviar){console.log("Somente leitura local; nenhum dado enviado ao D1.");return;}
+ if(!enviar){console.log("Somente leitura local; nenhum dado enviado ao servidor.");return;}
  const body=fs.readFileSync(destino);
  let last,enviado=false;
  for(let tentativa=1;tentativa<=3;tentativa++){
@@ -66,7 +69,7 @@ async function main(){
    if(!response.ok){const e=Error("HTTP "+response.status);e.permanente=response.status<500&&response.status!==429;throw e;}
    const r=await response.json();
    if(r.ok!==true||r.grupos!==payload.registros.length||r.registros!==payload.resumo.reduce((s,x)=>s+Number(x.REGISTROS),0))throw Error("Confirmação do servidor divergente.");
-   console.log("D1 confirmado: "+JSON.stringify({lote:r.lote,duplicado:r.duplicado,grupos:r.grupos,registros:r.registros,alteracoes:r.alteracoes}));enviado=true;break;
+   console.log("Servidor confirmado: "+JSON.stringify({lote:r.lote,duplicado:r.duplicado,grupos:r.grupos,registros:r.registros,alteracoes:r.alteracoes}));enviado=true;break;
   }catch(e){last=e;console.error("Envio tentativa "+tentativa+": "+e.message);if(e.permanente)break;if(tentativa<3)await new Promise(r=>setTimeout(r,5000*tentativa));}
  }
  if(last && !enviado)throw last;
@@ -74,7 +77,7 @@ async function main(){
   const response=await fetch(process.env.VENDAS_URL+"/cmv/sync",{method:"POST",headers:{"Authorization":"Bearer "+process.env.VENDAS_SYNC_KEY,"Content-Type":"application/json"},body:JSON.stringify(cmvPayload),redirect:"error",signal:AbortSignal.timeout(120000)});
   if(!response.ok)throw Error("Vendas sincronizadas; CMV falhou HTTP "+response.status);
   const r=await response.json();if(!r.ok||r.dias!==cmvPayload.dias.length)throw Error("Confirmação CMV divergente");
-  console.log("CMV D1 confirmado: "+JSON.stringify(r));
+  console.log("CMV servidor confirmado: "+JSON.stringify(r));
  }
 }
 main().catch(e=>{console.error("Falha no extrator:",e.message);process.exitCode=1;});

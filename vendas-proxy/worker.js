@@ -18,7 +18,7 @@ function amount(v){if(typeof v!=="number"||!Number.isFinite(v)||!Number.isSafeIn
 async function sync(req,db){
  const raw=await req.text();if(raw.length>3000000)fail("Lote grande",413);
  let p;try{p=JSON.parse(raw)}catch{fail("JSON inválido")}
- if(!p||p.schema!==1||p.fonte!=="LANCAMENTOS"||p.criterio!=="ENTRADA_SAIDA=S; SUM(VALOR-DESCONTO), sem CMV")fail("Schema inválido");
+ if(!p||p.schema!==1||p.fonte!=="LANCAMENTOS"||![ "ENTRADA_SAIDA=S; SUM(VALOR-DESCONTO), sem CMV", "DATA_CAIXA; V/S: VALOR-ARREDONDAMENTO; D/E: -VALOR; sem CMV" ].includes(p.criterio))fail("Schema inválido");
  windowOf(p.inicio,p.fim);
  if(typeof p.extraido_em!=="string"||!Number.isFinite(Date.parse(p.extraido_em))||new Date(p.extraido_em).toISOString()!==p.extraido_em||Date.parse(p.extraido_em)>Date.now()+300000)fail("Data de extração inválida");
  if(!Array.isArray(p.registros)||!p.registros.length||p.registros.length>12000||!Array.isArray(p.resumo)||p.resumo.length!==3)fail("Lote inválido");
