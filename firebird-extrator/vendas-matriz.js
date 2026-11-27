@@ -29,20 +29,31 @@ async function main(){
   const resumo=await q("SELECT CAST(L.CD_FILIAL AS INTEGER) AS FILIAL, COUNT(*) AS REGISTROS, COUNT("+valor+") AS REGISTROS_COM_VALOR, CAST(MAX(L.DATA_CAIXA) AS VARCHAR(10)) AS ULTIMA_DATA, CAST(SUM("+valor+") AS NUMERIC(18,2)) AS VENDAS FROM LANCAMENTOS L WHERE "+filtro+" AND "+filtroVendas+" GROUP BY L.CD_FILIAL ORDER BY 1");
   const auditoria=await q("SELECT CAST(L.CD_FILIAL AS INTEGER) AS FILIAL,L.ENTRADA_SAIDA,L.TIPO_VENDA,L.TROCA,COUNT(*) AS REGISTROS,COUNT("+valor+") AS REGISTROS_COM_VALOR,CAST(SUM("+valor+") AS NUMERIC(18,2)) AS TOTAL FROM LANCAMENTOS L WHERE "+filtro+" GROUP BY L.CD_FILIAL,L.ENTRADA_SAIDA,L.TIPO_VENDA,L.TROCA ORDER BY 1,2,3,4");
   if(cmvAtivo){
-   // CMV mantido no critério anterior até sua conciliação separada.
-   const valor="L.VALOR - L.DESCONTO";
-   const custo="L.CUSTO_MEDIO*L.QUANTIDADE";
+   // Mesma receita líquida das vendas; devoluções reduzem também o custo médio.
+   const custo="CASE WHEN L.TIPO_VENDA='V' THEN L.CUSTO_MEDIO*L.QUANTIDADE ELSE -L.CUSTO_MEDIO*L.QUANTIDADE END";
+   const valorAbs="ABS("+valor+")",custoAbs="ABS("+custo+")";
    const invalido="("+valor+" IS NULL OR L.CUSTO_MEDIO IS NULL OR L.CUSTO_MEDIO<=0 OR L.QUANTIDADE IS NULL OR L.QUANTIDADE<=0)";
-   const suspeito="("+valor+" > 0 AND "+custo+" > ("+valor+")*2)";
+   const suspeito="("+valorAbs+" > 0 AND "+custoAbs+" > "+valorAbs+"*2)";
    const faixa="CASE WHEN "+invalido+" THEN 'INVALIDO' WHEN "+suspeito+" THEN 'SUSPEITO' ELSE 'SEM_ALERTA' END";
-   const base=" FROM LANCAMENTOS L LEFT JOIN CLASSES C ON C.CD_CLASSE=L.CD_CLASSE WHERE "+filtro+" AND L.ENTRADA_SAIDA='S' AND L.TIPO_VENDA='V'";
+   const base=" FROM LANCAMENTOS L LEFT JOIN CLASSES C ON C.CD_CLASSE=L.CD_CLASSE WHERE "+filtro+" AND "+filtroVendas;
    const campos="CAST(L.CD_FILIAL AS INTEGER) AS FILIAL, CAST(L.DATA_CAIXA AS VARCHAR(10)) AS DIA, L.CD_CLASSE AS CD_CLASSE, C.DESCRICAO AS CLASSE";
    const medidas="COUNT(*) AS REGISTROS, CAST(COALESCE(SUM("+valor+"),0) AS NUMERIC(18,4)) AS VENDAS, CAST(COALESCE(SUM("+custo+"),0) AS NUMERIC(18,4)) AS CMV";
    const grupos=await q("SELECT "+campos+", "+faixa+" AS FAIXA, "+medidas+base+" GROUP BY 1,2,3,4,5 ORDER BY 1,2,3,5");
-   const alertas=await q("SELECT "+campos+", L.ID_PRODUTO AS ID_PRODUTO,L.CD_PRODUTO AS CD_PRODUTO,L.DESCRICAO AS PRODUTO,"+faixa+" AS FAIXA, "+medidas+base+" AND ("+invalido+" OR "+suspeito+" OR "+custo+">("+valor+")) GROUP BY 1,2,3,4,5,6,7,8 ORDER BY 1,2,5,8");
+   const alertas=await q("SELECT "+campos+", L.ID_PRODUTO AS ID_PRODUTO,L.CD_PRODUTO AS CD_PRODUTO,L.DESCRICAO AS PRODUTO,"+faixa+" AS FAIXA, "+medidas+base+" AND ("+invalido+" OR "+suspeito+" OR "+custoAbs+">"+valorAbs+") GROUP BY 1,2,3,4,5,6,7,8 ORDER BY 1,2,5,8");
    const diasMap=new Map();
    for(const g of grupos){const k=g.FILIAL+":"+g.DIA;if(!diasMap.has(k))diasMap.set(k,{filial:g.FILIAL,dia:g.DIA,grupos:[],alertas:[]});diasMap.get(k).grupos.push(g);}
    for(const a of alertas){const d=diasMap.get(a.FILIAL+":"+a.DIA);if(!d)throw Error("Auditoria CMV sem grupo");d.alertas.push(a);}
+   // Concilia receita e quantidade de lançamentos por filial/dia antes de publicar.
+   const confere=new Map();
+   for(const r of registros){
+    const k=r.FILIAL+":"+r.DIA, s=confere.get(k)||{v:0,n:0};
+    s.v+=Number(r.VENDAS);s.n+=Number(r.REGISTROS);confere.set(k,s);
+   }
+   for(const [k,s] of confere){
+    const d=diasMap.get(k);
+    if(!d||Math.abs(d.grupos.reduce((v,g)=>v+Number(g.VENDAS),0)-s.v)>0.02||d.grupos.reduce((n,g)=>n+Number(g.REGISTROS),0)!==s.n)throw Error("Conciliação CMV/vendas divergente: "+k);
+   }
+   if(diasMap.size!==confere.size)throw Error("Cobertura CMV/vendas divergente.");
    cmvPayload={schema:1,inicio,fim,extraido_em:new Date().toISOString(),dias:[...diasMap.values()]};
   }
   await call(tx,"commit");tx=null;
@@ -55,7 +66,7 @@ async function main(){
   payload={schema:1,fonte:"LANCAMENTOS",criterio:"DATA_CAIXA; V/S: VALOR-ARREDONDAMENTO; D/E: -VALOR; sem CMV",inicio,fim,extraido_em:new Date().toISOString(),resumo,registros,auditoria};
   destino=path.resolve("vendas-matriz.json"); const temporario=destino+".tmp";
   fs.writeFileSync(temporario,JSON.stringify(payload,null,2),"utf8");fs.renameSync(temporario,destino);
-  console.log("Drogalink Vendas Matriz beta.4 | "+inicio+" a "+fim);
+  console.log("Drogalink Vendas Matriz beta.5 | "+inicio+" a "+fim);
   console.table(resumo);console.log(registros.length+" grupos agregados. Arquivo: "+destino);
 
  }finally{if(tx)await call(tx,"rollback").catch(()=>{});await call(db,"detach");}
